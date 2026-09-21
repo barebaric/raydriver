@@ -25,10 +25,15 @@ jobs:
       - name: Lint Python
         run: pip install ruff && ruff check tests/ python/
 
-      - name: Lint Rust
-        uses: actions-rust-lang/rust-clippy-check@v1
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          args: -- -D warnings
+          components: rustfmt, clippy
+
+      - name: Lint Rust
+        run: |
+          cargo fmt --check
+          cargo clippy -- -D warnings
 
   test:
     name: Tests (${{ matrix.os }})
