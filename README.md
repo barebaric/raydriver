@@ -10,6 +10,22 @@ and deadlock recovery, cancel/safety-shutdown semantics, settings and
 WCS access, and probe cycles. Dialects (command templates) remain data
 owned by Rayforge and are passed in resolved form.
 
+## CLI
+
+The `raydriver` command runs G-code against a real device with live
+progress, or against the built-in firmware emulator for hardware-free
+dry runs:
+
+```bash
+raydriver run job.gcode --port /dev/ttyUSB0 --baudrate 115200
+raydriver run job.gcode --emulator          # no hardware needed
+raydriver status --port /dev/ttyUSB0 --seconds 5
+```
+
+While a job runs, `raydriver run` shows acknowledged lines, a
+progress bar, the device state, machine position, feed rate and ETA;
+`Ctrl-C` cancels the job and runs the safety shutdown.
+
 ## Development
 
 ```bash

@@ -166,6 +166,13 @@ class MockTransport:
         r"""
         All bytes written to the device so far.
         """
+    def take_new_sent(self) -> builtins.list[bytes]:
+        r"""
+        Writes recorded since the previous call (or the last
+        `clear_sent`): a monotonic cursor, so clearing the log never
+        skips or replays chunks.  This is what device emulators
+        should consume.
+        """
     def clear_sent(self) -> None:
         r"""
         Clear the recorded sent bytes.

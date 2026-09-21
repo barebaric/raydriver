@@ -666,6 +666,10 @@ impl SessionCore {
                 GrblResponseType::Line => self.handle_line(&resp.text),
             }
         }
+        // Wake parked senders only after the responses were
+        // processed, so progress callbacks and request completions
+        // are always observed first (asyncio-like ordering).
+        self.flow.flush_notifications();
     }
 
     fn handle_ok(&self, pending: Option<super::flow::PendingCommand>) {

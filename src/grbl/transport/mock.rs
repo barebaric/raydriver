@@ -16,7 +16,7 @@ use super::{Transport, TransportError};
 pub struct MockInner {
     open: AtomicBool,
     tx: Mutex<Option<mpsc::UnboundedSender<Vec<u8>>>>,
-    sent: Mutex<Vec<Vec<u8>>>,
+    sent: Mutex<(Vec<Vec<u8>>, usize)>,
     write_error: Mutex<Option<String>>,
 }
 
@@ -25,7 +25,7 @@ impl MockInner {
         Arc::new(Self {
             open: AtomicBool::new(false),
             tx: Mutex::new(None),
-            sent: Mutex::new(Vec::new()),
+            sent: Mutex::new((Vec::new(), 0)),
             write_error: Mutex::new(None),
         })
     }
@@ -39,12 +39,24 @@ impl MockInner {
 
     /// All bytes written to the device so far.
     pub fn sent(&self) -> Vec<Vec<u8>> {
-        self.sent.lock().unwrap().clone()
+        self.sent.lock().unwrap().0.clone()
+    }
+
+    /// Writes recorded since the previous call (or the last
+    /// `clear_sent`).  A monotonic cursor, so clearing the log
+    /// between calls never skips or replays chunks.
+    pub fn take_new_sent(&self) -> Vec<Vec<u8>> {
+        let mut guard = self.sent.lock().unwrap();
+        let new = guard.0[guard.1..].to_vec();
+        guard.1 = guard.0.len();
+        new
     }
 
     /// Clear the recorded sent bytes.
     pub fn clear_sent(&self) {
-        self.sent.lock().unwrap().clear();
+        let mut guard = self.sent.lock().unwrap();
+        guard.0.clear();
+        guard.1 = 0;
     }
 
     /// Simulate connect/disconnect of the physical link.
@@ -64,7 +76,7 @@ impl Default for MockInner {
         Self {
             open: AtomicBool::new(false),
             tx: Mutex::new(None),
-            sent: Mutex::new(Vec::new()),
+            sent: Mutex::new((Vec::new(), 0)),
             write_error: Mutex::new(None),
         }
     }
@@ -94,7 +106,7 @@ impl Transport for MockInner {
             self.open.store(false, Ordering::SeqCst);
             return Err(TransportError::Connection(message));
         }
-        self.sent.lock().unwrap().push(data.to_vec());
+        self.sent.lock().unwrap().0.push(data.to_vec());
         Ok(())
     }
 

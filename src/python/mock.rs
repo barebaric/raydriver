@@ -44,6 +44,18 @@ impl MockTransport {
             .collect()
     }
 
+    /// Writes recorded since the previous call (or the last
+    /// `clear_sent`): a monotonic cursor, so clearing the log never
+    /// skips or replays chunks.  This is what device emulators
+    /// should consume.
+    fn take_new_sent<'py>(&self, py: Python<'py>) -> Vec<Bound<'py, PyBytes>> {
+        self.inner
+            .take_new_sent()
+            .into_iter()
+            .map(|data| PyBytes::new(py, &data))
+            .collect()
+    }
+
     /// Clear the recorded sent bytes.
     fn clear_sent(&self) {
         self.inner.clear_sent();

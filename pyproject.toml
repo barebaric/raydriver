@@ -22,6 +22,9 @@ test = [
     "pytest-asyncio",
 ]
 
+[project.scripts]
+raydriver = "raydriver.cli.main:main"
+
 [tool.maturin]
 module-name = "raydriver"
 python-source = "python"

@@ -280,9 +280,13 @@ impl GrblSession {
         let op_map = op_line_map.unwrap_or_default();
         let estimates = op_estimates.unwrap_or_default();
         spawn_future(py, async move {
+            // The callback stays installed after the run returns:
+            // the final command_done events are marshaled from the
+            // reader task and may be delivered moments later (the
+            // Python driver keeps _on_command_done until its stream
+            // finally-block too). The next run replaces it.
             events.set_progress_callback(progress_callback);
             core.run(&gcode, op_map, estimates).await;
-            events.set_progress_callback(None);
             Ok(Python::attach(none_obj))
         })
     }

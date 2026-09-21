@@ -14,6 +14,27 @@
 - `make check` — lint + test
 - `make build` — build the wheel (release)
 
+## CLI
+
+- `raydriver run job.gcode --port /dev/ttyUSB0` — stream a G-code
+  file to a real device with live progress
+- `raydriver run job.gcode --emulator` — same, against the built-in
+  firmware emulator (no hardware needed)
+- `raydriver status --port /dev/ttyUSB0` — connect and print live
+  status reports
+
+## Testing
+
+All tests are Python-based, under `tests/`, and run against
+`raydriver.emulator.GrblEmulator` — a GRBL 1.1h *firmware emulator*
+(not a mock): it models the character-counting RX buffer, the
+15-block planner with deferred acknowledgements, realtime command
+interception, modal G-code state, feed-rate-timed motion, alarms,
+homing, probing and the `$` system commands.  Device-side code
+consumes session writes via `MockTransport.take_new_sent()` (a
+monotonic cursor — never index into `sent()`, which tests may clear
+at any time).
+
 ## Rules
 
 - You are strictly forbidden from editing stubs manually. They are only

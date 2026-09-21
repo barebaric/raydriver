@@ -5,12 +5,19 @@ Grbl firmware — the character-counting RX buffer, the 15-block
 planner with deferred acknowledgements, realtime command
 interception, modal G-code state, motion simulation with feed-rate
 timing, alarms, homing, probing and the ``$`` system commands — so
-the Rust driver is exercised against the same protocol dynamics it
-sees on hardware.
+the driver is exercised against the same protocol dynamics it sees
+on hardware.
+
+Used by the test suite and by ``raydriver run --emulator`` for
+hardware-free dry runs.
 
 Timing: all motion durations are scaled by ``speed_factor``
 (default 2000x) so jobs finish in milliseconds while preserving the
 ordering and buffering semantics of real motion.
+
+The welcome banner is emitted when the first byte arrives after a
+(dark) boot — modeling the DTR reset a USB-serial open causes on
+real boards.
 """
 
 import asyncio
@@ -86,7 +93,7 @@ class _Block:
         start,
         target,
         feed,
-        duration,
+        base_seconds,
         is_jog=False,
         is_dwell=False,
         is_home=False,
@@ -95,7 +102,7 @@ class _Block:
         self.start = start
         self.target = target
         self.feed = feed
-        self.duration = duration
+        self.base_seconds = base_seconds
         self.is_jog = is_jog
         self.is_dwell = is_dwell
         self.is_home = is_home
@@ -127,12 +134,13 @@ class GrblEmulator:
         self.fragment_output = fragment_output
         self.silent = False
         self.rx_overrun = False
-        self.welcome_on_start = True
+        self.tx_log = bytearray()
 
         self.settings = dict(DEFAULT_SETTINGS)
         self.wcs = {f"G5{n}": [0.0, 0.0, 0.0] for n in range(4, 10)}
         self.active_wcs = "G54"
         self.mpos = [0.0, 0.0, 0.0]
+        self._planned_pos = [0.0, 0.0, 0.0]
         self.feed = 0.0
         self.spindle = 0
         self.probe_touch = None
@@ -158,7 +166,7 @@ class GrblEmulator:
         self._rx_used = 0
         self._report_count = 0
         self._wco_dirty = True
-        self._seen = 0
+        self._welcomed = False
         self._last_tick = None
         self._out_rng = random.Random(1234)
 
@@ -190,6 +198,7 @@ class GrblEmulator:
         self._line_overflow = False
         self._rx_used = 0
         self._hold_requested = False
+        self._planned_pos = list(self.mpos)
         self._out(f"ALARM:{code}\r\n".encode())
         if message:
             self._out(message)
@@ -197,17 +206,10 @@ class GrblEmulator:
     # ---------------------------------------------------------- runtime
 
     async def run(self):
-        if self.welcome_on_start:
-            self._out(WELCOME)
         self._last_tick = self._now()
         while True:
-            sent = self.mock.sent()
-            if len(sent) < self._seen:
-                # The test cleared the sent log; start over.
-                self._seen = 0
-            for chunk in sent[self._seen :]:
+            for chunk in self.mock.take_new_sent():
                 self._feed_bytes(chunk)
-            self._seen = len(sent)
             self._tick()
             await asyncio.sleep(self.TICK)
 
@@ -216,6 +218,7 @@ class GrblEmulator:
         return asyncio.get_running_loop().time()
 
     def _out(self, data: bytes):
+        self.tx_log.extend(data)
         if self.silent:
             return
         if self.fragment_output:
@@ -236,6 +239,12 @@ class GrblEmulator:
     def _feed_byte(self, byte: int):
         if self.silent:
             return
+        # Opening the serial port toggles DTR and resets the
+        # controller: the first byte arrives right as the firmware
+        # (re)boots and prints its banner.
+        if not self._welcomed:
+            self._welcomed = True
+            self._out(WELCOME)
         # Realtime commands are intercepted before the line buffer.
         if byte == 0x18:
             self._soft_reset()
@@ -289,6 +298,7 @@ class GrblEmulator:
         self._line_overflow = False
         self._rx_used = 0
         self._hold_requested = False
+        self._planned_pos = list(self.mpos)
         self._out(WELCOME)
         if was_moving or self._state == "Alarm":
             self._state = "Alarm"
@@ -304,6 +314,7 @@ class GrblEmulator:
                 # Real Grbl cancels a jog on feed hold.
                 self._current_block = None
                 self._planner.clear()
+                self._planned_pos = list(self.mpos)
 
     def _cycle_resume(self):
         if self._state == "Hold":
@@ -318,17 +329,14 @@ class GrblEmulator:
         fields = []
         if self.settings["10"] & 1:
             fields.append(
-                "MPos:"
-                + ",".join(_fmt(self._to_report(v)) for v in self.mpos)
+                "MPos:" + ",".join(_fmt(self._to_report(v)) for v in self.mpos)
             )
         else:
             wco = self._wco()
             fields.append(
                 "WPos:"
                 + ",".join(
-                    _fmt(
-                        self._to_report(self.mpos[i] - wco[i])
-                    )
+                    _fmt(self._to_report(self.mpos[i] - wco[i]))
                     for i in range(3)
                 )
             )
@@ -338,9 +346,7 @@ class GrblEmulator:
                 f"Bf:{PLANNER_BLOCKS - len(self._planner)},{rx_avail}"
             )
         block = self._current_block
-        if block is not None and not (
-            block.is_dwell or block.is_home
-        ):
+        if block is not None and not (block.is_dwell or block.is_home):
             fields.append(
                 f"FS:{int(round(self.feed))},{int(round(self.spindle))}"
             )
@@ -372,12 +378,13 @@ class GrblEmulator:
                 self._current_block = self._planner.pop(0)
                 self._block_elapsed = 0.0
                 block = self._current_block
-                if block.feed and not (
-                    block.is_dwell or block.is_home
-                ):
+                if block.feed and not (block.is_dwell or block.is_home):
                     self.feed = block.feed
                 self._state = (
-                    "Jog" if block.is_jog else "Home" if block.is_home
+                    "Jog"
+                    if block.is_jog
+                    else "Home"
+                    if block.is_home
                     else "Run"
                 )
             elif self._state in ("Run", "Jog", "Home"):
@@ -388,16 +395,15 @@ class GrblEmulator:
 
         self._block_elapsed += elapsed
         block = self._current_block
-        if self._block_elapsed >= block.duration:
+        if self._block_elapsed >= self._block_duration(block):
             self.mpos = list(block.target)
             self._current_block = None
             self._finish_block(block)
         else:
-            frac = self._block_elapsed / block.duration
+            frac = self._block_elapsed / self._block_duration(block)
             for i in range(3):
                 self.mpos[i] = (
-                    block.start[i]
-                    + (block.target[i] - block.start[i]) * frac
+                    block.start[i] + (block.target[i] - block.start[i]) * frac
                 )
 
     def _finish_block(self, block):
@@ -413,8 +419,7 @@ class GrblEmulator:
             self._ack(b"ok\r\n")
             self._set_alarm(
                 4,
-                b"[MSG:Probe fail - Probe did not contact within "
-                b"travel]\r\n",
+                b"[MSG:Probe fail - Probe did not contact within travel]\r\n",
             )
         elif block.is_dwell:
             return
@@ -424,9 +429,9 @@ class GrblEmulator:
         flag = 1 if success else 0
         self.last_prb = (*self.mpos, flag)
         self._out(
-            "[PRB:"
-            + ",".join(_fmt(v) for v in prb)
-            + f":{flag}]\r\n".encode()
+            (
+                "[PRB:" + ",".join(_fmt(v) for v in prb) + f":{flag}]\r\n"
+            ).encode()
         )
 
     def _drain_pending_lines(self):
@@ -544,9 +549,7 @@ class GrblEmulator:
                 self._out(
                     "[{}:{}]\r\n".format(
                         slot,
-                        ",".join(
-                            _fmt(self._to_report(v)) for v in values
-                        ),
+                        ",".join(_fmt(self._to_report(v)) for v in values),
                     ).encode()
                 )
             self._out(b"[G28:0.000,0.000,0.000]\r\n")
@@ -575,15 +578,16 @@ class GrblEmulator:
                 return
             self._planner.append(
                 _Block(
-                    list(self.mpos),
+                    list(self._planned_pos),
                     [0.0, 0.0, 0.0],
                     self.settings["25"],
                     self._motion_duration(
-                        self.mpos, [0.0, 0.0, 0.0], self.settings["25"]
+                        self._planned_pos, [0.0, 0.0, 0.0], self.settings["25"]
                     ),
                     is_home=True,
                 )
             )
+            self._planned_pos = [0.0, 0.0, 0.0]
             self._ack(b"ok\r\n")
             return
         match = _SETTING_RE.match(stripped)
@@ -591,9 +595,7 @@ class GrblEmulator:
             key, raw_value = match.groups()
             try:
                 value = (
-                    float(raw_value)
-                    if "." in raw_value
-                    else int(raw_value)
+                    float(raw_value) if "." in raw_value else int(raw_value)
                 )
             except ValueError:
                 self._ack(b"error:5\r\n")
@@ -612,7 +614,7 @@ class GrblEmulator:
             return
         try:
             target, feed, has_axis = self._resolve_motion(
-                words, force_distance="G91"
+                words, default_motion="G1"
             )
         except _GcodeError as exc:
             self._ack(f"error:{exc.code}\r\n".encode())
@@ -622,20 +624,25 @@ class GrblEmulator:
             return
         self._planner.append(
             _Block(
-                list(self.mpos),
+                list(self._planned_pos),
                 target,
                 feed,
-                self._motion_duration(self.mpos, target, feed),
+                self._motion_duration(self._planned_pos, target, feed),
                 is_jog=True,
             )
         )
+        self._planned_pos = list(target)
         self._ack(b"ok\r\n")
 
     # ----------------------------------------------------------- gcode
 
-    def _resolve_motion(self, words, force_distance=None):
-        """Compute the machine-space target and feed for a motion."""
-        distance = force_distance or self._modal["distance"]
+    def _resolve_motion(self, words, default_motion=None):
+        """Compute the machine-space target and feed for a motion.
+
+        ``default_motion`` supplies a modal motion for commands that
+        omit one (jog commands default to G1, like real Grbl).
+        """
+        distance = self._modal["distance"]
         scale = 25.4 if self._modal["units"] == "G20" else 1.0
         use_machine = False
         motion = self._modal["motion"]
@@ -651,11 +658,9 @@ class GrblEmulator:
                 elif value == 53:
                     use_machine = True
                 elif value == 90:
-                    if force_distance is None:
-                        distance = "G90"
+                    distance = "G90"
                 elif value == 91:
-                    if force_distance is None:
-                        distance = "G91"
+                    distance = "G91"
                 elif value == 20:
                     scale = 25.4
                 elif value == 21:
@@ -666,20 +671,24 @@ class GrblEmulator:
                 axis_words[letter] = value * scale
 
         if motion is None:
+            motion = default_motion
+        if motion is None:
             return None, feed, False
 
+        # Targets resolve against the position the planner will have
+        # reached when this block runs — not the live position, which
+        # lags behind while motion is in flight.
+        base = self._planned_pos
         target = []
         for i, axis in enumerate("XYZ"):
             if axis not in axis_words:
-                target.append(self.mpos[i])
+                target.append(base[i])
                 continue
             word = axis_words[axis]
             if motion == "G38.2" or distance == "G91":
-                target.append(self.mpos[i] + word)
+                target.append(base[i] + word)
             else:
-                target.append(
-                    word + (0.0 if use_machine else offset[i])
-                )
+                target.append(word + (0.0 if use_machine else offset[i]))
         return target, feed, bool(axis_words)
 
     def _exec_gcode(self, words):
@@ -692,16 +701,10 @@ class GrblEmulator:
                 if value in (0, 1, 2, 3, 38.2):
                     motion_pending = value
                 elif value == 4:
-                    dwell = next(
-                        (v for l, v, _ in words if l == "P"), 0.0
-                    )
+                    dwell = next((v for w, v, _ in words if w == "P"), 0.0)
                 elif value == 10:
-                    l_value = next(
-                        (v for l, v, _ in words if l == "L"), None
-                    )
-                    wcs_set = next(
-                        (v for l, v, _ in words if l == "P"), None
-                    )
+                    l_value = next((v for w, v, _ in words if w == "L"), None)
+                    wcs_set = next((v for w, v, _ in words if w == "P"), None)
                 elif value in (17, 18, 19):
                     self._modal["plane"] = f"G{int(value)}"
                 elif value in (20, 21):
@@ -754,56 +757,67 @@ class GrblEmulator:
                     list(self.mpos),
                     list(self.mpos),
                     self.feed,
-                    max(dwell / self.speed_factor, 0.001),
+                    dwell,
                     is_dwell=True,
                 )
             )
 
         if motion_pending is not None:
-            self._exec_motion(motion_pending, words)
+            if not self._exec_motion(motion_pending, words):
+                # The line's ack is deferred (probe motion) or
+                # suppressed (alarm): no ok here.
+                return
         self._ack(b"ok\r\n")
 
     @staticmethod
     def _pending_spindle(words):
-        return int(next((v for l, v, _ in words if l == "S"), 0))
+        return int(next((v for w, v, _ in words if w == "S"), 0))
 
     def _exec_motion(self, motion_value, words):
+        """Queue a motion block.
+
+        Returns True when the caller should ack the line, False when
+        the ack is deferred to block completion (probing) or
+        suppressed (soft-limit alarm), matching real Grbl.
+        """
         target, feed, has_axis = self._resolve_motion(words)
         if motion_value == 38.2:
             if not has_axis:
                 raise _GcodeError(33)
             self._exec_probe(target, feed)
-            return
+            return False
         if not has_axis:
             # Modal-only line like "G1 F600": just updates state.
-            if motion_value == 1 and feed <= 0 and (
-                self._modal["motion"] == "G1"
+            if (
+                motion_value == 1
+                and feed <= 0
+                and (self._modal["motion"] == "G1")
             ):
                 raise _GcodeError(22)
             self._modal["motion"] = f"G{int(motion_value)}"
-            return
+            return True
         if motion_value == 1 and feed <= 0:
             raise _GcodeError(22)
         self._check_soft_limits(target)
         if self._state == "Alarm":
-            return
+            return False
         self._modal["motion"] = f"G{int(motion_value)}"
         if motion_value == 0:
             rapid = max(self.settings["110"], self.settings["111"], 1.0)
             feed = rapid
         elif motion_value in (2, 3):
-            if not any(
-                l in ("I", "J", "R") for l, _v, _r in words
-            ):
+            if not any(w in ("I", "J", "R") for w, _v, _r in words):
                 raise _GcodeError(35)
         self._planner.append(
             _Block(
-                list(self.mpos),
+                list(self._planned_pos),
                 target,
                 feed,
-                self._motion_duration(self.mpos, target, feed),
+                self._motion_duration(self._planned_pos, target, feed),
             )
         )
+        self._planned_pos = list(target)
+        return True
 
     def _exec_probe(self, target, feed):
         self._check_soft_limits(target)
@@ -820,14 +834,15 @@ class GrblEmulator:
                     break
         end = target if touch is None else touch
         block = _Block(
-            list(self.mpos),
+            list(self._planned_pos),
             end,
             feed,
-            self._motion_duration(self.mpos, end, feed),
+            self._motion_duration(self._planned_pos, end, feed),
             probe_touch=touch,
         )
         block.is_probe = True
         self._planner.append(block)
+        self._planned_pos = list(end)
 
     def _check_soft_limits(self, target):
         if self.settings["20"] == 0 or self.settings["22"] == 0:
@@ -835,12 +850,22 @@ class GrblEmulator:
         for i, travel_key in enumerate(("130", "131", "132")):
             travel = self.settings[travel_key]
             if target[i] < -1e-6 or target[i] > travel + 1e-6:
+                # Grbl always acks a processed line: the move is
+                # rejected with an error status after the alarm is
+                # raised (error:5 = travel violation).
                 self._set_alarm(2)
+                self._ack(b"error:5\r\n")
                 return
 
     def _motion_duration(self, start, target, feed):
+        """Un-scaled block duration at speed_factor 1 (seconds)."""
         dist = math.dist(start, target)
         if dist == 0:
-            return 0.001
+            return 0.0
         feed = max(feed, 1.0)
-        return max(dist / (feed / 60.0) / self.speed_factor, 0.001)
+        return dist / (feed / 60.0)
+
+    def _block_duration(self, block):
+        """Current wall-clock duration of *block* under the live
+        speed factor (so tests can accelerate mid-job)."""
+        return max(block.base_seconds / self.speed_factor, 0.001)

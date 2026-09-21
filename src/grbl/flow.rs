@@ -62,6 +62,8 @@ struct FlowInner {
     rx_size: Option<usize>,
     status_buffer: Vec<u8>,
     pending: VecDeque<PendingCommand>,
+    acked_since_flush: bool,
+    drained_since_flush: bool,
 }
 
 /// Buffer accounting and low-level response parsing state.
@@ -117,12 +119,10 @@ impl FlowControl {
     /// alarms, info messages) as well.
     pub fn parse_incoming(&self, data: &[u8]) -> Vec<GrblResponse> {
         let mut responses = Vec::new();
-        let mut acked = false;
-        let pending_empty;
         {
             let mut inner = self.inner.lock().unwrap();
             inner.status_buffer.extend_from_slice(data);
-            acked |= Self::extract_acks_from_buffer(&mut inner, &mut responses);
+            Self::extract_acks_from_buffer(&mut inner, &mut responses);
             while let Some(nl) =
                 inner.status_buffer.iter().position(|b| *b == b'\n')
             {
@@ -138,7 +138,8 @@ impl FlowControl {
                     }
                     if line == "ok" {
                         let pending = Self::ack_ok_locked(&mut inner);
-                        acked = true;
+                        inner.acked_since_flush = true;
+                        inner.drained_since_flush |= inner.pending.is_empty();
                         responses.push(GrblResponse {
                             rtype: GrblResponseType::Ok,
                             text: "ok".to_string(),
@@ -146,7 +147,8 @@ impl FlowControl {
                         });
                     } else if line.starts_with("error:") {
                         Self::ack_ok_locked(&mut inner);
-                        acked = true;
+                        inner.acked_since_flush = true;
+                        inner.drained_since_flush |= inner.pending.is_empty();
                         responses.push(GrblResponse {
                             rtype: GrblResponseType::Error,
                             text: line.to_string(),
@@ -161,28 +163,44 @@ impl FlowControl {
                     }
                 }
             }
-            pending_empty = inner.pending.is_empty();
         }
-        if acked {
-            self.signal_space_available();
-            if pending_empty {
-                self.notify_drained();
-            }
-        }
+        // Notifications are deferred to flush_notifications() so the
+        // session finishes processing the responses (progress
+        // callbacks, request completion) before a streaming task
+        // wakes up and observes the freed buffer space — mirroring
+        // asyncio's single-threaded scheduling in the Python driver.
         responses
     }
 
+    /// Deliver the flow-control notifications accumulated by
+    /// [`FlowControl::parse_incoming`].  The session calls this
+    /// after processing the parsed responses.
+    pub fn flush_notifications(&self) {
+        let (space, drained) = {
+            let mut inner = self.inner.lock().unwrap();
+            (
+                std::mem::take(&mut inner.acked_since_flush),
+                std::mem::take(&mut inner.drained_since_flush),
+            )
+        };
+        if space {
+            self.signal_space_available();
+        }
+        if drained {
+            self.notify_drained();
+        }
+    }
     fn extract_acks_from_buffer(
         inner: &mut FlowInner,
         responses: &mut Vec<GrblResponse>,
-    ) -> bool {
-        let mut acked = false;
+    ) {
         while let Some(m) = OK_ACK_RE.find(&inner.status_buffer) {
             let start = m.start();
             let end = m.end();
             inner.status_buffer.drain(start..end);
             let pending = Self::ack_ok_locked(inner);
-            acked = true;
+            inner.acked_since_flush = true;
+            inner.drained_since_flush |= inner.pending.is_empty();
             responses.push(GrblResponse {
                 rtype: GrblResponseType::Ok,
                 text: "ok".to_string(),
@@ -203,7 +221,8 @@ impl FlowControl {
                  connection MUST be fixed for reliable operation."
             );
             let pending = Self::ack_ok_locked(inner);
-            acked = true;
+            inner.acked_since_flush = true;
+            inner.drained_since_flush |= inner.pending.is_empty();
             responses.push(GrblResponse {
                 rtype: GrblResponseType::Ok,
                 text: "ok".to_string(),
@@ -235,7 +254,8 @@ impl FlowControl {
                  (interleaved recovery)"
             );
             Self::ack_ok_locked(inner);
-            acked = true;
+            inner.acked_since_flush = true;
+            inner.drained_since_flush |= inner.pending.is_empty();
             responses.push(GrblResponse {
                 rtype: GrblResponseType::Error,
                 text: error_text,
@@ -243,7 +263,6 @@ impl FlowControl {
             });
             search_from = start;
         }
-        acked
     }
 
     /// Search `status_buffer` for a pattern like `o\0k\r*\n` where

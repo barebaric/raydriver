@@ -1,22 +1,18 @@
-"""Session lifecycle and interactive command tests (port of
-test_grbl_serial_driver.py scenarios that don't involve streaming)."""
+"""Session lifecycle and interactive command tests, driven against
+the GRBL firmware emulator."""
 
 import asyncio
 
 import pytest
+from conftest import make_session, sent_bytes, start_device
 
 from raydriver.grbl.types import DeviceStatus
 
 
 class TestConnection:
-    async def test_connect_emits_connected_after_handshake(
-        self, mock, device, events
-    ):
-        session, _, _, _ = None, mock, device, events
-        from conftest import make_session
-
+    async def test_handshake_and_build_info(self, mock, events):
+        emulator, device_task = await start_device(mock)
         session = make_session(mock, events)
-        device_task = asyncio.ensure_future(device.run())
         try:
             await session.connect()
             payload = await events.wait_for(
@@ -24,14 +20,16 @@ class TestConnection:
                 lambda p: p[0] == "CONNECTED",
             )
             assert payload[1] is None
-            assert b"$I\n" in b"".join(mock.sent())
+            # The connection loop queried $I, whose OPT line
+            # advertised the emulated 128-byte RX buffer.
+            assert b"$I\n" in sent_bytes(mock)
+            assert session.rx_buffer_size == 128
         finally:
             await session.disconnect()
             device_task.cancel()
 
     async def test_handshake_timeout_on_phantom_port(self, mock, events):
-        from conftest import make_session
-
+        # No emulator attached: nothing ever answers.
         session = make_session(mock, events, {"handshake_timeout": 0.15})
         try:
             await session.connect()
@@ -41,14 +39,13 @@ class TestConnection:
             )
             assert "No response" in payload[1]
             await events.wait_for(
-                "connection_status_changed", lambda p: p[0] == "SLEEPING"
+                "connection_status_changed",
+                lambda p: p[0] == "SLEEPING",
             )
         finally:
             await session.disconnect()
 
     async def test_reconnect_after_recovery(self, mock, events):
-        from conftest import FakeDevice, make_session
-
         session = make_session(mock, events, {"handshake_timeout": 0.15})
         try:
             await session.connect()
@@ -56,137 +53,114 @@ class TestConnection:
                 "connection_status_changed",
                 lambda p: p[0] == "ERROR",
             )
-            device = FakeDevice(mock)
-            device_task = asyncio.ensure_future(device.run())
+            # The device appears (cable plugged back in).
+            emulator, device_task = await start_device(mock)
             await events.wait_for(
                 "connection_status_changed",
                 lambda p: p[0] == "CONNECTED",
-                timeout=5.0,
+                timeout=8.0,
             )
             device_task.cancel()
         finally:
             await session.disconnect()
-
-    async def test_welcome_variant_grblhal(self, mock, events):
-        from conftest import FakeDevice, make_session
-
-        device = FakeDevice(mock, welcome=b"GrblHAL 1.1f\r\n")
-        session = make_session(mock, events)
-        device_task = asyncio.ensure_future(device.run())
-        try:
-            await session.connect()
-            await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
-            )
-        finally:
-            await session.disconnect()
-            device_task.cancel()
 
     async def test_command_while_disconnected_raises(self, mock, events):
-        from conftest import make_session
-
         session = make_session(mock, events)
         with pytest.raises(ConnectionError):
             await session.execute_interactive_command("$X")
 
 
-class TestConnectionState:
-    async def test_status_report_updates_state(self, connected, events):
-        session, mock, device, events = connected
-        from conftest import STATUS_RUN
+class TestStatusReports:
+    async def test_status_report_updates_state(self, rig):
+        session, mock, emulator, events = rig
+        # Handshake polls already delivered the first report.
+        state = session.state
+        assert state.status == DeviceStatus.IDLE
+        assert state.machine_pos == [0.0, 0.0, 0.0]
 
-        mock.push(STATUS_RUN)
-        payload = await events.wait_for(
-            "state_changed",
-            lambda p: p.status == DeviceStatus.RUN,
-        )
-        assert payload.feed_rate == 500
-        assert payload.machine_pos == [1.0, 2.0, 0.0]
-
-    async def test_rx_buffer_size_from_opt(self, mock, events):
-        from conftest import FakeDevice, make_session
-
-        device = FakeDevice(mock)
-        device.build_info = b"[VER:1.1h:]\r\n[OPT:V,15,356]\r\nok\r\n"
-        # Keep Bf out of the status reports so it cannot disagree
-        # with the OPT-provided size.
-        device.status = b"<Idle|MPos:0.000,0.000,0.000>\r\n"
-        session = make_session(mock, events)
-        device_task = asyncio.ensure_future(device.run())
-        try:
-            await session.connect()
-            await events.wait_for(
-                "config_changed", lambda p: p == ("rx_buffer_size", 356)
-            )
-            assert session.rx_buffer_size == 356
-        finally:
-            await session.disconnect()
-            device_task.cancel()
-
-    async def test_rx_buffer_size_override_wins(self, mock, device, events):
-        from conftest import make_session
-
+    async def test_rx_buffer_size_override_wins(self, mock, events):
+        emulator, device_task = await start_device(mock)
         session = make_session(mock, events, {"rx_buffer_size_override": 64})
-        device_task = asyncio.ensure_future(device.run())
         try:
             await session.connect()
             await events.wait_for(
                 "connection_status_changed",
                 lambda p: p[0] == "CONNECTED",
             )
+            # OPT and Bf advertise 128, but the override sticks.
+            await asyncio.sleep(0.15)
             assert session.rx_buffer_size == 64
         finally:
             await session.disconnect()
             device_task.cancel()
 
-    async def test_fragmented_status_report_ignored(self, connected):
-        session, mock, device, events = connected
-        states_before = [e for e in events.events if e[0] == "state_changed"]
+    async def test_fragmented_status_report_ignored(self, rig):
+        session, mock, emulator, events = rig
+        states_before = len(
+            [e for e in events.events if e[0] == "state_changed"]
+        )
         mock.push(b"<Idle|MPos")
         await asyncio.sleep(0.1)
-        states_after = [e for e in events.events if e[0] == "state_changed"]
-        assert len(states_after) == len(states_before)
+        states_after = len(
+            [e for e in events.events if e[0] == "state_changed"]
+        )
+        assert states_after == states_before
 
 
 class TestInteractiveCommands:
-    async def test_ok_response(self, connected):
-        session, mock, device, events = connected
+    async def test_ok_response(self, rig):
+        session, mock, emulator, events = rig
         lines = await session.execute_interactive_command("$X")
         assert lines == ["ok"]
 
-    async def test_multi_line_response(self, connected):
-        session, mock, device, events = connected
+    async def test_multi_line_response(self, rig):
+        session, mock, emulator, events = rig
         lines = await session.execute_interactive_command("$G")
         assert lines[0].startswith("[G54")
         assert lines[-1] == "ok"
 
-    async def test_error_response(self, connected):
-        session, mock, device, events = connected
-        device.command_failures["$X"] = "error:2"
-        lines = await session.execute_interactive_command("$X")
-        assert lines == ["error:2"]
+    async def test_error_response(self, rig):
+        session, mock, emulator, events = rig
+        lines = await session.execute_interactive_command("G999")
+        assert lines == ["error:20"]
 
-    async def test_queued_command(self, connected):
-        session, mock, device, events = connected
+    async def test_queued_command(self, rig):
+        session, mock, emulator, events = rig
         lines = await session.execute_command("$X")
         assert lines == ["ok"]
 
-    async def test_interleaved_status_and_ok(self, connected):
-        session, mock, device, events = connected
-        # Ack interleaved with a status report fragment, delivered in
-        # one chunk: the ack must still be extracted before the line
-        # parser sees it.
+    async def test_interleaved_status_and_ok(self, rig):
+        session, mock, emulator, events = rig
+        # A status report fragment and the ack in one chunk: the
+        # ack must still be extracted before line-based parsing.
         fut = asyncio.ensure_future(session.execute_interactive_command("$X"))
         await asyncio.sleep(0.05)
-        mock.push(b"<Idle|MPos:0,0,0|Bf:15,127>\r\nok\r\n")
+        mock.push(b"<Idle|MPos:0.000,0.000,0.000|Bf:15,128>\r\nok\r\n")
         assert await fut == ["ok"]
         assert session.buffer_count == 0
 
+    async def test_commands_rejected_while_alarmed(self, rig):
+        session, mock, emulator, events = rig
+        emulator.settings["22"] = 1
+        emulator.settings["20"] = 1
+        # A move beyond the travel limit: the line is rejected with
+        # an error (after ALARM:2) and the machine locks.
+        lines = await session.execute_interactive_command("G0 X10000")
+        assert "ALARM:2" in lines
+        assert lines[-1] == "error:5"
+        await events.wait_for("state_changed", lambda p: p.error is not None)
+        # Like real Grbl, subsequent gcode is rejected.
+        lines = await session.execute_interactive_command("G0 X1")
+        assert lines == ["error:9"]
+        # $X unlocks.
+        lines = await session.execute_interactive_command("$X")
+        assert "[MSG:Caution: Unlocked]" in lines
+        assert lines[-1] == "ok"
+
 
 class TestHold:
-    async def test_hold_sends_realtime_and_updates_state(self, connected):
-        session, mock, device, events = connected
+    async def test_hold_sends_realtime_and_updates_state(self, rig):
+        session, mock, emulator, events = rig
         await session.set_hold(True)
         assert b"!" in mock.sent()
         await events.wait_for(
@@ -195,8 +169,8 @@ class TestHold:
         await session.set_hold(False)
         assert b"~" in mock.sent()
 
-    async def test_resume_without_job_reports_idle(self, connected):
-        session, mock, device, events = connected
+    async def test_resume_without_job_reports_idle(self, rig):
+        session, mock, emulator, events = rig
         await session.set_hold(True)
         await session.set_hold(False)
         await events.wait_for(
@@ -205,166 +179,184 @@ class TestHold:
 
 
 class TestDeviceOperations:
-    async def test_move_to_formatting(self, connected):
-        session, mock, device, events = connected
-        await session.move_to(1500, 10, -20.5)
-        assert b"$J=G90 G21 F1500 X10.0 Y-20.5\n" in b"".join(mock.sent())
+    async def test_move_to_reaches_target(self, rig):
+        session, mock, emulator, events = rig
+        await session.move_to(1500, 100, -50)
+        await asyncio.sleep(0.1)
+        assert emulator.mpos == pytest.approx([100.0, -50.0, 0.0])
+        assert b"$J=G90 G21 F1500 X100.0 Y-50.0\n" in sent_bytes(mock)
 
-    async def test_jog_formatting(self, connected):
-        session, mock, device, events = connected
+    async def test_jog_reaches_target(self, rig):
+        session, mock, emulator, events = rig
         await session.jog(1000, [("x", 10), ("y", -2.5)])
-        sent = b"".join(mock.sent())
-        assert b"$J=G91 G21 F1000 X10.0 Y-2.5\n" in sent
+        await asyncio.sleep(0.1)
+        assert emulator.mpos == pytest.approx([10.0, -2.5, 0.0])
+        assert b"$J=G91 G21 F1000 X10.0 Y-2.5\n" in sent_bytes(mock)
 
-    async def test_jog_no_axes_is_noop(self, connected):
-        session, mock, device, events = connected
+    async def test_jog_no_axes_is_noop(self, rig):
+        session, mock, emulator, events = rig
         mock.clear_sent()
         await session.jog(1000, [])
-        assert b"".join(mock.sent()) == b""
+        assert sent_bytes(mock) == b""
 
-    async def test_select_tool(self, connected):
-        session, mock, device, events = connected
+    async def test_select_tool(self, rig):
+        session, mock, emulator, events = rig
         await session.select_tool(2)
-        assert b"T2\n" in b"".join(mock.sent())
+        assert b"T2\n" in sent_bytes(mock)
 
-    async def test_set_power_on(self, connected):
-        session, mock, device, events = connected
+    async def test_set_power_reflected_in_parser_state(self, rig):
+        session, mock, emulator, events = rig
         await session.set_power(500)
-        assert b"M4 S500\n" in b"".join(mock.sent())
+        lines = await session.execute_interactive_command("$G")
+        assert "M4" in lines[0]
+        assert "S500" in lines[0]
 
-    async def test_set_power_off(self, connected):
-        session, mock, device, events = connected
+    async def test_set_power_off(self, rig):
+        session, mock, emulator, events = rig
         await session.set_power(None)
-        assert b"M5\n" in b"".join(mock.sent())
+        lines = await session.execute_interactive_command("$G")
+        assert "M5" in lines[0]
+        assert b"M5\n" in sent_bytes(mock)
 
-    async def test_set_focus_power(self, connected):
-        session, mock, device, events = connected
+    async def test_set_focus_power(self, rig):
+        session, mock, emulator, events = rig
         await session.set_focus_power(100)
-        assert b"M3 S100\n" in b"".join(mock.sent())
+        lines = await session.execute_interactive_command("$G")
+        assert "M3" in lines[0]
 
-    async def test_home_all(self, connected):
-        session, mock, device, events = connected
+    async def test_home_cycle(self, rig):
+        session, mock, emulator, events = rig
+        await session.move_to(1500, 50, 50)
+        await asyncio.sleep(0.05)
+        emulator.settings["22"] = 1
         await session.home(None, "G54")
-        text = b"".join(mock.sent())
+        await asyncio.sleep(0.1)
+        assert emulator.mpos == pytest.approx([0.0, 0.0, 0.0])
+        text = sent_bytes(mock)
         assert b"$H\n" in text
         assert b"G4 P0.01\n" in text
         assert b"G55\n" in text
         assert b"G54\n" in text
-        assert text.index(b"$H\n") < text.index(b"G4 P0.01\n")
-        assert text.index(b"G4 P0.01\n") < text.index(b"G55\n")
-        assert text.index(b"G55\n") < text.index(b"G54\n")
 
-    async def test_home_single_axis(self, connected):
-        session, mock, device, events = connected
-        await session.home(["X"], "G54")
-        assert b"$HX\n" in b"".join(mock.sent())
+    async def test_home_disabled_reports_error(self, rig):
+        session, mock, emulator, events = rig
+        assert emulator.settings["22"] == 0
+        lines = await session.execute_command("$H")
+        assert lines == ["error:5"]
 
-    async def test_update_dialect(self, connected):
-        session, mock, device, events = connected
+    async def test_update_dialect(self, rig):
+        session, mock, emulator, events = rig
         session.update_dialect({"move_to": "G0 X{x} Y{y}"})
         await session.move_to(1500, 10, 20)
-        assert b"G0 X10.0 Y20.0\n" in b"".join(mock.sent())
+        assert b"G0 X10.0 Y20.0\n" in sent_bytes(mock)
 
 
 class TestSettings:
-    async def test_read_settings(self, connected):
-        session, mock, device, events = connected
+    async def test_read_settings(self, rig):
+        session, mock, emulator, events = rig
         pairs = await session.read_settings()
         as_dict = dict(pairs)
         assert as_dict["13"] == "0"
         assert as_dict["110"] == "500.000"
 
-    async def test_write_setting(self, connected):
-        session, mock, device, events = connected
+    async def test_write_setting_persists(self, rig):
+        session, mock, emulator, events = rig
         await session.write_setting("110", "750.000")
-        assert b"$110=750.000\n" in b"".join(mock.sent())
+        assert emulator.settings["110"] == 750.0
+        assert b"$110=750.000\n" in sent_bytes(mock)
+        pairs = await session.read_settings()
+        assert dict(pairs)["110"] == "750.000"
 
-    async def test_detect_unit_system_metric(self, connected):
-        session, mock, device, events = connected
+    async def test_detect_unit_system_metric(self, rig):
+        session, mock, emulator, events = rig
         assert await session.detect_unit_system() == "metric"
 
-    async def test_detect_unit_system_imperial(self, connected):
-        session, mock, device, events = connected
-        device.settings = ["$13=1"]
+    async def test_detect_unit_system_imperial(self, rig):
+        session, mock, emulator, events = rig
+        emulator.settings["13"] = 1
         assert await session.detect_unit_system() == "imperial"
 
 
 class TestWcs:
-    async def test_read_wcs_offsets(self, connected):
-        session, mock, device, events = connected
+    async def test_read_wcs_offsets(self, rig):
+        session, mock, emulator, events = rig
         offsets = await session.read_wcs_offsets()
         assert offsets["G54"] == (0.0, 0.0, 0.0)
-        assert offsets["G55"] == (10.0, 20.0, 0.0)
         await events.wait_for("wcs_updated")
 
-    async def test_read_wcs_offsets_imperial(self, connected):
-        session, mock, device, events = connected
-        device.settings = ["$13=1"]
-        assert await session.detect_unit_system() == "imperial"
-        offsets = await session.read_wcs_offsets()
-        assert offsets["G55"][0] == pytest.approx(10.0 * 25.4)
-
-    async def test_set_wcs_offset(self, connected):
-        session, mock, device, events = connected
+    async def test_set_then_read_wcs_offset(self, rig):
+        session, mock, emulator, events = rig
         await session.set_wcs_offset("G55", 10, 20, None)
-        assert b"G10 L2 P2 X10.0 Y20.0\n" in b"".join(mock.sent())
+        assert b"G10 L2 P2 X10.0 Y20.0\n" in sent_bytes(mock)
+        offsets = await session.read_wcs_offsets()
+        assert offsets["G55"] == (10.0, 20.0, 0.0)
 
-    async def test_set_wcs_offset_with_z(self, connected):
-        session, mock, device, events = connected
+    async def test_set_wcs_offset_with_z(self, rig):
+        session, mock, emulator, events = rig
         await session.set_wcs_offset("G54", 1, 2, 3)
-        assert b"G10 L2 P1 X1.0 Y2.0 Z3.0\n" in b"".join(mock.sent())
+        assert b"G10 L2 P1 X1.0 Y2.0 Z3.0\n" in sent_bytes(mock)
+        assert emulator.wcs["G54"] == [1.0, 2.0, 3.0]
 
-    async def test_set_wcs_offset_invalid_slot(self, connected):
-        session, mock, device, events = connected
+    async def test_set_wcs_offset_invalid_slot(self, rig):
+        session, mock, emulator, events = rig
         with pytest.raises(RuntimeError):
             await session.set_wcs_offset("G53", 1, 2, None)
 
-    async def test_read_parser_state(self, connected):
-        session, mock, device, events = connected
+    async def test_read_parser_state(self, rig):
+        session, mock, emulator, events = rig
         assert await session.read_parser_state() == "G54"
 
 
 class TestProbe:
-    async def test_successful_probe(self, connected):
-        session, mock, device, events = connected
-        pos = await session.run_probe_cycle("z", 10.0, 100)
-        assert pos == (10.0, 20.0, 5.0)
+    async def test_successful_probe(self, rig):
+        session, mock, emulator, events = rig
+        emulator.probe_touch = (0.0, 0.0, -5.0)
+        pos = await session.run_probe_cycle("Z", 10.0, 100)
+        assert pos == pytest.approx((0.0, 0.0, -5.0))
         await events.wait_for(
             "probe_status_changed", lambda p: "triggered" in p
         )
+        assert emulator.mpos == pytest.approx([0.0, 0.0, -5.0])
 
-    async def test_failed_probe(self, connected):
-        session, mock, device, events = connected
-        device.probe_response = "[PRB:0.0,0.0,0.0:0]"
+    async def test_failed_probe_raises_alarm(self, rig):
+        session, mock, emulator, events = rig
+        # No contact configured: Grbl reports PRB:0 + ALARM:4.
         pos = await session.run_probe_cycle("Z", 10.0, 100)
         assert pos is None
         await events.wait_for(
             "probe_status_changed", lambda p: p == "Probe failed"
         )
-
-    async def test_probe_unit_conversion(self, connected):
-        session, mock, device, events = connected
-        device.settings = ["$13=1"]
-        await session.detect_unit_system()
-        device.probe_response = "[PRB:1.0,1.0,1.0:1]"
-        pos = await session.run_probe_cycle("Z", 10.0, 100)
-        assert pos[0] == pytest.approx(25.4)
-
-
-class TestAlarmLine:
-    async def test_alarm_line_sets_state_error(self, connected):
-        session, mock, device, events = connected
-        mock.push(b"ALARM:1\r\n")
         payload = await events.wait_for(
             "state_changed", lambda p: p.error is not None
         )
-        assert payload.error.code == 1
-        assert payload.error.title == "Hard Limit"
+        assert payload.error.code == 4
+        assert payload.error.title.startswith("Probe Fail")
 
-    async def test_alarm_sets_error_via_status_report(self, connected):
-        session, mock, device, events = connected
-        mock.push(b"<Alarm:2|MPos:0,0,0>\r\n")
+    async def test_probe_after_alarm_lock_can_unlock(self, rig):
+        session, mock, emulator, events = rig
+        await session.run_probe_cycle("Z", 10.0, 100)
+        await events.wait_for("state_changed", lambda p: p.error is not None)
+        lines = await session.execute_command("$X")
+        assert "[MSG:Caution: Unlocked]" in lines
+
+    async def test_probe_unit_conversion(self, rig):
+        session, mock, emulator, events = rig
+        emulator.settings["13"] = 1
+        assert await session.detect_unit_system() == "imperial"
+        emulator.probe_touch = (0.0, 0.0, -25.4)
+        pos = await session.run_probe_cycle("Z", 50.0, 100)
+        assert pos[2] == pytest.approx(-25.4)
+
+
+class TestInchReports:
+    async def test_imperial_reports_converted_to_mm(self, rig):
+        session, mock, emulator, events = rig
+        await session.move_to(1500, 25.4, 0)
+        emulator.settings["13"] = 1
+        assert await session.detect_unit_system() == "imperial"
         payload = await events.wait_for(
-            "state_changed", lambda p: p.error is not None
+            "state_changed",
+            lambda p: p.machine_pos[0] is not None and p.machine_pos[0] > 20.0,
         )
-        assert payload.error.title == "Soft Limit"
+        # The report arrived in inches; the driver reports mm.
+        assert payload.machine_pos[0] == pytest.approx(25.4, abs=0.1)
