@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint and typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+
+      - name: Install wheel
+        run: pip install dist/raydriver-*.whl
+
+      - name: Lint Python
+        run: pip install ruff && ruff check tests/ python/
+
+      - name: Lint Rust
+        uses: actions-rust-lang/rust-clippy-check@v1
+        with:
+          args: -- -D warnings
+
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+
+      - name: Install wheel
+        shell: bash
+        run: pip install dist/raydriver-*.whl
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: pytest -v

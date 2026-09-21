@@ -1,0 +1,50 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "raydriver"
+dynamic = ["version"]
+description = "Rust-native machine drivers for Rayforge, with Python bindings."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dependencies = []
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.maturin]
+module-name = "raydriver"
+python-source = "python"
+
+[tool.pyo3-stub-gen]
+module-name = "raydriver"
+
+[tool.pyright]
+stubPath = "python"
+reportMissingModuleSource = false
+include = ["tests", "python"]
+
+[tool.ruff]
+line-length = 79
+exclude = ["*.pyi"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["raydriver"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
