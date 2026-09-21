@@ -56,7 +56,7 @@ jobs:
         run: pip install dist/raydriver-*.whl
 
       - name: Install test dependencies
-        run: pip install pytest pytest-asyncio
+        run: pip install pytest pytest-asyncio pytest-timeout
 
       - name: Run tests
         run: pytest -v
