@@ -36,22 +36,21 @@ jobs:
           cargo fmt --check 2>&1 | tee fmt-output.txt
           cargo clippy -- -D warnings 2>&1 | tee clippy-output.txt
 
-      - name: Persist lint output to ci-logs branch
-        if: failure()
+      - name: Persist diagnostics to ci-logs branch
+        if: failure() || cancelled()
         shell: bash
         run: |
           cd "$(mktemp -d)"
-          git init -q
+          git init -q -b ci-logs
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
           mkdir -p logs
-          cp "${{ github.workspace }}/fmt-output.txt" logs/ 2>/dev/null || true
-          cp "${{ github.workspace }}/clippy-output.txt" logs/ 2>/dev/null || true
+          cp ${{ github.workspace }}/fmt-output.txt logs/ 2>/dev/null || true
+          cp ${{ github.workspace }}/clippy-output.txt logs/ 2>/dev/null || true
           git add -A
-          git commit -qm --allow-empty "lint diagnostics @ ${{ github.sha }}"
-          git push -q origin ci-logs
+          git commit -qm --allow-empty "diagnostics: lint @ ${{ github.sha }}"
+          git push -q -f origin ci-logs:refs/heads/ci-logs-lint
 
   test:
     name: Tests (${{ matrix.os }})
@@ -113,21 +112,21 @@ jobs:
           set -o pipefail
           maturin build --release --out dist 2>&1 | tee build-output.txt
 
-      - name: Persist build output to ci-logs branch
-        if: failure()
+      - name: Persist diagnostics to ci-logs branch
+        if: failure() || cancelled()
         shell: bash
         run: |
           cd "$(mktemp -d)"
-          git init -q
+          git init -q -b ci-logs
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          mkdir -p logs/windows-shards
-          cp "${{ github.workspace }}/build-output.txt" logs/windows-shards/build-output.txt 2>/dev/null || true
+          mkdir -p logs
+          cp ${{ github.workspace }}/build-output.txt logs/ 2>/dev/null || true
+          cp nope logs/ 2>/dev/null || true
           git add -A
-          git commit -qm --allow-empty "windows build diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
-          git push -q origin ci-logs
+          git commit -qm --allow-empty "diagnostics: windows-build-${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q -f origin ci-logs:refs/heads/ci-logs-win-build-${{ matrix.file }}
 
       - name: Install wheel
         shell: bash
@@ -143,24 +142,21 @@ jobs:
           python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee shard-output.txt
           exit ${PIPESTATUS[0]}
 
-      - name: Persist shard output to ci-logs branch
+      - name: Persist diagnostics to ci-logs branch
         if: failure() || cancelled()
         shell: bash
         run: |
-          mkdir -p /tmp/diag
-          cp shard-output.txt "/tmp/diag/shard-$(basename ${{ matrix.file }}).txt" 2>/dev/null || echo "no output" > "/tmp/diag/shard-$(basename ${{ matrix.file }}).txt"
-          cp freeze-dump.txt "/tmp/diag/freeze-$(basename ${{ matrix.file }}).txt" 2>/dev/null || true
           cd "$(mktemp -d)"
-          git init -q
+          git init -q -b ci-logs
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          mkdir -p logs/windows-shards
-          cp /tmp/diag/* logs/windows-shards/ 2>/dev/null || true
+          mkdir -p logs
+          cp ${{ github.workspace }}/shard-output.txt logs/ 2>/dev/null || true
+          cp ${{ github.workspace }}/freeze-dump.txt logs/ 2>/dev/null || true
           git add -A
-          git commit -qm --allow-empty "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
-          git push -q origin ci-logs || (git pull -q --rebase origin ci-logs && git push -q origin ci-logs)
+          git commit -qm --allow-empty "diagnostics: windows-${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q -f origin ci-logs:refs/heads/ci-logs-win-${{ matrix.file }}
 
       - name: Upload test output
         if: always()
@@ -169,21 +165,18 @@ jobs:
           name: pytest-${{ matrix.os }}
           path: pytest-output.txt
 
-      - name: Persist test output to ci-logs branch
+      - name: Persist diagnostics to ci-logs branch
         if: failure() || cancelled()
         shell: bash
         run: |
-          mkdir -p /tmp/diag
-          cp pytest-output.txt /tmp/diag/main-${{ matrix.os }}.txt 2>/dev/null || echo "no output" > /tmp/diag/main-${{ matrix.os }}.txt
-          cp freeze-dump.txt /tmp/diag/freeze-main-${{ matrix.os }}.txt 2>/dev/null || true
           cd "$(mktemp -d)"
-          git init -q
+          git init -q -b ci-logs
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
           mkdir -p logs
-          cp /tmp/diag/* logs/
+          cp ${{ github.workspace }}/pytest-output.txt logs/ 2>/dev/null || true
+          cp ${{ github.workspace }}/freeze-dump.txt logs/ 2>/dev/null || true
           git add -A
-          git commit -qm --allow-empty "test diagnostics: main-${{ matrix.os }} @ ${{ github.sha }}"
-          git push -q origin ci-logs || (git pull -q --rebase origin ci-logs && git push -q origin ci-logs)
+          git commit -qm --allow-empty "diagnostics: main-${{ matrix.os }} @ ${{ github.sha }}"
+          git push -q -f origin ci-logs:refs/heads/ci-logs-main-${{ matrix.os }}

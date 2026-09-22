@@ -3,8 +3,6 @@ emulator (raydriver.emulator)."""
 
 import asyncio
 import faulthandler
-import os
-import threading
 import time
 
 import pytest
@@ -14,22 +12,15 @@ from raydriver.grbl import GrblSession, MockTransport
 
 
 def _arm_freeze_watchdog():
-    """Dump all thread stacks every 150s while the process is stuck.
+    """Dump all thread stacks and exit if the process runs too long.
 
-    The dump runs on a C-level thread and works even when the GIL is
-    stuck; healthy runs finish long before the first dump.  The dump
-    goes to a file so CI persists it, and a hard exit timer kills a
-    frozen process before its CI job timeout hides the evidence.
+    The dump and the exit run on a C-level thread and work even when
+    the GIL is stuck (unlike Python timers, which need the GIL to
+    wake).  Healthy runs finish in minutes; a frozen process dies at
+    the deadline, leaving `freeze-dump.txt` for CI to persist.
     """
     dump_file = open("freeze-dump.txt", "w")
-    faulthandler.dump_traceback_later(150, repeat=True, file=dump_file)
-
-    def hard_exit():
-        time.sleep(480)
-        print("FREEZE WATCHDOG: exiting after 480s of process lifetime")
-        os._exit(3)
-
-    threading.Thread(target=hard_exit, daemon=True).start()
+    faulthandler.dump_traceback_later(600, exit=True, file=dump_file)
 
 
 _arm_freeze_watchdog()
