@@ -31,26 +31,24 @@ jobs:
           components: rustfmt, clippy
 
       - name: Lint Rust
+        shell: bash
         run: |
           set -o pipefail
           cargo fmt --check 2>&1 | tee fmt-output.txt
           cargo clippy -- -D warnings 2>&1 | tee clippy-output.txt
 
       - name: Persist diagnostics to ci-logs branch
-        if: failure() || cancelled()
+        if: failure()
         shell: bash
         run: |
-          cd "$(mktemp -d)"
-          git init -q -b ci-logs
+          mkdir -p logs
+          cp fmt-output.txt clippy-output.txt logs/ 2>/dev/null || true
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          mkdir -p logs
-          cp ${{ github.workspace }}/fmt-output.txt logs/ 2>/dev/null || true
-          cp ${{ github.workspace }}/clippy-output.txt logs/ 2>/dev/null || true
-          git add -A
-          git commit -qm --allow-empty "diagnostics: lint @ ${{ github.sha }}"
-          git push -q -f origin ci-logs:refs/heads/ci-logs-lint
+          git add logs
+          git diff --cached --quiet && echo "nothing to persist" && exit 0
+          git commit -qm "lint diagnostics @ ${{ github.sha }}"
+          git push -q -f origin "HEAD:refs/heads/ci-logs-lint"
 
   test:
     name: Tests (${{ matrix.os }})
@@ -58,9 +56,9 @@ jobs:
     timeout-minutes: 40
     strategy:
       fail-fast: false
+      # Windows is covered by the sharded windows-shard job (its
+      # release build is slow and one hang must not hide the rest).
       matrix:
-        # Windows is covered by the sharded windows-shard job (its
-        # release build is slow and one hang must not hide the rest).
         os: [ubuntu-latest, macos-15-intel, macos-15]
     steps:
       - uses: actions/checkout@v7
@@ -76,6 +74,7 @@ jobs:
         run: pip install dist/raydriver-*.whl
 
       - name: Install test dependencies
+        shell: bash
         run: pip install pytest pytest-asyncio pytest-timeout
 
       - name: Run tests
@@ -83,6 +82,19 @@ jobs:
         run: |
           pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee pytest-output.txt
           exit ${PIPESTATUS[0]}
+
+      - name: Persist diagnostics to ci-logs branch
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          mkdir -p logs
+          cp pytest-output.txt freeze-dump.txt logs/ 2>/dev/null || true
+          git config user.name ci-bot
+          git config user.email ci-bot@users.noreply.github.com
+          git add logs
+          git diff --cached --quiet && echo "nothing to persist" && exit 0
+          git commit -qm "test diagnostics: ${{ matrix.os }} @ ${{ github.sha }}"
+          git push -q -f origin "HEAD:refs/heads/ci-logs-main-${{ matrix.os }}"
 
   windows-shard:
     name: Windows shard (${{ matrix.file }})
@@ -104,6 +116,7 @@ jobs:
         uses: dtolnay/rust-toolchain@1.98.1
 
       - name: Install maturin
+        shell: bash
         run: pip install maturin
 
       - name: Build wheel
@@ -112,21 +125,18 @@ jobs:
           set -o pipefail
           maturin build --release --out dist 2>&1 | tee build-output.txt
 
-      - name: Persist diagnostics to ci-logs branch
-        if: failure() || cancelled()
+      - name: Persist build diagnostics to ci-logs branch
+        if: failure()
         shell: bash
         run: |
-          cd "$(mktemp -d)"
-          git init -q -b ci-logs
+          mkdir -p logs
+          cp build-output.txt logs/ 2>/dev/null || true
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          mkdir -p logs
-          cp ${{ github.workspace }}/build-output.txt logs/ 2>/dev/null || true
-          cp nope logs/ 2>/dev/null || true
-          git add -A
-          git commit -qm --allow-empty "diagnostics: windows-build-${{ matrix.file }} @ ${{ github.sha }}"
-          git push -q -f origin ci-logs:refs/heads/ci-logs-win-build-${{ matrix.file }}
+          git add logs
+          git diff --cached --quiet && echo "nothing to persist" && exit 0
+          git commit -qm "windows build diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q -f origin "HEAD:refs/heads/ci-logs-win-build-${{ matrix.file }}"
 
       - name: Install wheel
         shell: bash
@@ -142,41 +152,15 @@ jobs:
           python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee shard-output.txt
           exit ${PIPESTATUS[0]}
 
-      - name: Persist diagnostics to ci-logs branch
+      - name: Persist shard diagnostics to ci-logs branch
         if: failure() || cancelled()
         shell: bash
         run: |
-          cd "$(mktemp -d)"
-          git init -q -b ci-logs
+          mkdir -p logs
+          cp shard-output.txt freeze-dump.txt logs/ 2>/dev/null || true
           git config user.name ci-bot
           git config user.email ci-bot@users.noreply.github.com
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          mkdir -p logs
-          cp ${{ github.workspace }}/shard-output.txt logs/ 2>/dev/null || true
-          cp ${{ github.workspace }}/freeze-dump.txt logs/ 2>/dev/null || true
-          git add -A
-          git commit -qm --allow-empty "diagnostics: windows-${{ matrix.file }} @ ${{ github.sha }}"
-          git push -q -f origin ci-logs:refs/heads/ci-logs-win-${{ matrix.file }}
-
-      - name: Upload test output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pytest-${{ matrix.os }}
-          path: pytest-output.txt
-
-      - name: Persist diagnostics to ci-logs branch
-        if: failure() || cancelled()
-        shell: bash
-        run: |
-          cd "$(mktemp -d)"
-          git init -q -b ci-logs
-          git config user.name ci-bot
-          git config user.email ci-bot@users.noreply.github.com
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
-          mkdir -p logs
-          cp ${{ github.workspace }}/pytest-output.txt logs/ 2>/dev/null || true
-          cp ${{ github.workspace }}/freeze-dump.txt logs/ 2>/dev/null || true
-          git add -A
-          git commit -qm --allow-empty "diagnostics: main-${{ matrix.os }} @ ${{ github.sha }}"
-          git push -q -f origin ci-logs:refs/heads/ci-logs-main-${{ matrix.os }}
+          git add logs
+          git diff --cached --quiet && echo "nothing to persist" && exit 0
+          git commit -qm "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q -f origin "HEAD:refs/heads/ci-logs-win-shard"
