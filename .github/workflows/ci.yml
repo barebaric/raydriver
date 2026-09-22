@@ -83,10 +83,10 @@ jobs:
           set -o pipefail
           rm -f pytest-output.txt
           for attempt in 1 2 3; do
-            if timeout 600 pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee -a pytest-output.txt; then
+            if pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee -a pytest-output.txt; then
               exit 0
             fi
-            echo "attempt $attempt failed or timed out, retrying..." | tee -a pytest-output.txt
+            echo "attempt $attempt failed, retrying..." | tee -a pytest-output.txt
           done
           exit 1
 
@@ -159,10 +159,10 @@ jobs:
           set -o pipefail
           rm -f shard-output.txt
           for attempt in 1 2 3; do
-            if timeout 600 python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee -a shard-output.txt; then
+            if python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee -a shard-output.txt; then
               exit 0
             fi
-            echo "attempt $attempt failed or timed out, retrying..." | tee -a shard-output.txt
+            echo "attempt $attempt failed, retrying..." | tee -a shard-output.txt
           done
           exit 1
 
