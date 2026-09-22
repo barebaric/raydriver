@@ -132,9 +132,11 @@ jobs:
           git push -q origin ci-logs
 
       - name: Install wheel
+        shell: bash
         run: pip install dist/raydriver-*.whl
 
       - name: Install test dependencies
+        shell: bash
         run: pip install pytest pytest-asyncio pytest-timeout
 
       - name: Run shard
