@@ -46,12 +46,11 @@ jobs:
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          rm -rf ./* 2>/dev/null || true
           mkdir -p logs
           cp "${{ github.workspace }}/fmt-output.txt" logs/ 2>/dev/null || true
           cp "${{ github.workspace }}/clippy-output.txt" logs/ 2>/dev/null || true
           git add -A
-          git commit -qm "lint diagnostics @ ${{ github.sha }}"
+          git commit -qm --allow-empty "lint diagnostics @ ${{ github.sha }}"
           git push -q origin ci-logs
 
   test:
@@ -124,7 +123,6 @@ jobs:
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          rm -rf ./* 2>/dev/null || true
           mkdir -p logs/windows-shards
           cp "${{ github.workspace }}/build-output.txt" logs/windows-shards/build-output.txt 2>/dev/null || true
           git add -A
@@ -157,11 +155,10 @@ jobs:
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          rm -rf ./* 2>/dev/null || true
           mkdir -p logs/windows-shards
           cp /tmp/diag/* logs/windows-shards/
           git add -A
-          git commit -qm "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
+          git commit -qm --allow-empty "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
           git push -q origin ci-logs
 
       - name: Upload test output
@@ -183,9 +180,8 @@ jobs:
           git config user.email ci-bot@users.noreply.github.com
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
-          rm -rf ./* 2>/dev/null || true
           mkdir -p logs
           cp /tmp/diag/* logs/
           git add -A
-          git commit -qm "test diagnostics: ${{ matrix.os }} @ ${{ github.sha }}"
+          git commit -qm --allow-empty "test diagnostics: main-${{ matrix.os }} @ ${{ github.sha }}"
           git push -q origin ci-logs
