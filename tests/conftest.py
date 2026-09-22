@@ -2,12 +2,37 @@
 emulator (raydriver.emulator)."""
 
 import asyncio
+import faulthandler
+import sys
+import threading
 import time
 
 import pytest
 
 from raydriver.emulator import GrblEmulator
 from raydriver.grbl import GrblSession, MockTransport
+
+
+def _arm_freeze_watchdog():
+    """Dump all thread stacks and exit if the process ever freezes.
+
+    The dump runs on a C-level thread and works even when the GIL is
+    stuck; the watchdog keeps re-arming it so healthy (slow) runs are
+    never killed.
+    """
+
+    def watchdog():
+        while True:
+            faulthandler.dump_traceback_later(
+                150, exit=True, file=sys.__stderr__
+            )
+            time.sleep(60)
+
+    thread = threading.Thread(target=watchdog, daemon=True)
+    thread.start()
+
+
+_arm_freeze_watchdog()
 
 FAST_TIMINGS = {
     "handshake_timeout": 2.0,
