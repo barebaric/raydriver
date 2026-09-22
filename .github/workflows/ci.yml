@@ -102,11 +102,34 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Install maturin
+        run: pip install maturin
+
       - name: Build wheel
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --out dist
+        shell: bash
+        run: |
+          set -o pipefail
+          maturin build --release --out dist 2>&1 | tee build-output.txt
+
+      - name: Persist build output to ci-logs branch
+        if: failure()
+        shell: bash
+        run: |
+          cd "$(mktemp -d)"
+          git init -q
+          git config user.name ci-bot
+          git config user.email ci-bot@users.noreply.github.com
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
+          rm -rf ./* 2>/dev/null || true
+          mkdir -p logs/windows-shards
+          cp "${{ github.workspace }}/build-output.txt" logs/windows-shards/build-output.txt 2>/dev/null || true
+          git add -A
+          git commit -qm --allow-empty "windows build diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q origin ci-logs
 
       - name: Install wheel
         run: pip install dist/raydriver-*.whl
