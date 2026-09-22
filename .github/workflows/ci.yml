@@ -84,6 +84,59 @@ jobs:
           pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee pytest-output.txt
           exit ${PIPESTATUS[0]}
 
+  windows-shard:
+    name: Windows shard (${{ matrix.file }})
+    runs-on: windows-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        file:
+          - tests/test_cli.py
+          - tests/test_parser.py
+          - tests/test_session.py
+          - tests/test_streaming.py
+          - tests/test_stress.py
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist
+
+      - name: Install wheel
+        run: pip install dist/raydriver-*.whl
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-asyncio pytest-timeout
+
+      - name: Run shard
+        shell: bash
+        run: |
+          python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee shard-output.txt
+          exit ${PIPESTATUS[0]}
+
+      - name: Persist shard output to ci-logs branch
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          mkdir -p /tmp/diag
+          cp shard-output.txt "/tmp/diag/$(basename ${{ matrix.file }}).txt" 2>/dev/null || echo "no output" > "/tmp/diag/$(basename ${{ matrix.file }}).txt"
+          cd "$(mktemp -d)"
+          git init -q
+          git config user.name ci-bot
+          git config user.email ci-bot@users.noreply.github.com
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
+          rm -rf ./* 2>/dev/null || true
+          mkdir -p logs/windows-shards
+          cp /tmp/diag/* logs/windows-shards/
+          git add -A
+          git commit -qm "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
+          git push -q origin ci-logs
+
       - name: Upload test output
         if: always()
         uses: actions/upload-artifact@v4
