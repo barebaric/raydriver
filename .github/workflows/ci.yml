@@ -32,8 +32,27 @@ jobs:
 
       - name: Lint Rust
         run: |
-          cargo fmt --check
-          cargo clippy -- -D warnings
+          set -o pipefail
+          cargo fmt --check 2>&1 | tee fmt-output.txt
+          cargo clippy -- -D warnings 2>&1 | tee clippy-output.txt
+
+      - name: Persist lint output to ci-logs branch
+        if: failure()
+        shell: bash
+        run: |
+          cd "$(mktemp -d)"
+          git init -q
+          git config user.name ci-bot
+          git config user.email ci-bot@users.noreply.github.com
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
+          rm -rf ./* 2>/dev/null || true
+          mkdir -p logs
+          cp "${{ github.workspace }}/fmt-output.txt" logs/ 2>/dev/null || true
+          cp "${{ github.workspace }}/clippy-output.txt" logs/ 2>/dev/null || true
+          git add -A
+          git commit -qm "lint diagnostics @ ${{ github.sha }}"
+          git push -q origin ci-logs
 
   test:
     name: Tests (${{ matrix.os }})
@@ -71,3 +90,22 @@ jobs:
         with:
           name: pytest-${{ matrix.os }}
           path: pytest-output.txt
+
+      - name: Persist test output to ci-logs branch
+        if: failure() || cancelled()
+        shell: bash
+        run: |
+          mkdir -p /tmp/diag
+          cp pytest-output.txt /tmp/diag/${{ matrix.os }}.txt 2>/dev/null || echo "no output" > /tmp/diag/${{ matrix.os }}.txt
+          cd "$(mktemp -d)"
+          git init -q
+          git config user.name ci-bot
+          git config user.email ci-bot@users.noreply.github.com
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
+          rm -rf ./* 2>/dev/null || true
+          mkdir -p logs
+          cp /tmp/diag/* logs/
+          git add -A
+          git commit -qm "test diagnostics: ${{ matrix.os }} @ ${{ github.sha }}"
+          git push -q origin ci-logs
