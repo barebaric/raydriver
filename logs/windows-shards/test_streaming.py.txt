@@ -1,0 +1,19 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+cachedir: .pytest_cache
+rootdir: D:\a\raydriver\raydriver
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 15 items
+
+tests/test_streaming.py::TestRunBasics::test_simple_job_completes_and_moves PASSED [  6%]
+tests/test_streaming.py::TestRunBasics::test_progress_callbacks_fire_per_op PASSED [ 13%]
+tests/test_streaming.py::TestRunBasics::test_comments_and_empty_lines_skipped PASSED [ 20%]
+tests/test_streaming.py::TestRunBasics::test_job_status_reflected_as_run PASSED [ 26%]
+tests/test_streaming.py::TestRunBasics::test_long_job_never_overflows_rx_buffer PASSED [ 33%]
+tests/test_streaming.py::TestErrorsDuringJob::test_error_halts_stream PASSED [ 40%]
+tests/test_streaming.py::TestErrorsDuringJob::test_soft_limit_alarm_halts_stream 
