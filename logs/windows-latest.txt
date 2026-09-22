@@ -1,0 +1,16 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+cachedir: .pytest_cache
+rootdir: D:\a\raydriver\raydriver
+configfile: pyproject.toml
+testpaths: tests
+plugins: asyncio-1.4.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 60.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 131 items
+
+tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress PASSED [  0%]
+tests/test_cli.py::TestRunCommand::test_progress_percentages_render PASSED [  1%]
+tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code 
