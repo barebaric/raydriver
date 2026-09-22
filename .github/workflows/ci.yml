@@ -63,8 +63,7 @@ jobs:
       matrix:
         # Windows is covered by the sharded windows-shard job (its
         # release build is slow and one hang must not hide the rest).
-        exclude:
-          - os: windows-latest
+        os: [ubuntu-latest, macos-15-intel, macos-15]
     steps:
       - uses: actions/checkout@v7
 
