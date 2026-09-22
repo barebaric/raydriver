@@ -7,7 +7,6 @@
 //! on the loop thread).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use pyo3::prelude::*;
@@ -16,7 +15,6 @@ use crate::grbl::session::SessionEvents;
 use crate::grbl::types::{DeviceState, TransportStatus};
 
 pub(crate) struct PyEvents {
-    event_count: AtomicU64,
     event_callback: Option<Py<PyAny>>,
     loop_: Mutex<Option<Py<PyAny>>>,
     progress_callback: Mutex<Option<Py<PyAny>>>,
@@ -25,7 +23,6 @@ pub(crate) struct PyEvents {
 impl PyEvents {
     pub(crate) fn new(event_callback: Option<Py<PyAny>>) -> Self {
         Self {
-            event_count: AtomicU64::new(0),
             event_callback,
             loop_: Mutex::new(None),
             progress_callback: Mutex::new(None),
@@ -51,10 +48,6 @@ impl PyEvents {
     where
         F: FnOnce(Python<'_>) -> PyResult<Py<PyAny>>,
     {
-        let n = self.event_count.fetch_add(1, Ordering::SeqCst);
-        if n % 2000 == 0 {
-            eprintln!("[dbg] emit #{n} {name} inst={:p}", self as *const _);
-        }
         if self.event_callback.is_none() {
             return;
         }
