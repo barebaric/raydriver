@@ -170,15 +170,13 @@ async def cmd_run(args) -> int:
 
         op_map = {i: i for i in range(len(lines))}
         await session.run(text, op_map, [], view.progress)
-        # Progress can report an errored op as complete (the driver
-        # fires every op between two acks), so a device error also
-        # marks the run as failed.
-        success = view.acked >= len(lines) and not view.had_error
+        # Read the state snapshot synchronously: the events that
+        # carry the error may still be in flight when run() returns.
+        error = session.state.error
+        success = view.acked >= len(lines) and error is None
         message = "job did not complete"
-        if view.had_error and view.state is not None:
-            error = view.state.error
-            if error:
-                message = f"{error.title}: {error.description}"
+        if error is not None:
+            message = f"{error.title}: {error.description}"
         view.finish(success, message)
         return 0 if success else 1
     except asyncio.CancelledError:

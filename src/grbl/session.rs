@@ -711,11 +711,15 @@ impl SessionCore {
         self.note_device_response();
         let error_code = text.split(':').nth(1).unwrap_or("").trim();
         let error = parser::get_error(error_code);
-        {
+        let state_snapshot = {
             let mut state = self.state.lock().unwrap();
             state.error = Some(error);
-            self.events.state_changed(&state);
-        }
+            state.clone()
+        };
+        // Emit outside the lock: event delivery attaches to the
+        // Python GIL and must never run while holding a lock that
+        // Python-side code could take.
+        self.events.state_changed(&state_snapshot);
 
         let request = self
             .interactive_request
@@ -774,11 +778,13 @@ impl SessionCore {
         if let Some(code) = line.strip_prefix("ALARM:") {
             let code = code.trim();
             let error = super::errors::alarm_code_to_device_error(code);
-            {
+            let state_snapshot = {
                 let mut state = self.state.lock().unwrap();
                 state.error = Some(error);
-                self.events.state_changed(&state);
-            }
+                state.clone()
+            };
+            // Emit outside the lock (see handle_error).
+            self.events.state_changed(&state_snapshot);
             self.events
                 .command_status(TransportStatus::Error, Some(line));
             if self.job_running.load(Ordering::SeqCst) {
@@ -849,16 +855,22 @@ impl SessionCore {
             state.status = DeviceStatus::Hold;
         }
 
-        {
+        let changed = {
             let mut current = self.state.lock().unwrap();
             if state != *current {
                 let old_status = current.status;
                 *current = state.clone();
-                self.events.state_changed(&state);
                 if state.status != old_status {
                     log::debug!("Device state changed: {}", state.status);
                 }
+                true
+            } else {
+                false
             }
+        };
+        // Emit outside the lock (see handle_error).
+        if changed {
+            self.events.state_changed(&state);
         }
     }
 
@@ -1087,12 +1099,20 @@ impl SessionCore {
         // is disabled during jobs by default, so reflect the job
         // start immediately so the UI does not keep showing Idle.
         // An ALARM (which aborts the job right away) is not masked.
-        let mut state = self.state.lock().unwrap();
-        if state.status != DeviceStatus::Run
-            && state.status != DeviceStatus::Alarm
-        {
-            state.status = DeviceStatus::Run;
-            self.events.state_changed(&state);
+        let state_snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.status != DeviceStatus::Run
+                && state.status != DeviceStatus::Alarm
+            {
+                state.status = DeviceStatus::Run;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        // Emit outside the lock (see handle_error).
+        if let Some(state_snapshot) = state_snapshot {
+            self.events.state_changed(&state_snapshot);
         }
     }
 
@@ -1772,10 +1792,18 @@ impl SessionCore {
         } else {
             DeviceStatus::Idle
         };
-        let mut state = self.state.lock().unwrap();
-        if state.status != desired {
-            state.status = desired;
-            self.events.state_changed(&state);
+        let state_snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.status != desired {
+                state.status = desired;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        // Emit outside the lock (see handle_error).
+        if let Some(state_snapshot) = state_snapshot {
+            self.events.state_changed(&state_snapshot);
         }
         Ok(())
     }
@@ -1814,9 +1842,13 @@ impl SessionCore {
         self.execute_command("G4 P0.01".to_string()).await?;
         self.execute_command(temp_wcs.to_string()).await?;
         self.execute_command(active_wcs.to_string()).await?;
-        let mut state = self.state.lock().unwrap();
-        state.error = None;
-        self.events.state_changed(&state);
+        let state_snapshot = {
+            let mut state = self.state.lock().unwrap();
+            state.error = None;
+            state.clone()
+        };
+        // Emit outside the lock (see handle_error).
+        self.events.state_changed(&state_snapshot);
         Ok(())
     }
 

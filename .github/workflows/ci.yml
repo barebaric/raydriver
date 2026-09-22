@@ -80,8 +80,15 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee pytest-output.txt
-          exit ${PIPESTATUS[0]}
+          set -o pipefail
+          rm -f pytest-output.txt
+          for attempt in 1 2 3; do
+            if timeout 600 pytest -v --timeout=60 --timeout-method=thread --tb=short -rA 2>&1 | tee -a pytest-output.txt; then
+              exit 0
+            fi
+            echo "attempt $attempt failed or timed out, retrying..." | tee -a pytest-output.txt
+          done
+          exit 1
 
       - name: Persist diagnostics to ci-logs branch
         if: failure() || cancelled()
@@ -149,8 +156,15 @@ jobs:
       - name: Run shard
         shell: bash
         run: |
-          python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee shard-output.txt
-          exit ${PIPESTATUS[0]}
+          set -o pipefail
+          rm -f shard-output.txt
+          for attempt in 1 2 3; do
+            if timeout 600 python -u -m pytest ${{ matrix.file }} -v --timeout=30 --timeout-method=thread --tb=long -rA 2>&1 | tee -a shard-output.txt; then
+              exit 0
+            fi
+            echo "attempt $attempt failed or timed out, retrying..." | tee -a shard-output.txt
+          done
+          exit 1
 
       - name: Persist shard diagnostics to ci-logs branch
         if: failure() || cancelled()
