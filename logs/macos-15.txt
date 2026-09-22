@@ -130,4 +130,10 @@ tests/test_streaming.py::TestRunBasics::test_comments_and_empty_lines_skipped PA
 tests/test_streaming.py::TestRunBasics::test_job_status_reflected_as_run PASSED [ 89%]
 tests/test_streaming.py::TestRunBasics::test_long_job_never_overflows_rx_buffer PASSED [ 90%]
 tests/test_streaming.py::TestErrorsDuringJob::test_error_halts_stream PASSED [ 90%]
-tests/test_streaming.py::TestErrorsDuringJob::test_soft_limit_alarm_halts_stream 
+tests/test_streaming.py::TestErrorsDuringJob::test_soft_limit_alarm_halts_stream PASSED [ 91%]
+tests/test_streaming.py::TestStallBehavior::test_stall_retries_while_device_alive PASSED [ 92%]
+tests/test_streaming.py::TestStallBehavior::test_stall_aborts_when_device_dies PASSED [ 93%]
+tests/test_streaming.py::TestCancel::test_cancel_mid_job_sends_reset_and_safety_shutdown PASSED [ 93%]
+tests/test_streaming.py::TestCancel::test_cancel_without_job PASSED      [ 94%]
+tests/test_streaming.py::TestCancel::test_cancel_emergency_adds_estop PASSED [ 95%]
+tests/test_streaming.py::TestCancel::test_cancelled_sender_does_not_resurrect 
