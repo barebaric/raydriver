@@ -148,7 +148,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/diag
-          cp shard-output.txt "/tmp/diag/$(basename ${{ matrix.file }}).txt" 2>/dev/null || echo "no output" > "/tmp/diag/$(basename ${{ matrix.file }}).txt"
+          cp shard-output.txt "/tmp/diag/shard-$(basename ${{ matrix.file }}).txt" 2>/dev/null || echo "no output" > "/tmp/diag/shard-$(basename ${{ matrix.file }}).txt"
+          cp freeze-dump.txt "/tmp/diag/freeze-$(basename ${{ matrix.file }}).txt" 2>/dev/null || true
           cd "$(mktemp -d)"
           git init -q
           git config user.name ci-bot
@@ -156,10 +157,10 @@ jobs:
           git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git fetch origin ci-logs 2>/dev/null && git checkout -q -b ci-logs origin/ci-logs || git checkout -q --orphan ci-logs
           mkdir -p logs/windows-shards
-          cp /tmp/diag/* logs/windows-shards/
+          cp /tmp/diag/* logs/windows-shards/ 2>/dev/null || true
           git add -A
           git commit -qm --allow-empty "windows shard diagnostics: ${{ matrix.file }} @ ${{ github.sha }}"
-          git push -q origin ci-logs
+          git push -q origin ci-logs || (git pull -q --rebase origin ci-logs && git push -q origin ci-logs)
 
       - name: Upload test output
         if: always()
@@ -173,7 +174,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p /tmp/diag
-          cp pytest-output.txt /tmp/diag/${{ matrix.os }}.txt 2>/dev/null || echo "no output" > /tmp/diag/${{ matrix.os }}.txt
+          cp pytest-output.txt /tmp/diag/main-${{ matrix.os }}.txt 2>/dev/null || echo "no output" > /tmp/diag/main-${{ matrix.os }}.txt
+          cp freeze-dump.txt /tmp/diag/freeze-main-${{ matrix.os }}.txt 2>/dev/null || true
           cd "$(mktemp -d)"
           git init -q
           git config user.name ci-bot
@@ -184,4 +186,4 @@ jobs:
           cp /tmp/diag/* logs/
           git add -A
           git commit -qm --allow-empty "test diagnostics: main-${{ matrix.os }} @ ${{ github.sha }}"
-          git push -q origin ci-logs
+          git push -q origin ci-logs || (git pull -q --rebase origin ci-logs && git push -q origin ci-logs)
