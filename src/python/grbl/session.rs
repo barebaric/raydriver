@@ -15,10 +15,10 @@ use crate::grbl::session::{
 };
 use crate::grbl::types::UnitSystem;
 
-use super::events::PyEvents;
-use super::mock::MockTransport;
-use super::pyfuture::{none_obj, spawn_future};
-use super::types::DeviceState;
+use crate::python::events::PyEvents;
+use crate::python::grbl::mock::MockTransport;
+use crate::python::grbl::types::DeviceState;
+use crate::python::pyfuture::{none_obj, spawn_future};
 
 impl From<SessionError> for PyErr {
     fn from(err: SessionError) -> Self {

@@ -207,7 +207,10 @@ impl SessionEvents for PyEvents {
     fn state_changed(&self, state: &DeviceState) {
         let state = state.clone();
         self.schedule("state_changed", move |py| {
-            let obj = Py::new(py, super::types::DeviceState::new(state))?;
+            let obj = Py::new(
+                py,
+                crate::python::grbl::types::DeviceState::new(state),
+            )?;
             Ok(obj.into_any())
         });
     }
