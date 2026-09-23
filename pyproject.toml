@@ -20,6 +20,7 @@ dependencies = []
 test = [
     "pytest",
     "pytest-asyncio",
+    "pytest-timeout",
 ]
 
 [project.scripts]

@@ -1,69 +1,84 @@
-name: Release
+name: Build and Publish
 
 on:
-  push:
-    tags:
-      - "v*"
-
-permissions:
-  contents: read
+  release:
+    types: [published]
+  workflow_dispatch:
 
 jobs:
-  wheels:
-    name: Build wheels
+  build-wheels:
+    name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { os: ubuntu-latest, target: x86_64 }
-          - { os: ubuntu-24.04-arm, target: aarch64 }
-          - { os: windows-latest, target: x64 }
-          - { os: macos-latest, target: aarch64 }
-          - { os: macos-13, target: x86_64 }
+        os: [ubuntu-latest, windows-latest, macos-15-intel, macos-15]
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build wheels
-        uses: PyO3/maturin-action@v1
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+
+      - uses: PyO3/maturin-action@v1
         with:
           command: build
           args: --release --out dist
-          target: ${{ matrix.target }}
 
-      - name: Upload wheels
+      - name: Upload wheels as artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-${{ matrix.target }}
-          path: dist
+          name: wheels-${{ matrix.os }}
+          path: dist/*.whl
 
-  sdist:
+  build-sdist:
     name: Build sdist
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+
+      - uses: PyO3/maturin-action@v1
         with:
           command: sdist
           args: --out dist
-      - name: Upload sdist
+
+      - name: Upload sdist as artifact
         uses: actions/upload-artifact@v4
         with:
           name: sdist
-          path: dist
+          path: dist/*.tar.gz
 
   publish:
     name: Publish to PyPI
-    needs: [wheels, sdist]
+    needs: [build-wheels, build-sdist]
     runs-on: ubuntu-latest
-    environment: pypi
     permissions:
       id-token: write
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Publish
+
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+
+      - name: Upload artifacts to GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/*

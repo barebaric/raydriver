@@ -26,6 +26,19 @@ While a job runs, `raydriver run` shows acknowledged lines, a
 progress bar, the device state, machine position, feed rate and ETA;
 `Ctrl-C` cancels the job and runs the safety shutdown.
 
+## Releases
+
+Releasing mirrors the Raygeo flow:
+
+1. Configure a PyPI *trusted publisher* for this repository once
+   (owner `barebaric`, repo `raydriver`, workflow `release.yml`,
+   environment `pypi`).
+2. `gh release create v0.1.0 --title "v0.1.0" --generate-notes`
+
+The `Build and Publish` workflow then stamps the version from the
+tag, builds wheels (Linux/Windows/macOS) and an sdist, publishes to
+PyPI via OIDC, and attaches the artifacts to the GitHub release.
+
 ## Development
 
 ```bash
