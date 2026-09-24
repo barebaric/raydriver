@@ -106,7 +106,8 @@ class _Block:
         self.is_jog = is_jog
         self.is_dwell = is_dwell
         self.is_home = is_home
-        self.probe_touch = probe_touch
+        self.probe_touch: list[float] | None = probe_touch
+        self.is_probe = False
 
 
 class GrblEmulator:
@@ -139,8 +140,8 @@ class GrblEmulator:
         self.settings = dict(DEFAULT_SETTINGS)
         self.wcs = {f"G5{n}": [0.0, 0.0, 0.0] for n in range(4, 10)}
         self.active_wcs = "G54"
-        self.mpos = [0.0, 0.0, 0.0]
-        self._planned_pos = [0.0, 0.0, 0.0]
+        self.mpos: list[float] = [0.0, 0.0, 0.0]
+        self._planned_pos: list[float] = [0.0, 0.0, 0.0]
         self.feed = 0.0
         self.spindle = 0
         self.probe_touch = None
@@ -360,7 +361,9 @@ class GrblEmulator:
 
     def _tick(self):
         now = self._now()
-        elapsed = now - self._last_tick
+        elapsed = now - (
+            self._last_tick if self._last_tick is not None else now
+        )
         self._last_tick = now
         if elapsed < 0:
             elapsed = 0.0
@@ -414,7 +417,7 @@ class GrblEmulator:
             self.mpos = list(block.probe_touch)
             self._report_probe(success=True)
             self._ack(b"ok\r\n")
-        elif getattr(block, "is_probe", False):
+        elif block.is_probe:
             self._report_probe(success=False)
             self._ack(b"ok\r\n")
             self._set_alarm(
@@ -619,7 +622,7 @@ class GrblEmulator:
         except _GcodeError as exc:
             self._ack(f"error:{exc.code}\r\n".encode())
             return
-        if not has_axis:
+        if target is None or not has_axis:
             self._ack(b"error:16\r\n")
             return
         self._planner.append(
@@ -786,7 +789,7 @@ class GrblEmulator:
                 raise _GcodeError(33)
             self._exec_probe(target, feed)
             return False
-        if not has_axis:
+        if target is None or not has_axis:
             # Modal-only line like "G1 F600": just updates state.
             if (
                 motion_value == 1

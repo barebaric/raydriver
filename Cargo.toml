@@ -10,6 +10,8 @@ python = ["dep:pyo3", "dep:pyo3-stub-gen"]
 
 [dependencies]
 async-trait = "0.1"
+env_filter = "0.1"
+env_logger = "0.11"
 log = "0.4"
 pyo3 = { version = "0.28", features = ["abi3", "abi3-py311", "py-clone"], optional = true }
 pyo3-stub-gen = { version = "0.23.0", optional = true }

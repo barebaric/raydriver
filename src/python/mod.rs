@@ -5,10 +5,135 @@ pub(crate) mod grbl;
 pub(crate) mod pyfuture;
 pub(crate) mod runtime;
 
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::gen_stub_pyfunction;
+
+/// UTC timestamp in RFC3339-ish form, without pulling in a date
+/// crate (Howard Hinnant's civil-from-days algorithm).
+fn utc_timestamp() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let millis = now.subsec_millis();
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let (y, m, d) = {
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        (y + i64::from(m <= 2), m as u32, d as u32)
+    };
+    format!(
+        "{y:04}-{m:02}-{d:02}T{h:02}:{mi:02}:{s:02}.{millis:03}Z",
+        h = rem / 3600,
+        mi = rem % 3600 / 60,
+        s = rem % 60,
+    )
+}
+
+struct LoggerState {
+    filter: env_filter::Filter,
+    file: Option<std::fs::File>,
+}
+
+static LOGGER: Mutex<Option<LoggerState>> = Mutex::new(None);
+
+struct BridgeLogger;
+
+impl log::Log for BridgeLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        LOGGER
+            .lock()
+            .map(|guard| {
+                guard.as_ref().is_some_and(|s| s.filter.enabled(metadata))
+            })
+            .unwrap_or(false)
+    }
+
+    fn log(&self, record: &log::Record) {
+        let line = format!(
+            "[{} {:<5} {}] {}\n",
+            utc_timestamp(),
+            record.level(),
+            record.target(),
+            record.args()
+        );
+        let guard = LOGGER.lock();
+        let mut guard = match guard {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        if !state.filter.matches(record) {
+            return;
+        }
+        match state.file.as_mut() {
+            Some(file) => {
+                let _ = file.write_all(line.as_bytes());
+            }
+            None => {
+                let _ = std::io::stderr().write_all(line.as_bytes());
+            }
+        }
+    }
+
+    fn flush(&self) {
+        let guard = LOGGER.lock();
+        let mut guard = match guard {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(state) = guard.as_mut() {
+            if let Some(file) = state.file.as_mut() {
+                let _ = file.flush();
+            }
+        }
+        let _ = std::io::stderr().flush();
+    }
+}
+
+/// Initialize the Rust-side logger (`log` crate) so session
+/// diagnostics reach stderr or, when *path* is given, a dedicated
+/// log file (opened in append mode).  The filter defaults to
+/// ``warn`` and can be overridden with an ``env_logger`` filter
+/// string argument or via ``RUST_LOG`` (which always wins).  Calling
+/// again re-targets output and replaces the filter.
+#[gen_stub_pyfunction]
+#[pyfunction]
+#[pyo3(signature = (filter = None, path = None))]
+fn init_logging(filter: Option<&str>, path: Option<&str>) {
+    let spec = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| filter.unwrap_or("warn").to_string());
+    let mut filter_builder = env_filter::Builder::new();
+    filter_builder.parse(&spec);
+    let filter = filter_builder.build();
+    log::set_max_level(filter.filter());
+    let file = path.and_then(|p| {
+        OpenOptions::new().create(true).append(true).open(p).ok()
+    });
+    // Installing the global logger succeeds only on the first call;
+    // later calls just retarget the shared state below.
+    let _ = log::set_boxed_logger(Box::new(BridgeLogger));
+    *LOGGER.lock().unwrap() = Some(LoggerState { filter, file });
+}
 
 /// Register the root `raydriver` module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(init_logging, m)?)?;
     grbl::register(m)?;
     Ok(())
 }

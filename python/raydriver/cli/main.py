@@ -5,15 +5,24 @@ against the built-in firmware emulator for hardware-free dry runs,
 showing live progress while the job executes:
 
     raydriver run job.gcode --port /dev/ttyUSB0
+    raydriver run job.gcode --port /dev/ttyUSB0 --log-file job.log
     raydriver run job.gcode --emulator
     raydriver status --port /dev/ttyUSB0 --seconds 5
+
+Session diagnostics (stall detection, liveness, unexpected device
+lines) go to stderr by default; ``--log-file`` redirects them to a
+dedicated file so they never interleave with the progress display.
+Verbosity follows ``RUST_LOG`` (e.g. ``RUST_LOG=debug``).
 """
 
 import argparse
 import asyncio
+import os
 import sys
 import time
+from typing import Any
 
+import raydriver.raydriver as _native
 from raydriver.grbl import GrblSession, MockTransport
 from raydriver.grbl.parser import strip_gcode_comments
 from raydriver.grbl.types import DeviceState
@@ -25,7 +34,12 @@ def _fmt_seconds(seconds):
 
 
 class RunView:
-    """Single-line live progress renderer for a streaming job."""
+    """Single-line live progress renderer for a streaming job.
+
+    On a TTY the display is a ``\\r``-animated single line.  When
+    stdout is redirected (no TTY), updates are newline-terminated and
+    rate-limited so interleaved log lines stay intact.
+    """
 
     def __init__(self, total_lines, out=None):
         self.total = total_lines
@@ -36,6 +50,9 @@ class RunView:
         self.started = time.monotonic()
         self._last_render = 0.0
         self.finished = False
+        self._stream = self._stdout()
+        self._tty = bool(getattr(self._stream, "isatty", lambda: False)())
+        self._min_interval = 0.05 if self._tty else 1.0
 
     def _stdout(self):
         return self.out if self.out is not None else sys.stdout
@@ -54,7 +71,7 @@ class RunView:
         if self.finished and not force:
             return
         now = time.monotonic()
-        if not force and now - self._last_render < 0.05:
+        if not force and now - self._last_render < self._min_interval:
             return
         self._last_render = now
         elapsed = now - self.started
@@ -62,7 +79,7 @@ class RunView:
         bar_width = 20
         filled = int(bar_width * frac)
         bar = "#" * filled + "-" * (bar_width - filled)
-        parts = [f"\r {self.acked}/{self.total} [{bar}] {frac:6.1%}"]
+        parts = [f" {self.acked}/{self.total} [{bar}] {frac:6.1%}"]
         if self.state is not None:
             mpos = ",".join(
                 f"{v:.3f}" if v is not None else "  -  "
@@ -80,12 +97,13 @@ class RunView:
             parts.append(f"eta {_fmt_seconds(eta)}")
         parts.append(f"{_fmt_seconds(elapsed)}")
         line = " | ".join(parts)
-        print(
-            f"{line:<100}",
-            end="",
-            flush=True,
-            file=self._stdout(),
-        )
+        if self._tty:
+            print(f"\r{line:<100}", end="", flush=True, file=self._stream)
+        else:
+            # Newline-terminated so redirected logs and progress
+            # lines never share a physical line.
+            self._stream.write(line + "\n")
+            self._stream.flush()
 
     def finish(self, success, message=""):
         self.finished = False
@@ -103,6 +121,7 @@ class RunView:
 
 def _open_session(args, on_event):
     poll = not getattr(args, "no_poll", False)
+    config = {"poll_status_while_running": poll}
     if args.emulator:
         from raydriver.emulator import GrblEmulator
 
@@ -110,7 +129,7 @@ def _open_session(args, on_event):
         emulator = GrblEmulator(mock, speed_factor=args.speed_factor)
         session = GrblSession.with_transport(
             mock,
-            config={"poll_status_while_running": poll},
+            config=config,
             dialect={},
             event_callback=on_event,
         )
@@ -120,7 +139,7 @@ def _open_session(args, on_event):
             config={
                 "port": args.port,
                 "baudrate": args.baudrate,
-                "poll_status_while_running": poll,
+                **config,
             },
             dialect={},
             event_callback=on_event,
@@ -141,7 +160,7 @@ async def cmd_run(args) -> int:
 
     connected = asyncio.get_running_loop().create_future()
 
-    def on_event(name, payload=None):
+    def on_event(name: str, payload: Any = None):
         if name == "state_changed":
             view.on_state(payload)
         elif name == "connection_status_changed" and not (connected.done()):
@@ -194,7 +213,7 @@ async def cmd_run(args) -> int:
 
 
 async def cmd_status(args) -> int:
-    def on_event(name, payload=None):
+    def on_event(name: str, payload: Any = None):
         if name == "state_changed":
             mpos = ",".join(
                 f"{v:8.3f}" if v is not None else "     -  "
@@ -244,6 +263,13 @@ def build_parser():
             default=2000.0,
             help="emulator motion speed multiplier (emulator only)",
         )
+        run_parser.add_argument(
+            "--log-file",
+            default=None,
+            help="write Rust-side session diagnostics to this file "
+            "(default: stderr).  Level defaults to info for the file "
+            "and can be overridden with RUST_LOG",
+        )
 
     run_parser = subparsers.add_parser(
         "run", help="stream a G-code file to the device"
@@ -276,6 +302,10 @@ def build_parser():
 
 async def amain(argv) -> int:
     args = build_parser().parse_args(argv)
+    if args.log_file and "RUST_LOG" not in os.environ:
+        # Diagnostics belong in the log file; info level by default.
+        os.environ["RUST_LOG"] = "info"
+    _native.init_logging(path=args.log_file)
     return await args.func(args)
 
 

@@ -95,6 +95,16 @@ class TestErrorsDuringJob:
         assert emulator.tx_log.count(WELCOME) >= 2
         states = [p for n, p in events.events if n == "state_changed"]
         assert any(s.error is not None and s.error.code == 20 for s in states)
+        # run() resolves normally even on failure, so the terminal
+        # error must be readable from the device state afterwards.
+        # The protocol error (proper GRBL code) is preserved.
+        assert session.state.error is not None
+        assert session.state.error.code == 20
+        # A subsequent job start clears the error again.
+        job = asyncio.ensure_future(session.run(gcode(5)))
+        await asyncio.wait_for(job, timeout=10)
+        await events.wait_for("job_finished")
+        assert session.state.error is None
 
     async def test_soft_limit_alarm_halts_stream(self, rig):
         session, mock, emulator, events = rig
@@ -157,6 +167,14 @@ class TestStallBehavior:
             await asyncio.wait_for(session.run(slow_gcode(40)), timeout=40)
             await events.wait_for("job_finished")
             assert sent_bytes(mock).count(b"G1 X") < 40
+            # No protocol error was seen, so run() must surface the
+            # job-level failure ("device stopped responding") through
+            # the device state, otherwise callers cannot tell a dead
+            # job from a completed one.
+            error = session.state.error
+            assert error is not None
+            assert error.title == "Job Error"
+            assert "stopped responding" in error.description
         finally:
             await session.disconnect()
             device_task.cancel()

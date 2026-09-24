@@ -1,0 +1,17 @@
+# See https://pre-commit.com for more information
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright
+        entry: npx --yes pyright python/raydriver tests
+        language: system
+        pass_filenames: false
+        files: ^(python/.*\.pyi?|tests/.*\.py|src/.*\.rs)$

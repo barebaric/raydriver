@@ -25,6 +25,22 @@ jobs:
       - name: Lint Python
         run: pip install ruff && ruff check tests/ python/
 
+      - name: Run pyright
+        run: npx --yes pyright --pythonpath $(which python) python/raydriver tests
+
+      - name: Validate stubs in wheel
+        run: |
+          cat > /tmp/test_stubs.py << 'EOF'
+          from raydriver.grbl import GrblSession
+          from raydriver.grbl.parser import parse_state
+          from raydriver.grbl.types import DeviceState
+
+          session: GrblSession
+          state: DeviceState
+          parsed = parse_state("<Idle|MPos:0,0,0>", None, False)
+          EOF
+          npx --yes pyright --pythonpath $(which python) /tmp/test_stubs.py
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.98.1
         with:

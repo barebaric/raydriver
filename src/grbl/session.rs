@@ -22,7 +22,9 @@ use super::transport::mock::MockInner;
 use super::transport::serial::SerialTransport;
 use super::transport::telnet::TelnetTransport;
 use super::transport::{Transport, TransportError};
-use super::types::{DeviceState, DeviceStatus, TransportStatus, UnitSystem};
+use super::types::{
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
+};
 
 tokio::task_local! {
     /// Set inside the streaming task so `abort_stream_task` can
@@ -807,6 +809,11 @@ impl SessionCore {
         } else if line.starts_with("Grbl ") || line.starts_with("GrblHAL ") {
             self.handshake_received.set();
             log::debug!("Received Grbl welcome message: {line}");
+        } else if self.is_job_running() {
+            // Unknown chatter during a job is anomalous (e.g. a
+            // controller crash banner) and must be visible at the
+            // default log level.
+            log::warn!("Unexpected device line during job: {line}");
         } else {
             log::debug!("Received informational line: {line}");
         }
@@ -1099,12 +1106,17 @@ impl SessionCore {
         // is disabled during jobs by default, so reflect the job
         // start immediately so the UI does not keep showing Idle.
         // An ALARM (which aborts the job right away) is not masked.
+        // A stale error from a previous failed job is cleared: the
+        // new job starts from a clean slate.
         let state_snapshot = {
             let mut state = self.state.lock().unwrap();
+            let had_error = state.error.take().is_some();
             if state.status != DeviceStatus::Run
                 && state.status != DeviceStatus::Alarm
             {
                 state.status = DeviceStatus::Run;
+                Some(state.clone())
+            } else if had_error {
                 Some(state.clone())
             } else {
                 None
@@ -1241,6 +1253,29 @@ impl SessionCore {
         if let Err(ref err) = outcome {
             if !self.is_cancelled() {
                 log::warn!("Job interrupted: {err:?}; calling cancel()");
+                // Surface the terminal job error through the device
+                // state: run() resolves normally either way, so
+                // consumers can only detect a failed job by
+                // inspecting the state.  Protocol errors (which
+                // already set state.error with a proper GRBL code)
+                // are preserved.
+                let snapshot = {
+                    let mut state = self.state.lock().unwrap();
+                    if state.error.is_none() {
+                        state.error = Some(DeviceError::new(
+                            -1,
+                            "Job Error",
+                            &err.to_string(),
+                        ));
+                        Some(state.clone())
+                    } else {
+                        None
+                    }
+                };
+                // Emit outside the lock (see handle_error).
+                if let Some(snapshot) = snapshot {
+                    self.events.state_changed(&snapshot);
+                }
                 let _ = self.cancel(true).await;
             }
         }
