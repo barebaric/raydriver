@@ -26,7 +26,9 @@ jobs:
         run: pip install ruff && ruff check tests/ python/
 
       - name: Run pyright
-        run: npx --yes pyright --pythonpath $(which python) python/raydriver tests
+        run: |
+          pip install pytest pytest-asyncio
+          npx --yes pyright --pythonpath $(which python) python/raydriver tests
 
       - name: Validate stubs in wheel
         run: |
