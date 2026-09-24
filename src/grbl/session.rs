@@ -718,17 +718,21 @@ impl SessionCore {
             // First error wins: the root-cause failure must not be
             // overwritten by secondary errors from the teardown that
             // follows it (e.g. a safety M5 racing into an alarm state
-            // and getting error:9).
-            if state.error.is_some() {
-                return;
+            // and getting error:9).  Secondary errors still resolve
+            // the pending request below.
+            if state.error.is_none() {
+                state.error = Some(error);
+                Some(state.clone())
+            } else {
+                None
             }
-            state.error = Some(error);
-            state.clone()
         };
         // Emit outside the lock: event delivery attaches to the
         // Python GIL and must never run while holding a lock that
         // Python-side code could take.
-        self.events.state_changed(&state_snapshot);
+        if let Some(state_snapshot) = state_snapshot {
+            self.events.state_changed(&state_snapshot);
+        }
 
         let request = self
             .interactive_request
@@ -790,14 +794,17 @@ impl SessionCore {
             let state_snapshot = {
                 let mut state = self.state.lock().unwrap();
                 // First error wins (see handle_error).
-                if state.error.is_some() {
-                    return;
+                if state.error.is_none() {
+                    state.error = Some(error);
+                    Some(state.clone())
+                } else {
+                    None
                 }
-                state.error = Some(error);
-                state.clone()
             };
             // Emit outside the lock (see handle_error).
-            self.events.state_changed(&state_snapshot);
+            if let Some(state_snapshot) = state_snapshot {
+                self.events.state_changed(&state_snapshot);
+            }
             self.events
                 .command_status(TransportStatus::Error, Some(line));
             if self.job_running.load(Ordering::SeqCst) {
