@@ -715,6 +715,13 @@ impl SessionCore {
         let error = parser::get_error(error_code);
         let state_snapshot = {
             let mut state = self.state.lock().unwrap();
+            // First error wins: the root-cause failure must not be
+            // overwritten by secondary errors from the teardown that
+            // follows it (e.g. a safety M5 racing into an alarm state
+            // and getting error:9).
+            if state.error.is_some() {
+                return;
+            }
             state.error = Some(error);
             state.clone()
         };
@@ -782,6 +789,10 @@ impl SessionCore {
             let error = super::errors::alarm_code_to_device_error(code);
             let state_snapshot = {
                 let mut state = self.state.lock().unwrap();
+                // First error wins (see handle_error).
+                if state.error.is_some() {
+                    return;
+                }
                 state.error = Some(error);
                 state.clone()
             };
