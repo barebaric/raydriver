@@ -2,6 +2,7 @@
 planner-deferred acknowledgements, stalls, alarms and cancel."""
 
 import asyncio
+import time
 
 import pytest
 from conftest import (
@@ -11,6 +12,7 @@ from conftest import (
 )
 
 from raydriver.emulator import WELCOME
+from raydriver.grbl.types import DeviceStatus
 
 
 def gcode(n_lines):
@@ -100,6 +102,18 @@ class TestErrorsDuringJob:
         # The protocol error (proper GRBL code) is preserved.
         assert session.state.error is not None
         assert session.state.error.code == 20
+        # An emergency reset racing in-flight motion leaves the
+        # machine alarm-locked (real Grbl behaves the same).  Recover
+        # like an operator would, then wait for the between-jobs
+        # status poller to reflect Idle before starting the next job.
+        await session.execute_interactive_command("$X")
+        deadline = time.monotonic() + 5
+        while (
+            session.state.status != DeviceStatus.IDLE
+            and time.monotonic() < deadline
+        ):
+            await asyncio.sleep(0.05)
+        assert session.state.status == DeviceStatus.IDLE
         # A subsequent job start clears the error again.
         job = asyncio.ensure_future(session.run(gcode(5)))
         await asyncio.wait_for(job, timeout=10)
