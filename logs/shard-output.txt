@@ -1,0 +1,225 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+cachedir: .pytest_cache
+rootdir: D:\a\raydriver\raydriver
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 8 items
+
+tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress PASSED [ 12%]
+tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected PASSED [ 25%]
+tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics PASSED [ 37%]
+tests/test_cli.py::TestRunCommand::test_progress_percentages_render PASSED [ 50%]
+tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code FAILED [ 62%]
+tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected PASSED    [ 75%]
+tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly PASSED [ 87%]
+tests/test_cli.py::TestStatusCommand::test_status_reports_printed PASSED [100%]
+
+================================== FAILURES ===================================
+___________ TestRunCommand.test_device_error_aborts_with_exit_code ____________
+
+self = <test_cli.TestRunCommand object at 0x000001C6247BB170>
+gcode_file = <function gcode_file.<locals>.write at 0x000001C62482F100>
+capsys = <_pytest.capture.CaptureFixture object at 0x000001C6247D23C0>
+
+    async def test_device_error_aborts_with_exit_code(
+        self, gcode_file, capsys
+    ):
+        path = gcode_file("G1 X10 F1000\nG999\nG1 X0 F1000\n")
+        rc = await amain(["run", path, "--emulator", "--speed-factor", "100"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "ABORTED" in out
+        # The abort line must carry the failure reason, not just
+        # "job did not complete".
+>       assert "Unsupported Command" in out
+E       AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+
+tests\test_cli.py:91: AssertionError
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:35.356Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+[2026-09-24T23:19:35.357Z ERROR raydriver::grbl::session] GRBL error during job: error:20. Halting stream.
+[2026-09-24T23:19:35.357Z WARN  raydriver::grbl::session] Job interrupted: Device("GRBL error: error:20"); calling cancel()
+=================================== PASSES ====================================
+______________ TestRunCommand.test_successful_job_shows_progress ______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:34.714Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+________ TestRunCommand.test_progress_lines_terminated_when_redirected ________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:34.739Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+_______________ TestRunCommand.test_progress_percentages_render _______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:34.772Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+______________ TestRunCommand.test_missing_device_fails_cleanly _______________
+---------------------------- Captured stdout call -----------------------------
+Connecting to /dev/null-does-not-exist ...
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:35.651Z ERROR raydriver::grbl::session] Connection error: connection error: The system cannot find the path specified.
+________________ TestStatusCommand.test_status_reports_printed ________________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:35.656Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+=========================== short test summary info ===========================
+PASSED tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress
+PASSED tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected
+PASSED tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics
+PASSED tests/test_cli.py::TestRunCommand::test_progress_percentages_render
+PASSED tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected
+PASSED tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly
+PASSED tests/test_cli.py::TestStatusCommand::test_status_reports_printed
+FAILED tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code - AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+========================= 1 failed, 7 passed in 1.49s =========================
+attempt 1 failed, retrying...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+cachedir: .pytest_cache
+rootdir: D:\a\raydriver\raydriver
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 8 items
+
+tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress PASSED [ 12%]
+tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected PASSED [ 25%]
+tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics PASSED [ 37%]
+tests/test_cli.py::TestRunCommand::test_progress_percentages_render PASSED [ 50%]
+tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code FAILED [ 62%]
+tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected PASSED    [ 75%]
+tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly PASSED [ 87%]
+tests/test_cli.py::TestStatusCommand::test_status_reports_printed PASSED [100%]
+
+================================== FAILURES ===================================
+___________ TestRunCommand.test_device_error_aborts_with_exit_code ____________
+
+self = <test_cli.TestRunCommand object at 0x000001B3F8CD1D30>
+gcode_file = <function gcode_file.<locals>.write at 0x000001B3F8CF1120>
+capsys = <_pytest.capture.CaptureFixture object at 0x000001B3F8D05280>
+
+    async def test_device_error_aborts_with_exit_code(
+        self, gcode_file, capsys
+    ):
+        path = gcode_file("G1 X10 F1000\nG999\nG1 X0 F1000\n")
+        rc = await amain(["run", path, "--emulator", "--speed-factor", "100"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "ABORTED" in out
+        # The abort line must carry the failure reason, not just
+        # "job did not complete".
+>       assert "Unsupported Command" in out
+E       AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+
+tests\test_cli.py:91: AssertionError
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:37.181Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+[2026-09-24T23:19:37.185Z ERROR raydriver::grbl::session] GRBL error during job: error:20. Halting stream.
+[2026-09-24T23:19:37.186Z WARN  raydriver::grbl::session] Job interrupted: Device("GRBL error: error:20"); calling cancel()
+=================================== PASSES ====================================
+______________ TestRunCommand.test_successful_job_shows_progress ______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:36.557Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+________ TestRunCommand.test_progress_lines_terminated_when_redirected ________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:36.575Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+_______________ TestRunCommand.test_progress_percentages_render _______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:36.623Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+______________ TestRunCommand.test_missing_device_fails_cleanly _______________
+---------------------------- Captured stdout call -----------------------------
+Connecting to /dev/null-does-not-exist ...
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:37.459Z ERROR raydriver::grbl::session] Connection error: connection error: The system cannot find the path specified.
+________________ TestStatusCommand.test_status_reports_printed ________________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:37.464Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+=========================== short test summary info ===========================
+PASSED tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress
+PASSED tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected
+PASSED tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics
+PASSED tests/test_cli.py::TestRunCommand::test_progress_percentages_render
+PASSED tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected
+PASSED tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly
+PASSED tests/test_cli.py::TestStatusCommand::test_status_reports_printed
+FAILED tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code - AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+========================= 1 failed, 7 passed in 1.42s =========================
+attempt 2 failed, retrying...
+============================= test session starts =============================
+platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0 -- C:\hostedtoolcache\windows\Python\3.12.10\x64\python.exe
+cachedir: .pytest_cache
+rootdir: D:\a\raydriver\raydriver
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, timeout-2.4.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 30.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 8 items
+
+tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress PASSED [ 12%]
+tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected PASSED [ 25%]
+tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics PASSED [ 37%]
+tests/test_cli.py::TestRunCommand::test_progress_percentages_render PASSED [ 50%]
+tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code FAILED [ 62%]
+tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected PASSED    [ 75%]
+tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly PASSED [ 87%]
+tests/test_cli.py::TestStatusCommand::test_status_reports_printed PASSED [100%]
+
+================================== FAILURES ===================================
+___________ TestRunCommand.test_device_error_aborts_with_exit_code ____________
+
+self = <test_cli.TestRunCommand object at 0x000001DCD5C41D60>
+gcode_file = <function gcode_file.<locals>.write at 0x000001DCD5C618A0>
+capsys = <_pytest.capture.CaptureFixture object at 0x000001DCD5C42450>
+
+    async def test_device_error_aborts_with_exit_code(
+        self, gcode_file, capsys
+    ):
+        path = gcode_file("G1 X10 F1000\nG999\nG1 X0 F1000\n")
+        rc = await amain(["run", path, "--emulator", "--speed-factor", "100"])
+        assert rc == 1
+        out = capsys.readouterr().out
+        assert "ABORTED" in out
+        # The abort line must carry the failure reason, not just
+        # "job did not complete".
+>       assert "Unsupported Command" in out
+E       AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+
+tests\test_cli.py:91: AssertionError
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:38.959Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+[2026-09-24T23:19:38.976Z ERROR raydriver::grbl::session] GRBL error during job: error:20. Halting stream.
+[2026-09-24T23:19:38.976Z WARN  raydriver::grbl::session] Job interrupted: Device("GRBL error: error:20"); calling cancel()
+=================================== PASSES ====================================
+______________ TestRunCommand.test_successful_job_shows_progress ______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:38.336Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+________ TestRunCommand.test_progress_lines_terminated_when_redirected ________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:38.350Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+_______________ TestRunCommand.test_progress_percentages_render _______________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:38.382Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+______________ TestRunCommand.test_missing_device_fails_cleanly _______________
+---------------------------- Captured stdout call -----------------------------
+Connecting to /dev/null-does-not-exist ...
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:39.248Z ERROR raydriver::grbl::session] Connection error: connection error: The system cannot find the path specified.
+________________ TestStatusCommand.test_status_reports_printed ________________
+---------------------------- Captured stderr call -----------------------------
+[2026-09-24T23:19:39.253Z WARN  raydriver::grbl::session] Device did not report RX buffer size via $I. Using default 127 bytes.
+=========================== short test summary info ===========================
+PASSED tests/test_cli.py::TestRunCommand::test_successful_job_shows_progress
+PASSED tests/test_cli.py::TestRunCommand::test_progress_lines_terminated_when_redirected
+PASSED tests/test_cli.py::TestRunCommand::test_log_file_receives_diagnostics
+PASSED tests/test_cli.py::TestRunCommand::test_progress_percentages_render
+PASSED tests/test_cli.py::TestRunCommand::test_empty_file_is_rejected
+PASSED tests/test_cli.py::TestRunCommand::test_missing_device_fails_cleanly
+PASSED tests/test_cli.py::TestStatusCommand::test_status_reports_printed
+FAILED tests/test_cli.py::TestRunCommand::test_device_error_aborts_with_exit_code - AssertionError: assert 'Unsupported Command' in 'Connecting to emulated device ...\n 0/3 [--------------------]   0.0% | IDLE MPos:0.000,0.000,0.000 | 00:00\nDevice: [VER:1.1h.EMULATOR:] | [OPT:V,15,128] | ok\n 3/3 [####################] 100.0% | RUN MPos:0.000,0.000,0.000 | eta 00:00 | 00:00\n\n ABORTED — Commands Locked: Cannot send commands while in alarm or jog mode. Clear the alarm state first.: 3/3 lines acknowledged in 00:00\n'
+========================= 1 failed, 7 passed in 1.43s =========================
+attempt 3 failed, retrying...
