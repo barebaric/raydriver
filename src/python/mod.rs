@@ -131,9 +131,26 @@ fn init_logging(filter: Option<&str>, path: Option<&str>) {
     *LOGGER.lock().unwrap() = Some(LoggerState { filter, file });
 }
 
+/// Tear down the shared tokio runtime (see
+/// [`runtime::shutdown`]).  Called via `atexit`, before CPython
+/// finalizes the interpreter.
+#[pyfunction]
+fn _shutdown_runtime() {
+    runtime::shutdown();
+}
+
+fn register_atexit_hook(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    let py = m.py();
+    let atexit = py.import("atexit")?;
+    let hook = wrap_pyfunction!(_shutdown_runtime, m)?;
+    atexit.call_method1("register", (hook,))?;
+    Ok(())
+}
+
 /// Register the root `raydriver` module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_logging, m)?)?;
     grbl::register(m)?;
+    register_atexit_hook(m)?;
     Ok(())
 }
