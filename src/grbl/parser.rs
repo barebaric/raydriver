@@ -262,6 +262,12 @@ pub fn parse_opt_info(line: &str) -> Option<i64> {
         .and_then(|caps| caps[3].parse::<i64>().ok())
 }
 
+/// Extract the compile option flags from an
+/// `[OPT:<flags>,<planner_buffer_blocks>,<rx_buffer_size>]` line.
+pub fn parse_opt_flags(line: &str) -> Option<String> {
+    GRBL_OPT_RE.captures(line).map(|caps| caps[1].to_string())
+}
+
 /// Parses the response from a '$G' command to find the active WCS.
 /// Example response: `[G54 G17 G21 G90 G94 M5 M9 T0 F0 S0]`
 pub fn parse_grbl_parser_state(response_lines: &[String]) -> Option<String> {

@@ -19,6 +19,7 @@ __all__ = [
     "parse_grbl_parser_state",
     "parse_grbl_settings",
     "parse_msg",
+    "parse_opt_flags",
     "parse_opt_info",
     "parse_probe_line",
     "parse_setting_pairs",
@@ -85,6 +86,11 @@ def parse_grbl_settings(lines: typing.Sequence[builtins.str]) -> builtins.dict[b
 def parse_msg(line: builtins.str) -> typing.Optional[tuple[builtins.str, builtins.str]]:
     r"""
     Parse a `[MSG:key:value]` line into `(key, value)`.
+    """
+
+def parse_opt_flags(line: builtins.str) -> typing.Optional[builtins.str]:
+    r"""
+    Extract the compile option flags from an `[OPT:...]` line.
     """
 
 def parse_opt_info(line: builtins.str) -> typing.Optional[builtins.int]:

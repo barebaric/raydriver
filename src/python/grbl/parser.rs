@@ -60,6 +60,13 @@ fn parse_opt_info(line: &str) -> Option<i64> {
     parser::parse_opt_info(line)
 }
 
+/// Extract the compile option flags from an `[OPT:...]` line.
+#[gen_stub_pyfunction(module = "raydriver.grbl.parser")]
+#[pyfunction]
+fn parse_opt_flags(line: &str) -> Option<String> {
+    parser::parse_opt_flags(line)
+}
+
 /// Parse a `[MSG:key:value]` line into `(key, value)`.
 #[gen_stub_pyfunction(module = "raydriver.grbl.parser")]
 #[pyfunction]
@@ -202,6 +209,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "parse_version",
             "parse_ver",
             "parse_opt_info",
+            "parse_opt_flags",
             "parse_msg",
             "extract_device_name",
             "extract_device_name_from_output",
@@ -225,6 +233,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(pyo3::wrap_pyfunction!(parse_version, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(parse_ver, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(parse_opt_info, m.clone())?)?;
+    m.add_function(pyo3::wrap_pyfunction!(parse_opt_flags, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(parse_msg, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(extract_device_name, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(
