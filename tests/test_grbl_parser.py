@@ -14,6 +14,7 @@ from raydriver.grbl.parser import (
     parse_grbl_parser_state,
     parse_grbl_settings,
     parse_msg,
+    parse_opt_flags,
     parse_opt_info,
     parse_probe_line,
     parse_setting_pairs,
@@ -334,6 +335,16 @@ class TestOptInfo:
     def test_invalid(self):
         assert parse_opt_info("[VER:1.1h:]") is None
         assert parse_opt_info("ok") is None
+
+
+class TestOptFlags:
+    def test_valid(self):
+        assert parse_opt_flags("[OPT:V,15,127]") == "V"
+        assert parse_opt_flags("[OPT:VMPH,63,511]") == "VMPH"
+
+    def test_invalid(self):
+        assert parse_opt_flags("[VER:1.1h:]") is None
+        assert parse_opt_flags("ok") is None
 
 
 class TestParseMsg:
