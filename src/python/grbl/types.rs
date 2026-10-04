@@ -18,7 +18,7 @@ pyo3_stub_gen::module_doc!("raydriver.grbl.types", "{}", MODULE_DOC);
 
 /// Machine state as reported in Grbl status reports.
 #[gen_stub_pyclass_enum]
-#[pyclass(module = "raydriver.grbl.types", eq, eq_int, skip_from_py_object)]
+#[pyclass(module = "raydriver.grbl.types", eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeviceStatus {
     #[pyo3(name = "UNKNOWN")]
@@ -78,6 +78,29 @@ impl From<core::DeviceStatus> for DeviceStatus {
     }
 }
 
+impl From<DeviceStatus> for core::DeviceStatus {
+    fn from(status: DeviceStatus) -> Self {
+        match status {
+            DeviceStatus::Unknown => Self::Unknown,
+            DeviceStatus::Idle => Self::Idle,
+            DeviceStatus::Run => Self::Run,
+            DeviceStatus::Hold => Self::Hold,
+            DeviceStatus::Jog => Self::Jog,
+            DeviceStatus::Alarm => Self::Alarm,
+            DeviceStatus::Door => Self::Door,
+            DeviceStatus::Check => Self::Check,
+            DeviceStatus::Home => Self::Home,
+            DeviceStatus::Sleep => Self::Sleep,
+            DeviceStatus::Tool => Self::Tool,
+            DeviceStatus::Queue => Self::Queue,
+            DeviceStatus::Lock => Self::Lock,
+            DeviceStatus::Unlock => Self::Unlock,
+            DeviceStatus::Cycle => Self::Cycle,
+            DeviceStatus::Test => Self::Test,
+        }
+    }
+}
+
 #[gen_stub_pymethods]
 #[pymethods]
 impl DeviceStatus {
@@ -110,7 +133,7 @@ impl DeviceStatus {
 
 /// An error or alarm with code, title and description.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl.types", eq, skip_from_py_object)]
+#[pyclass(module = "raydriver.grbl.types", eq, from_py_object)]
 #[derive(Clone, PartialEq)]
 pub struct DeviceError {
     pub(crate) inner: core::DeviceError,
@@ -125,6 +148,13 @@ impl DeviceError {
 #[gen_stub_pymethods]
 #[pymethods]
 impl DeviceError {
+    #[new]
+    fn new_py(code: i32, title: String, description: String) -> Self {
+        Self {
+            inner: core::DeviceError::new(code, &title, &description),
+        }
+    }
+
     #[getter]
     fn code(&self) -> i32 {
         self.inner.code
@@ -174,9 +204,19 @@ impl DeviceState {
         self.inner.status.into()
     }
 
+    #[setter]
+    fn set_status(&mut self, status: DeviceStatus) {
+        self.inner.status = status.into();
+    }
+
     #[getter]
     fn error(&self) -> Option<DeviceError> {
         self.inner.error.clone().map(DeviceError::new)
+    }
+
+    #[setter]
+    fn set_error(&mut self, error: Option<&DeviceError>) {
+        self.inner.error = error.map(|e| e.inner.clone());
     }
 
     /// Machine position in mm; entries may be `None`.
@@ -185,10 +225,20 @@ impl DeviceState {
         self.inner.machine_pos.clone()
     }
 
+    #[setter]
+    fn set_machine_pos(&mut self, pos: Vec<Option<f64>>) {
+        self.inner.machine_pos = pos;
+    }
+
     /// Work position in mm; entries may be `None`.
     #[getter]
     fn work_pos(&self) -> Vec<Option<f64>> {
         self.inner.work_pos.clone()
+    }
+
+    #[setter]
+    fn set_work_pos(&mut self, pos: Vec<Option<f64>>) {
+        self.inner.work_pos = pos;
     }
 
     /// Work coordinate offset in mm; entries may be `None`.
@@ -197,9 +247,19 @@ impl DeviceState {
         self.inner.wco.clone()
     }
 
+    #[setter]
+    fn set_wco(&mut self, wco: Vec<Option<f64>>) {
+        self.inner.wco = wco;
+    }
+
     #[getter]
     fn feed_rate(&self) -> Option<i64> {
         self.inner.feed_rate
+    }
+
+    #[setter]
+    fn set_feed_rate(&mut self, feed_rate: Option<i64>) {
+        self.inner.feed_rate = feed_rate;
     }
 
     #[getter]
@@ -207,14 +267,29 @@ impl DeviceState {
         self.inner.spindle_speed
     }
 
+    #[setter]
+    fn set_spindle_speed(&mut self, spindle_speed: Option<i64>) {
+        self.inner.spindle_speed = spindle_speed;
+    }
+
     #[getter]
     fn buffer_available(&self) -> Option<i64> {
         self.inner.buffer_available
     }
 
+    #[setter]
+    fn set_buffer_available(&mut self, buffer_available: Option<i64>) {
+        self.inner.buffer_available = buffer_available;
+    }
+
     #[getter]
     fn buffer_rx_available(&self) -> Option<i64> {
         self.inner.buffer_rx_available
+    }
+
+    #[setter]
+    fn set_buffer_rx_available(&mut self, buffer_rx_available: Option<i64>) {
+        self.inner.buffer_rx_available = buffer_rx_available;
     }
 
     fn __repr__(&self) -> String {
