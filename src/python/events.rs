@@ -3,22 +3,64 @@
 //! Implements [`SessionEvents`] by marshaling each event onto the
 //! caller's asyncio loop.  Events are queued on the Rust side and a
 //! single `call_soon_threadsafe(drain)` signal per batch wakes the
-//! loop, which invokes `event_callback(name, payload)` for every
-//! queued event on the loop thread.  Batching keeps the loop's
-//! self-pipe write rate at one signal per batch regardless of event
-//! volume.
+//! loop, which materializes one [`SessionEvent`] per queued event and
+//! invokes `event_callback(event)` for it on the loop thread.
+//! Batching keeps the loop's self-pipe write rate at one signal per
+//! batch regardless of event volume.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use pyo3::prelude::*;
+use pyo3_stub_gen::derive::gen_stub_pyclass_complex_enum;
 
 use crate::grbl::session::SessionEvents;
-use crate::grbl::types::{DeviceState, TransportStatus};
+use crate::grbl::types::{DeviceState as CoreDeviceState, TransportStatus};
 
-/// One queued event: the event name and its payload object.
-type QueuedEvent = (String, Py<PyAny>);
+use crate::python::grbl::types::DeviceState as PyDeviceState;
+
+/// One typed session event, delivered to `event_callback`.
+#[gen_stub_pyclass_complex_enum]
+#[pyclass(module = "raydriver.grbl", skip_from_py_object)]
+#[derive(Clone)]
+pub enum SessionEvent {
+    StateChanged {
+        state: PyDeviceState,
+    },
+    ConnectionStatusChanged {
+        status: String,
+        message: Option<String>,
+    },
+    CommandStatusChanged {
+        status: String,
+        message: Option<String>,
+    },
+    JobFinished {},
+    ProbeStatusChanged {
+        message: String,
+    },
+    WcsUpdated {
+        offsets: HashMap<String, (f64, f64, f64)>,
+    },
+    ConfigChanged {
+        key: String,
+        value: i64,
+    },
+    RawRx {
+        line: String,
+    },
+    RawTx {
+        line: String,
+    },
+}
+
+/// One queued event: session events go to the event callback, a
+/// progress report goes to the progress callback.
+enum QueuedEvent {
+    Session(SessionEvent),
+    Progress(i64),
+}
 
 pub(crate) struct PyEvents {
     event_callback: Option<Py<PyAny>>,
@@ -60,11 +102,13 @@ impl EventQueue {
 
 /// The loop-side drain callable: invoked via
 /// `loop.call_soon_threadsafe(drain)`; runs on the event loop
-/// thread and delivers every queued event.
+/// thread and delivers every queued event.  Carries both callbacks
+/// so each queued event routes to its own callback no matter which
+/// schedule call drained the batch.
 #[pyclass(module = "raydriver.grbl")]
 struct EventDrainer {
     queue: Arc<EventQueue>,
-    callback: Py<PyAny>,
+    events: Option<Py<PyAny>>,
     progress: Option<Py<PyAny>>,
 }
 
@@ -100,20 +144,16 @@ impl PyEvents {
         *self.progress_callback.lock().unwrap() = cb;
     }
 
-    /// Queue `(name, payload)` for delivery and schedule the loop
+    /// Queue a session event for delivery and schedule the loop
     /// drain if this caller flipped the scheduled flag.  The GIL is
-    /// attached only for payload construction and the single
-    /// `call_soon_threadsafe` signal.
-    fn schedule<F>(&self, name: &str, payload: F)
-    where
-        F: FnOnce(Python<'_>) -> PyResult<Py<PyAny>>,
-    {
+    /// attached only for the single `call_soon_threadsafe` signal;
+    /// the event is materialized into a Python object at drain time.
+    fn schedule(&self, event: SessionEvent) {
         if self.event_callback.is_none() {
             return;
         }
         let result: PyResult<()> = Python::attach(|py| {
-            let payload = payload(py)?;
-            if self.queue.push((name.to_string(), payload)) {
+            if self.queue.push(QueuedEvent::Session(event)) {
                 let loop_guard = self.loop_.lock().unwrap();
                 let Some(loop_) = loop_guard.as_ref() else {
                     self.queue.unschedule();
@@ -130,7 +170,7 @@ impl PyEvents {
                     py,
                     EventDrainer {
                         queue: self.queue.clone(),
-                        callback: callback.clone().unbind(),
+                        events: Some(callback.clone().unbind()),
                         progress: self
                             .progress_callback
                             .lock()
@@ -147,7 +187,7 @@ impl PyEvents {
         });
         if let Err(err) = result {
             self.queue.unschedule();
-            log::warn!("failed to schedule session event {name}: {err}");
+            log::warn!("failed to schedule session event: {err}");
         }
     }
 
@@ -169,17 +209,16 @@ impl PyEvents {
             };
             let loop_py = loop_.clone_ref(py);
             drop(loop_guard);
-            let payload = {
-                let obj = op_index.into_pyobject(py)?;
-                obj.unbind().into_any()
-            };
-            if self.queue.push(("__progress__".to_string(), payload)) {
+            if self.queue.push(QueuedEvent::Progress(op_index)) {
                 let drainer = Py::new(
                     py,
                     EventDrainer {
                         queue: self.queue.clone(),
-                        callback,
-                        progress: None,
+                        events: self
+                            .event_callback
+                            .as_ref()
+                            .map(|cb| cb.clone_ref(py)),
+                        progress: Some(callback),
                     },
                 )?;
                 if let Err(err) = loop_py
@@ -197,29 +236,12 @@ impl PyEvents {
             log::warn!("failed to schedule command_done: {err}");
         }
     }
-
-    /// Deliver one queued progress report (called on the loop
-    /// thread by the drainer).
-    fn deliver_progress(
-        callback: &Py<PyAny>,
-        py: Python<'_>,
-        payload: &Py<PyAny>,
-    ) {
-        if let Err(err) = callback.call1(py, (payload,)) {
-            log::warn!("progress callback failed: {err}");
-        }
-    }
 }
 
 impl SessionEvents for PyEvents {
-    fn state_changed(&self, state: &DeviceState) {
-        let state = state.clone();
-        self.schedule("state_changed", move |py| {
-            let obj = Py::new(
-                py,
-                crate::python::grbl::types::DeviceState::new(state),
-            )?;
-            Ok(obj.into_any())
+    fn state_changed(&self, state: &CoreDeviceState) {
+        self.schedule(SessionEvent::StateChanged {
+            state: PyDeviceState::new(state.clone()),
         });
     }
 
@@ -228,51 +250,39 @@ impl SessionEvents for PyEvents {
         status: TransportStatus,
         message: Option<&str>,
     ) {
-        let status = status.name().to_string();
-        let message = message.map(str::to_string);
-        self.schedule("connection_status_changed", move |py| {
-            Ok((status.clone(), message.clone())
-                .into_pyobject(py)?
-                .unbind()
-                .into_any())
+        self.schedule(SessionEvent::ConnectionStatusChanged {
+            status: status.name().to_string(),
+            message: message.map(str::to_string),
         });
     }
 
     fn command_status(&self, status: TransportStatus, message: Option<&str>) {
-        let status = status.name().to_string();
-        let message = message.map(str::to_string);
-        self.schedule("command_status_changed", move |py| {
-            Ok((status.clone(), message.clone())
-                .into_pyobject(py)?
-                .unbind()
-                .into_any())
+        self.schedule(SessionEvent::CommandStatusChanged {
+            status: status.name().to_string(),
+            message: message.map(str::to_string),
         });
     }
 
     fn job_finished(&self) {
-        self.schedule("job_finished", move |py| {
-            Ok(super::pyfuture::none_obj(py))
-        });
+        self.schedule(SessionEvent::JobFinished {});
     }
 
     fn probe_status(&self, message: &str) {
-        let message = message.to_string();
-        self.schedule("probe_status_changed", move |py| {
-            Ok(message.clone().into_pyobject(py)?.unbind().into_any())
+        self.schedule(SessionEvent::ProbeStatusChanged {
+            message: message.to_string(),
         });
     }
 
     fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>) {
-        let offsets = offsets.clone();
-        self.schedule("wcs_updated", move |py| {
-            Ok(offsets.clone().into_pyobject(py)?.unbind().into_any())
+        self.schedule(SessionEvent::WcsUpdated {
+            offsets: offsets.clone(),
         });
     }
 
     fn config_changed(&self, key: &str, value: i64) {
-        let key = key.to_string();
-        self.schedule("config_changed", move |py| {
-            Ok((key.clone(), value).into_pyobject(py)?.unbind().into_any())
+        self.schedule(SessionEvent::ConfigChanged {
+            key: key.to_string(),
+            value,
         });
     }
 
@@ -281,33 +291,49 @@ impl SessionEvents for PyEvents {
     }
 
     fn raw_rx(&self, line: &str) {
-        let line = line.to_string();
-        self.schedule("raw_rx", move |py| {
-            Ok(line.clone().into_pyobject(py)?.unbind().into_any())
+        self.schedule(SessionEvent::RawRx {
+            line: line.to_string(),
         });
     }
 
     fn raw_tx(&self, line: &str) {
-        let line = line.to_string();
-        self.schedule("raw_tx", move |py| {
-            Ok(line.clone().into_pyobject(py)?.unbind().into_any())
+        self.schedule(SessionEvent::RawTx {
+            line: line.to_string(),
         });
     }
 }
 
 impl EventDrainer {
-    /// Progress reports use a sentinel event name and route to the
-    /// progress callback instead of the event callback.
+    /// Deliver each queued event to its own callback: session
+    /// events to the event callback, progress reports to the
+    /// progress callback.
     fn take_and_deliver(&self, py: Python<'_>) {
-        for (name, payload) in self.queue.take() {
-            if name == "__progress__" {
-                let progress_cb =
-                    self.progress.as_ref().unwrap_or(&self.callback);
-                PyEvents::deliver_progress(progress_cb, py, &payload);
-            } else {
-                let callback = self.callback.bind(py);
-                if let Err(err) = callback.call1((name, payload)) {
-                    log::warn!("event callback failed: {err}");
+        for event in self.queue.take() {
+            match event {
+                QueuedEvent::Session(event) => {
+                    let Some(callback) = self.events.as_ref() else {
+                        continue;
+                    };
+                    let obj = match event.into_pyobject(py) {
+                        Ok(obj) => obj.into_any().unbind(),
+                        Err(err) => {
+                            log::warn!(
+                                "failed to materialize session event: {err}"
+                            );
+                            continue;
+                        }
+                    };
+                    if let Err(err) = callback.bind(py).call1((obj,)) {
+                        log::warn!("event callback failed: {err}");
+                    }
+                }
+                QueuedEvent::Progress(op_index) => {
+                    let Some(callback) = self.progress.as_ref() else {
+                        continue;
+                    };
+                    if let Err(err) = callback.call1(py, (op_index,)) {
+                        log::warn!("progress callback failed: {err}");
+                    }
                 }
             }
         }

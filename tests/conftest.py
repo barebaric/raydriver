@@ -8,7 +8,7 @@ import time
 import pytest
 
 from raydriver.emulator import GrblEmulator
-from raydriver.grbl import GrblSession, MockTransport
+from raydriver.grbl import GrblSession, MockTransport, SessionEvent
 
 
 def _arm_freeze_watchdog():
@@ -65,24 +65,25 @@ class EventRecorder:
     def __init__(self):
         self.events = []
 
-    def callback(self, name, payload=None):
-        self.events.append((name, payload))
+    def callback(self, event):
+        self.events.append(event)
 
     def names(self):
-        return [name for name, _ in self.events]
+        return [type(event).__name__ for event in self.events]
 
-    async def wait_for(self, name, pred=None, timeout=5.0):
-        """Wait until an event *name* (matching *pred*) was recorded."""
+    async def wait_for(self, kind, pred=None, timeout=5.0):
+        """Wait until an event of *kind* (a SessionEvent variant
+        class) matching *pred* was recorded."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            for event_name, payload in self.events:
-                if event_name != name:
+            for event in self.events:
+                if not isinstance(event, kind):
                     continue
-                if pred is None or pred(payload):
-                    return payload
+                if pred is None or pred(event):
+                    return event
             await asyncio.sleep(0.01)
         raise AssertionError(
-            f"event {name!r} not observed within {timeout:.1f}s; "
+            f"event {kind!r} not observed within {timeout:.1f}s; "
             f"got {self.names()}"
         )
 
@@ -136,7 +137,8 @@ async def rig(mock, events):
     session = make_session(mock, events)
     await session.connect()
     await events.wait_for(
-        "connection_status_changed", lambda p: p[0] == "CONNECTED"
+        SessionEvent.ConnectionStatusChanged,
+        lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
     events.events.clear()

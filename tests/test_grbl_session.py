@@ -6,6 +6,7 @@ import asyncio
 import pytest
 from conftest import make_session, sent_bytes, start_device
 
+from raydriver.grbl import SessionEvent
 from raydriver.grbl.types import DeviceStatus
 
 
@@ -15,11 +16,11 @@ class TestConnection:
         session = make_session(mock, events)
         try:
             await session.connect()
-            payload = await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+            event = await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
             )
-            assert payload[1] is None
+            assert event.message is None
             # The connection loop queried $I, whose OPT line
             # advertised the emulated 128-byte RX buffer.
             assert b"$I\n" in sent_bytes(mock)
@@ -33,14 +34,14 @@ class TestConnection:
         session = make_session(mock, events, {"handshake_timeout": 0.15})
         try:
             await session.connect()
-            payload = await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "ERROR",
+            event = await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "ERROR",
             )
-            assert "No response" in payload[1]
+            assert "No response" in event.message
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "SLEEPING",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "SLEEPING",
             )
         finally:
             await session.disconnect()
@@ -50,14 +51,14 @@ class TestConnection:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "ERROR",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "ERROR",
             )
             # The device appears (cable plugged back in).
             emulator, device_task = await start_device(mock)
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
                 timeout=8.0,
             )
             device_task.cancel()
@@ -84,8 +85,8 @@ class TestStatusReports:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
             )
             # OPT and Bf advertise 128, but the override sticks.
             await asyncio.sleep(0.15)
@@ -97,12 +98,20 @@ class TestStatusReports:
     async def test_fragmented_status_report_ignored(self, rig):
         session, mock, emulator, events = rig
         states_before = len(
-            [e for e in events.events if e[0] == "state_changed"]
+            [
+                e
+                for e in events.events
+                if isinstance(e, SessionEvent.StateChanged)
+            ]
         )
         mock.push(b"<Idle|MPos")
         await asyncio.sleep(0.1)
         states_after = len(
-            [e for e in events.events if e[0] == "state_changed"]
+            [
+                e
+                for e in events.events
+                if isinstance(e, SessionEvent.StateChanged)
+            ]
         )
         assert states_after == states_before
 
@@ -148,7 +157,9 @@ class TestInteractiveCommands:
         lines = await session.execute_interactive_command("G0 X10000")
         assert "ALARM:2" in lines
         assert lines[-1] == "error:5"
-        await events.wait_for("state_changed", lambda p: p.error is not None)
+        await events.wait_for(
+            SessionEvent.StateChanged, lambda e: e.state.error is not None
+        )
         # Like real Grbl, subsequent gcode is rejected.
         lines = await session.execute_interactive_command("G0 X1")
         assert lines == ["error:9"]
@@ -164,7 +175,8 @@ class TestHold:
         await session.set_hold(True)
         assert b"!" in mock.sent()
         await events.wait_for(
-            "state_changed", lambda p: p.status == DeviceStatus.HOLD
+            SessionEvent.StateChanged,
+            lambda e: e.state.status == DeviceStatus.HOLD,
         )
         await session.set_hold(False)
         assert b"~" in mock.sent()
@@ -174,7 +186,8 @@ class TestHold:
         await session.set_hold(True)
         await session.set_hold(False)
         await events.wait_for(
-            "state_changed", lambda p: p.status == DeviceStatus.IDLE
+            SessionEvent.StateChanged,
+            lambda e: e.state.status == DeviceStatus.IDLE,
         )
 
 
@@ -282,7 +295,7 @@ class TestWcs:
         session, mock, emulator, events = rig
         offsets = await session.read_wcs_offsets()
         assert offsets["G54"] == (0.0, 0.0, 0.0)
-        await events.wait_for("wcs_updated")
+        await events.wait_for(SessionEvent.WcsUpdated)
 
     async def test_set_then_read_wcs_offset(self, rig):
         session, mock, emulator, events = rig
@@ -314,7 +327,8 @@ class TestProbe:
         pos = await session.run_probe_cycle("Z", 10.0, 100)
         assert pos == pytest.approx((0.0, 0.0, -5.0))
         await events.wait_for(
-            "probe_status_changed", lambda p: "triggered" in p
+            SessionEvent.ProbeStatusChanged,
+            lambda e: "triggered" in e.message,
         )
         assert emulator.mpos == pytest.approx([0.0, 0.0, -5.0])
 
@@ -324,18 +338,21 @@ class TestProbe:
         pos = await session.run_probe_cycle("Z", 10.0, 100)
         assert pos is None
         await events.wait_for(
-            "probe_status_changed", lambda p: p == "Probe failed"
+            SessionEvent.ProbeStatusChanged,
+            lambda e: e.message == "Probe failed",
         )
-        payload = await events.wait_for(
-            "state_changed", lambda p: p.error is not None
+        event = await events.wait_for(
+            SessionEvent.StateChanged, lambda e: e.state.error is not None
         )
-        assert payload.error.code == 4
-        assert payload.error.title.startswith("Probe Fail")
+        assert event.state.error.code == 4
+        assert event.state.error.title.startswith("Probe Fail")
 
     async def test_probe_after_alarm_lock_can_unlock(self, rig):
         session, mock, emulator, events = rig
         await session.run_probe_cycle("Z", 10.0, 100)
-        await events.wait_for("state_changed", lambda p: p.error is not None)
+        await events.wait_for(
+            SessionEvent.StateChanged, lambda e: e.state.error is not None
+        )
         lines = await session.execute_command("$X")
         assert "[MSG:Caution: Unlocked]" in lines
 
@@ -354,9 +371,12 @@ class TestInchReports:
         await session.move_to(1500, 25.4, 0)
         emulator.settings["13"] = 1
         assert await session.detect_unit_system() == "imperial"
-        payload = await events.wait_for(
-            "state_changed",
-            lambda p: p.machine_pos[0] is not None and p.machine_pos[0] > 20.0,
+        event = await events.wait_for(
+            SessionEvent.StateChanged,
+            lambda e: (
+                e.state.machine_pos[0] is not None
+                and e.state.machine_pos[0] > 20.0
+            ),
         )
         # The report arrived in inches; the driver reports mm.
-        assert payload.machine_pos[0] == pytest.approx(25.4, abs=0.1)
+        assert event.state.machine_pos[0] == pytest.approx(25.4, abs=0.1)

@@ -13,6 +13,7 @@ from . import types
 __all__ = [
     "GrblSession",
     "MockTransport",
+    "SessionEvent",
     "parser",
     "types",
 ]
@@ -23,8 +24,8 @@ class GrblSession:
     A GRBL device session: connection lifecycle, streaming and
     interactive commands, entirely in Rust.
     
-    All async methods return asyncio futures; events are delivered to
-    `event_callback(name, payload)` on the event loop thread.
+    All async methods return asyncio futures; a typed `SessionEvent`
+    is delivered to `event_callback(event)` on the event loop thread.
     """
     @property
     def state(self) -> types.DeviceState:
@@ -187,4 +188,77 @@ class MockTransport:
         down), simulating an unplugged cable.
         """
     def __repr__(self) -> builtins.str: ...
+
+class SessionEvent:
+    r"""
+    One typed session event, delivered to `event_callback`.
+    """
+    @typing.final
+    class StateChanged(SessionEvent):
+        __match_args__ = ("state",)
+        @property
+        def state(self) -> types.DeviceState: ...
+        def __new__(cls, state: types.DeviceState) -> SessionEvent.StateChanged: ...
+    
+    @typing.final
+    class ConnectionStatusChanged(SessionEvent):
+        __match_args__ = ("status", "message",)
+        @property
+        def status(self) -> builtins.str: ...
+        @property
+        def message(self) -> typing.Optional[builtins.str]: ...
+        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.ConnectionStatusChanged: ...
+    
+    @typing.final
+    class CommandStatusChanged(SessionEvent):
+        __match_args__ = ("status", "message",)
+        @property
+        def status(self) -> builtins.str: ...
+        @property
+        def message(self) -> typing.Optional[builtins.str]: ...
+        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.CommandStatusChanged: ...
+    
+    @typing.final
+    class JobFinished(SessionEvent):
+        __match_args__ = ()
+        def __new__(cls) -> SessionEvent.JobFinished: ...
+    
+    @typing.final
+    class ProbeStatusChanged(SessionEvent):
+        __match_args__ = ("message",)
+        @property
+        def message(self) -> builtins.str: ...
+        def __new__(cls, message: builtins.str) -> SessionEvent.ProbeStatusChanged: ...
+    
+    @typing.final
+    class WcsUpdated(SessionEvent):
+        __match_args__ = ("offsets",)
+        @property
+        def offsets(self) -> builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]: ...
+        def __new__(cls, offsets: typing.Mapping[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]) -> SessionEvent.WcsUpdated: ...
+    
+    @typing.final
+    class ConfigChanged(SessionEvent):
+        __match_args__ = ("key", "value",)
+        @property
+        def key(self) -> builtins.str: ...
+        @property
+        def value(self) -> builtins.int: ...
+        def __new__(cls, key: builtins.str, value: builtins.int) -> SessionEvent.ConfigChanged: ...
+    
+    @typing.final
+    class RawRx(SessionEvent):
+        __match_args__ = ("line",)
+        @property
+        def line(self) -> builtins.str: ...
+        def __new__(cls, line: builtins.str) -> SessionEvent.RawRx: ...
+    
+    @typing.final
+    class RawTx(SessionEvent):
+        __match_args__ = ("line",)
+        @property
+        def line(self) -> builtins.str: ...
+        def __new__(cls, line: builtins.str) -> SessionEvent.RawTx: ...
+    
+    ...
 

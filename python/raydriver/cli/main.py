@@ -20,10 +20,9 @@ import asyncio
 import os
 import sys
 import time
-from typing import Any
 
 import raydriver.raydriver as _native
-from raydriver.grbl import GrblSession, MockTransport
+from raydriver.grbl import GrblSession, MockTransport, SessionEvent
 from raydriver.grbl.parser import strip_gcode_comments
 from raydriver.grbl.types import DeviceState
 
@@ -160,15 +159,19 @@ async def cmd_run(args) -> int:
 
     connected = asyncio.get_running_loop().create_future()
 
-    def on_event(name: str, payload: Any = None):
-        if name == "state_changed":
-            view.on_state(payload)
-        elif name == "connection_status_changed" and not (connected.done()):
-            if payload[0] == "CONNECTED":
+    def on_event(event: SessionEvent):
+        match event:
+            case SessionEvent.StateChanged():
+                view.on_state(event.state)
+            case SessionEvent.ConnectionStatusChanged(status="CONNECTED") if (
+                not connected.done()
+            ):
                 connected.set_result(True)
-            elif payload[0] == "ERROR":
+            case SessionEvent.ConnectionStatusChanged(
+                status="ERROR", message=message
+            ) if not connected.done():
                 connected.set_exception(
-                    ConnectionError(payload[1] or "connection failed")
+                    ConnectionError(message or "connection failed")
                 )
 
     session, device_task = _open_session(args, on_event)
@@ -213,17 +216,19 @@ async def cmd_run(args) -> int:
 
 
 async def cmd_status(args) -> int:
-    def on_event(name: str, payload: Any = None):
-        if name == "state_changed":
-            mpos = ",".join(
-                f"{v:8.3f}" if v is not None else "     -  "
-                for v in payload.machine_pos
-            )
-            error = f" ! {payload.error.title}" if payload.error else ""
-            print(
-                f"{time.strftime('%H:%M:%S')} {payload.status.name:8}"
-                f" MPos:{mpos}{error}"
-            )
+    def on_event(event: SessionEvent):
+        match event:
+            case SessionEvent.StateChanged():
+                state = event.state
+                mpos = ",".join(
+                    f"{v:8.3f}" if v is not None else "     -  "
+                    for v in state.machine_pos
+                )
+                error = f" ! {state.error.title}" if state.error else ""
+                print(
+                    f"{time.strftime('%H:%M:%S')} {state.status.name:8}"
+                    f" MPos:{mpos}{error}"
+                )
 
     session, device_task = _open_session(args, on_event)
     try:
