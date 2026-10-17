@@ -52,9 +52,8 @@ make check   # lint + test
 
 ```python
 import asyncio
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSession, SessionEvent
 
-events = []
 session = GrblSession(
     config={"port": "/dev/ttyUSB0", "baudrate": 115200},
     dialect={
@@ -64,8 +63,19 @@ session = GrblSession(
         "laser_on": "M4 S{power:.0f}",
         "laser_off": "M5",
     },
-    event_callback=lambda name, payload: events.append((name, payload)),
+    event_callback=on_event,
 )
+
+def on_event(event: SessionEvent):
+    match event:
+        case SessionEvent.StateChanged():
+            print("device state:", event.state.status.name)
+        case SessionEvent.ConnectionStatusChanged(status=status):
+            print("connection:", status)
+        case SessionEvent.RawRx(line=line):
+            print("<<", line)
+        case SessionEvent.RawTx(line=line):
+            print(">>", line)
 
 async def main():
     await session.connect()

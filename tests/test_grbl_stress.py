@@ -5,6 +5,8 @@ import asyncio
 
 from conftest import make_session, start_device
 
+from raydriver.grbl import SessionEvent
+
 
 def gcode(n_lines):
     return "\n".join(f"G1 X{i % 50} F2000" for i in range(n_lines))
@@ -21,8 +23,8 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )
             done = []
@@ -49,8 +51,8 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )
             n = 200
@@ -71,8 +73,8 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed",
-                lambda p: p[0] == "CONNECTED",
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )
             done = []

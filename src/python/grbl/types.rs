@@ -1,6 +1,11 @@
 //! Python-visible value types mirroring Rayforge's
 //! `machine.driver.driver` module.
 
+// `from_py_object` generates a FromPyObject impl whose .clone() is
+// flagged as clone_on_copy for Copy types; the lint cannot be
+// targeted at the generated impl, only at this module.
+#![allow(clippy::clone_on_copy)]
+
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyclass_enum, gen_stub_pymethods,

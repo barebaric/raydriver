@@ -171,8 +171,8 @@ fn parse_dialect(dict: Option<&Bound<'_, PyDict>>) -> PyResult<GrblDialect> {
 /// A GRBL device session: connection lifecycle, streaming and
 /// interactive commands, entirely in Rust.
 ///
-/// All async methods return asyncio futures; events are delivered to
-/// `event_callback(name, payload)` on the event loop thread.
+/// All async methods return asyncio futures; a typed `SessionEvent`
+/// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
 #[pyclass(module = "raydriver.grbl")]
 pub struct GrblSession {

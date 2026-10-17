@@ -2,6 +2,8 @@
 
 from conftest import make_session, start_device
 
+from raydriver.grbl import SessionEvent
+
 
 class TestRawLines:
     async def test_raw_tx_reports_interactive_command(self, mock, events):
@@ -10,11 +12,12 @@ class TestRawLines:
         try:
             await session.connect()
             await events.wait_for(
-                "connection_status_changed", lambda p: p[0] == "CONNECTED"
+                SessionEvent.ConnectionStatusChanged,
+                lambda e: e.status == "CONNECTED",
             )
             events.events.clear()
             await session.execute_interactive_command("$$")
-            await events.wait_for("raw_tx", lambda line: line == "$$")
+            await events.wait_for(SessionEvent.RawTx, lambda e: e.line == "$$")
         finally:
             await session.disconnect()
             device_task.cancel()
@@ -22,18 +25,20 @@ class TestRawLines:
     async def test_raw_rx_reports_settings_reply(self, rig):
         session, mock, emulator, events = rig
         await session.execute_interactive_command("$$")
-        await events.wait_for("raw_rx", lambda line: "ok" == line)
+        await events.wait_for(SessionEvent.RawRx, lambda e: "ok" == e.line)
         assert any(
-            name == "raw_rx" and line.startswith("$")
-            for name, line in events.events
+            isinstance(e, SessionEvent.RawRx) and e.line.startswith("$")
+            for e in events.events
         )
 
     async def test_raw_rx_reports_status_report(self, rig):
         session, mock, emulator, events = rig
-        report = await events.wait_for(
-            "raw_rx", lambda line: line.startswith("<") and line.endswith(">")
+        event = await events.wait_for(
+            SessionEvent.RawRx,
+            lambda e: e.line.startswith("<") and e.line.endswith(">"),
         )
-        assert "Idle" in report or "Run" in report or "Hold" in report
+        line = event.line
+        assert "Idle" in line or "Run" in line or "Hold" in line
 
     async def test_raw_rx_reports_welcome_message(self, mock, events):
         emulator, device_task = await start_device(mock)
@@ -41,7 +46,7 @@ class TestRawLines:
         try:
             await session.connect()
             await events.wait_for(
-                "raw_rx", lambda line: line.startswith("Grbl ")
+                SessionEvent.RawRx, lambda e: e.line.startswith("Grbl ")
             )
         finally:
             await session.disconnect()
@@ -51,9 +56,9 @@ class TestRawLines:
         session, mock, emulator, events = rig
         await session.execute_interactive_command("$I")
         raw = [
-            line
-            for name, line in events.events
-            if name in ("raw_rx", "raw_tx")
+            e.line
+            for e in events.events
+            if isinstance(e, (SessionEvent.RawRx, SessionEvent.RawTx))
         ]
         assert "$I" in raw
         assert any(line.startswith("[VER:") for line in raw)
