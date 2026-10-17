@@ -188,6 +188,10 @@ impl GrblSession {
     fn new(
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing")
+        ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let kind = transport_kind_from_config(config.as_ref())?;
@@ -202,6 +206,10 @@ impl GrblSession {
         transport: PyRef<'_, MockTransport>,
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing")
+        ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let kind = TransportKind::Mock(transport.inner.clone());

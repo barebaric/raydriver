@@ -7,6 +7,7 @@ The central type is GrblSession: it owns the connection lifecycle (handshake, st
 """
 
 import builtins
+import collections.abc
 import typing
 from . import parser
 from . import types
@@ -45,9 +46,9 @@ class GrblSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[typing.Any] = None) -> GrblSession: ...
+    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]] = None) -> GrblSession: ...
     @staticmethod
-    def with_transport(transport: MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[typing.Any] = None) -> GrblSession:
+    def with_transport(transport: MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]] = None) -> GrblSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
