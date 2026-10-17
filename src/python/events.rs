@@ -65,6 +65,7 @@ impl EventQueue {
 struct EventDrainer {
     queue: Arc<EventQueue>,
     callback: Py<PyAny>,
+    progress: Option<Py<PyAny>>,
 }
 
 #[pymethods]
@@ -130,6 +131,12 @@ impl PyEvents {
                     EventDrainer {
                         queue: self.queue.clone(),
                         callback: callback.clone().unbind(),
+                        progress: self
+                            .progress_callback
+                            .lock()
+                            .unwrap()
+                            .as_ref()
+                            .map(|cb| cb.clone_ref(py)),
                     },
                 )?;
                 loop_py
@@ -172,6 +179,7 @@ impl PyEvents {
                     EventDrainer {
                         queue: self.queue.clone(),
                         callback,
+                        progress: None,
                     },
                 )?;
                 if let Err(err) = loop_py
@@ -271,6 +279,20 @@ impl SessionEvents for PyEvents {
     fn command_done(&self, op_index: i64) {
         self.schedule_progress(op_index);
     }
+
+    fn raw_rx(&self, line: &str) {
+        let line = line.to_string();
+        self.schedule("raw_rx", move |py| {
+            Ok(line.clone().into_pyobject(py)?.unbind().into_any())
+        });
+    }
+
+    fn raw_tx(&self, line: &str) {
+        let line = line.to_string();
+        self.schedule("raw_tx", move |py| {
+            Ok(line.clone().into_pyobject(py)?.unbind().into_any())
+        });
+    }
 }
 
 impl EventDrainer {
@@ -279,7 +301,9 @@ impl EventDrainer {
     fn take_and_deliver(&self, py: Python<'_>) {
         for (name, payload) in self.queue.take() {
             if name == "__progress__" {
-                PyEvents::deliver_progress(&self.callback, py, &payload);
+                let progress_cb =
+                    self.progress.as_ref().unwrap_or(&self.callback);
+                PyEvents::deliver_progress(progress_cb, py, &payload);
             } else {
                 let callback = self.callback.bind(py);
                 if let Err(err) = callback.call1((name, payload)) {

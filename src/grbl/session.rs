@@ -44,6 +44,14 @@ pub trait SessionEvents: Send + Sync {
     fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>);
     fn config_changed(&self, key: &str, value: i64);
     fn command_done(&self, op_index: i64);
+
+    /// A complete line received from the device, including status
+    /// reports, `ok`/`error:` acknowledgements and `$` replies.
+    fn raw_rx(&self, _line: &str) {}
+
+    /// A complete line sent to the device (interactive commands and
+    /// realtime bytes; not bulk job streaming).
+    fn raw_tx(&self, _line: &str) {}
 }
 
 /// No-op event sink.
@@ -663,9 +671,18 @@ impl SessionCore {
         }
         for resp in lines.into_iter().chain(acks) {
             match resp.rtype {
-                GrblResponseType::Ok => self.handle_ok(resp.pending),
-                GrblResponseType::Error => self.handle_error(&resp.text),
-                GrblResponseType::Line => self.handle_line(&resp.text),
+                GrblResponseType::Ok => {
+                    self.events.raw_rx("ok");
+                    self.handle_ok(resp.pending)
+                }
+                GrblResponseType::Error => {
+                    self.events.raw_rx(&resp.text);
+                    self.handle_error(&resp.text)
+                }
+                GrblResponseType::Line => {
+                    self.events.raw_rx(&resp.text);
+                    self.handle_line(&resp.text)
+                }
             }
         }
         // Wake parked senders only after the responses were
@@ -1088,6 +1105,7 @@ impl SessionCore {
         let text = String::from_utf8_lossy(payload).to_string();
         self.flow
             .track_command(payload.len(), None, text.trim_end());
+        self.events.raw_tx(text.trim_end());
         self.transport.write(payload).await?;
         Ok(())
     }
