@@ -107,6 +107,7 @@ pub struct MarlinCore {
     job_running: AtomicBool,
     is_cancelled: AtomicBool,
     handshake_received: AsyncEvent,
+    connected: AsyncEvent,
     line_buffer: Mutex<Vec<u8>>,
     pending: Mutex<Option<Arc<PendingCmd>>>,
     job_exception: Mutex<Option<SessionError>>,
@@ -133,6 +134,7 @@ impl MarlinCore {
             job_running: AtomicBool::new(false),
             is_cancelled: AtomicBool::new(false),
             handshake_received: AsyncEvent::new(),
+            connected: AsyncEvent::new(),
             line_buffer: Mutex::new(Vec::new()),
             pending: Mutex::new(None),
             job_exception: Mutex::new(None),
@@ -248,6 +250,10 @@ impl MarlinCore {
                         self.config.connect_settle,
                     ))
                     .await;
+                    // Commands must not be sent before the device
+                    // announced itself: the boot banner's trailing ok
+                    // would otherwise resolve a pending command.
+                    self.connected.set();
                     self.update_connection_status(
                         TransportStatus::Connected,
                         None,
@@ -453,6 +459,24 @@ impl MarlinCore {
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
         let _guard = self.cmd_lock.lock().await;
+        if !self.connected.is_set() {
+            // Wait out the handshake: sending earlier would let the
+            // boot banner's trailing ok resolve this command.
+            let wait_deadline = tokio::time::Instant::now()
+                + MarlinConfig::secs(
+                    self.config.handshake_timeout
+                        + self.config.connect_settle
+                        + 2.0,
+                );
+            if tokio::time::timeout_at(wait_deadline, self.connected.wait())
+                .await
+                .is_err()
+            {
+                return Err(SessionError::Connection(
+                    "device did not announce itself (no 'start')".to_string(),
+                ));
+            }
+        }
         if !self.transport.is_open() {
             return Err(SessionError::Connection(
                 "Serial transport not connected".to_string(),

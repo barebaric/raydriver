@@ -178,6 +178,12 @@ class MarlinEmulator:
         if self._current is None:
             if self._queue:
                 self._current = self._queue.pop(0)
+                if not isinstance(self._current, _Motion):
+                    # A queued non-motion command: respond in turn.
+                    command = self._current
+                    self._current = None
+                    command()
+                    return
 
         if self._current is None:
             return
