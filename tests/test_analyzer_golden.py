@@ -89,7 +89,10 @@ async def grbl_scenario():
         await _quiesce(recorder)
         await session.execute_interactive_command("$I")
         await session.execute_interactive_command("$G")
-        await session.run("G90\nG1 X10 F1000\n", {0: 0, 1: 1}, [], None)
+        # One streamed line: with two, the character-counting
+        # session pipelines them and whether the first ok lands
+        # before or after the second write is scheduler luck.
+        await session.run("G1 X10 F1000\n", {0: 0}, [], None)
         await session.disconnect()
     finally:
         device_task.cancel()

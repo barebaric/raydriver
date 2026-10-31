@@ -15,7 +15,5 @@
    13   ->  $G                          parser state request
    14   <-  [G54 G17 G21 G90 G94 M5 M…
    15   <-  ok                          ack
-   16   ->  G90
-   17   ->  G1 X10 F1000
-   18   <-  ok                          ack
-   19   <-  ok                          ack
+   16   ->  G1 X10 F1000
+   17   <-  ok                          ack
