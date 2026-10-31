@@ -297,9 +297,19 @@ impl MarlinCore {
     }
 
     async fn position_poll_loop(&self) {
-        while self.transport.is_open()
-            && self.keep_running.load(Ordering::SeqCst)
-        {
+        loop {
+            // Poll on an interval, counting from the connection: a
+            // freshly booted device gets a moment before the first
+            // M114.
+            tokio::time::sleep(MarlinConfig::secs(
+                self.config.status_poll_interval,
+            ))
+            .await;
+            if !self.transport.is_open()
+                || !self.keep_running.load(Ordering::SeqCst)
+            {
+                break;
+            }
             if self.config.poll_status_while_running
                 || !self.job_running.load(Ordering::SeqCst)
             {
@@ -313,10 +323,6 @@ impl MarlinCore {
                     break;
                 }
             }
-            tokio::time::sleep(MarlinConfig::secs(
-                self.config.status_poll_interval,
-            ))
-            .await;
         }
     }
 
