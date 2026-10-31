@@ -1,5 +1,5 @@
 """Shared fixtures: sessions driven against the GRBL firmware
-emulator (raydriver.emulator)."""
+emulator (raydriver.grbl.emulator)."""
 
 import asyncio
 import faulthandler
@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from raydriver.emulator import GrblEmulator
 from raydriver.grbl import GrblSession, MockTransport, SessionEvent
+from raydriver.grbl.emulator import GrblEmulator
 
 
 def _arm_freeze_watchdog():

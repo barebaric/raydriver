@@ -4,6 +4,7 @@
 pub(crate) mod mock;
 pub(crate) mod parser;
 pub(crate) mod session;
+pub(crate) mod simple;
 pub(crate) mod types;
 
 use pyo3::prelude::*;
@@ -14,7 +15,9 @@ GRBL device drivers implemented in Rust.
 The central type is GrblSession: it owns the connection lifecycle \
 (handshake, status polling, reconnect), interactive commands, and \
 job streaming with character-counting flow control, stall detection \
-and deadlock recovery. Dialects remain data owned by Rayforge: \
+and deadlock recovery. GrblSimpleSession (raydriver.grbl.simple) is \
+the minimal alternative: strict ping-pong, for hardware where the \
+full driver misbehaves. Dialects remain data owned by Rayforge: \
 resolved command templates are passed into the session.
 ";
 
@@ -33,6 +36,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     grbl_mod.add_class::<session::GrblSession>()?;
     grbl_mod.add_class::<mock::MockTransport>()?;
     grbl_mod.add_class::<crate::python::events::SessionEvent>()?;
+
+    let simple_mod = PyModule::new(py, "simple")?;
+    simple::register(&simple_mod)?;
+    grbl_mod.add_submodule(&simple_mod)?;
 
     let types_mod = PyModule::new(py, "types")?;
     types::register(&types_mod)?;

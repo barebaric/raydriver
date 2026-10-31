@@ -10,9 +10,8 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::grbl::dialect::GrblDialect;
-use crate::grbl::session::{
-    SessionConfig, SessionCore, SessionError, TransportKind,
-};
+use crate::grbl::session::{SessionConfig, SessionCore, SessionError};
+use crate::grbl::transport::TransportKind;
 use crate::grbl::types::UnitSystem;
 
 use crate::python::events::PyEvents;
@@ -34,14 +33,20 @@ impl From<SessionError> for PyErr {
     }
 }
 
-fn get_bool(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<bool>> {
+pub(crate) fn get_bool(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<bool>> {
     match dict.get_item(key)? {
         Some(v) => Ok(Some(v.extract::<bool>()?)),
         None => Ok(None),
     }
 }
 
-fn get_f64(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<f64>> {
+pub(crate) fn get_f64(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<f64>> {
     match dict.get_item(key)? {
         Some(v) => {
             if let Ok(b) = v.extract::<bool>() {
@@ -67,7 +72,7 @@ fn get_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
     }
 }
 
-fn build_config(
+pub(crate) fn build_config(
     kind: TransportKind,
     dict: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<SessionConfig> {
@@ -129,7 +134,7 @@ fn build_config(
     Ok(config)
 }
 
-fn transport_kind_from_config(
+pub(crate) fn transport_kind_from_config(
     dict: Option<&Bound<'_, PyDict>>,
 ) -> PyResult<TransportKind> {
     let Some(dict) = dict else {
@@ -146,7 +151,9 @@ fn transport_kind_from_config(
     Ok(TransportKind::Serial { port, baudrate })
 }
 
-fn parse_dialect(dict: Option<&Bound<'_, PyDict>>) -> PyResult<GrblDialect> {
+pub(crate) fn parse_dialect(
+    dict: Option<&Bound<'_, PyDict>>,
+) -> PyResult<GrblDialect> {
     let mut safety_off_commands = None;
     let mut map: HashMap<String, String> = HashMap::new();
     if let Some(dict) = dict {

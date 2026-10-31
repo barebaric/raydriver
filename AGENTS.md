@@ -26,7 +26,7 @@
 ## Testing
 
 All tests are Python-based, under `tests/`, and run against
-`raydriver.emulator.GrblEmulator` — a GRBL 1.1h *firmware emulator*
+`raydriver.grbl.emulator.GrblEmulator` — a GRBL 1.1h *firmware emulator*
 (not a mock): it models the character-counting RX buffer, the
 15-block planner with deferred acknowledgements, realtime command
 interception, modal G-code state, feed-rate-timed motion, alarms,
