@@ -4,9 +4,14 @@ pub mod mock;
 pub mod serial;
 pub mod telnet;
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::grbl::transport::mock::MockInner;
+use crate::grbl::transport::serial::SerialTransport;
+use crate::grbl::transport::telnet::TelnetTransport;
 use crate::grbl::types::TransportStatus;
 
 /// A connection-orientiated byte transport to a device.
@@ -42,6 +47,33 @@ pub trait Transport: Send + Sync {
     /// Transport-level status hint after a failed operation.
     fn status_on_error(&self) -> TransportStatus {
         TransportStatus::Error
+    }
+}
+
+/// Which physical transport to use.
+///
+/// This is the transport registry: adding a transport means adding a
+/// variant plus a [`TransportKind::build`] arm — sessions and the
+/// Python config parsing stay untouched.
+#[derive(Clone)]
+pub enum TransportKind {
+    Serial { port: String, baudrate: u32 },
+    Telnet { host: String, port: u16 },
+    Mock(Arc<MockInner>),
+}
+
+impl TransportKind {
+    /// Construct the transport implementation for this kind.
+    pub fn build(&self) -> Arc<dyn Transport> {
+        match self {
+            TransportKind::Serial { port, baudrate } => {
+                SerialTransport::new(port, *baudrate)
+            }
+            TransportKind::Telnet { host, port } => {
+                TelnetTransport::new(host, *port)
+            }
+            TransportKind::Mock(inner) => inner.clone(),
+        }
     }
 }
 

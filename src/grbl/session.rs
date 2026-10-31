@@ -18,9 +18,7 @@ use super::dialect::{format_template, Arg, GrblDialect};
 use super::flow::FlowControl;
 use super::flow::GrblResponseType;
 use super::parser;
-use super::transport::mock::MockInner;
-use super::transport::serial::SerialTransport;
-use super::transport::telnet::TelnetTransport;
+use super::transport::TransportKind;
 use super::transport::{Transport, TransportError};
 use super::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
@@ -72,14 +70,6 @@ impl SessionEvents for NoopEvents {
     fn wcs_updated(&self, _offsets: &HashMap<String, (f64, f64, f64)>) {}
     fn config_changed(&self, _key: &str, _value: i64) {}
     fn command_done(&self, _op_index: i64) {}
-}
-
-/// Which physical transport to use.
-#[derive(Clone)]
-pub enum TransportKind {
-    Serial { port: String, baudrate: u32 },
-    Telnet { host: String, port: u16 },
-    Mock(Arc<MockInner>),
 }
 
 /// Session configuration with the Python driver's default timings.
@@ -334,15 +324,7 @@ impl SessionCore {
         dialect: GrblDialect,
         events: Arc<dyn SessionEvents>,
     ) -> Arc<Self> {
-        let transport: Arc<dyn Transport> = match &config.transport {
-            TransportKind::Serial { port, baudrate } => {
-                SerialTransport::new(port, *baudrate)
-            }
-            TransportKind::Telnet { host, port } => {
-                TelnetTransport::new(host, *port)
-            }
-            TransportKind::Mock(inner) => inner.clone(),
-        };
+        let transport: Arc<dyn Transport> = config.transport.build();
         let (cmd_tx, _) = mpsc::unbounded_channel();
         let core = Self {
             config,

@@ -13,6 +13,7 @@
 //! - [`grbl::transport`]: async byte transports (serial, telnet,
 //!   mock).
 //! - [`grbl::session`]: the connection/streaming state machines.
+//! - [`grbl::simple`]: the minimal ping-pong session.
 //!
 //! The crate is layered: `grbl` is pure Rust and must not depend on
 //! PyO3; the optional `python` feature provides bindings that

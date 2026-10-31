@@ -3,19 +3,21 @@
 r"""
 GRBL device drivers implemented in Rust.
 
-The central type is GrblSession: it owns the connection lifecycle (handshake, status polling, reconnect), interactive commands, and job streaming with character-counting flow control, stall detection and deadlock recovery. Dialects remain data owned by Rayforge: resolved command templates are passed into the session.
+The central type is GrblSession: it owns the connection lifecycle (handshake, status polling, reconnect), interactive commands, and job streaming with character-counting flow control, stall detection and deadlock recovery. GrblSimpleSession (raydriver.grbl.simple) is the minimal alternative: strict ping-pong, for hardware where the full driver misbehaves. Dialects remain data owned by Rayforge: resolved command templates are passed into the session.
 """
 
 import builtins
 import collections.abc
 import typing
 from . import parser
+from . import simple
 from . import types
 __all__ = [
     "GrblSession",
     "MockTransport",
     "SessionEvent",
     "parser",
+    "simple",
     "types",
 ]
 
