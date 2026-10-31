@@ -15,14 +15,14 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyclass_complex_enum;
 
-use crate::grbl::session::SessionEvents;
-use crate::grbl::types::{DeviceState as CoreDeviceState, TransportStatus};
+use crate::core::session::SessionEvents;
+use crate::core::types::{DeviceState as CoreDeviceState, TransportStatus};
 
-use crate::python::grbl::types::DeviceState as PyDeviceState;
+use crate::python::core::types::DeviceState as PyDeviceState;
 
 /// One typed session event, delivered to `event_callback`.
 #[gen_stub_pyclass_complex_enum]
-#[pyclass(module = "raydriver.grbl", skip_from_py_object)]
+#[pyclass(module = "raydriver.core", skip_from_py_object)]
 #[derive(Clone)]
 pub enum SessionEvent {
     StateChanged {
@@ -105,7 +105,7 @@ impl EventQueue {
 /// thread and delivers every queued event.  Carries both callbacks
 /// so each queued event routes to its own callback no matter which
 /// schedule call drained the batch.
-#[pyclass(module = "raydriver.grbl")]
+#[pyclass(module = "raydriver.core")]
 struct EventDrainer {
     queue: Arc<EventQueue>,
     events: Option<Py<PyAny>>,

@@ -1,11 +1,9 @@
 //! The `raydriver.grbl` Python submodule: GRBL sessions, transports
 //! and value types.
 
-pub(crate) mod mock;
 pub(crate) mod parser;
 pub(crate) mod session;
 pub(crate) mod simple;
-pub(crate) mod types;
 
 use pyo3::prelude::*;
 
@@ -28,22 +26,13 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let grbl_mod = PyModule::new(py, "grbl")?;
 
     grbl_mod.setattr("__doc__", MODULE_DOC)?;
-    grbl_mod.add(
-        "__all__",
-        vec!["GrblSession", "MockTransport", "SessionEvent", "types"],
-    )?;
+    grbl_mod.add("__all__", vec!["GrblSession", "parser"])?;
 
     grbl_mod.add_class::<session::GrblSession>()?;
-    grbl_mod.add_class::<mock::MockTransport>()?;
-    grbl_mod.add_class::<crate::python::events::SessionEvent>()?;
 
     let simple_mod = PyModule::new(py, "simple")?;
     simple::register(&simple_mod)?;
     grbl_mod.add_submodule(&simple_mod)?;
-
-    let types_mod = PyModule::new(py, "types")?;
-    types::register(&types_mod)?;
-    grbl_mod.add_submodule(&types_mod)?;
 
     let parser_mod = PyModule::new(py, "parser")?;
     parser::register(&parser_mod)?;

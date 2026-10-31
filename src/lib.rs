@@ -1,25 +1,24 @@
 //! Rust-native machine drivers.
 //!
-//! Currently contains the GRBL protocol stack:
+//! The crate is split into a protocol-neutral core and protocol
+//! modules built on top of it:
 //!
-//! - [`grbl::types`]: shared value types (device state, statuses,
-//!   errors).
-//! - [`grbl::errors`]: Grbl error and alarm code tables.
-//! - [`grbl::parser`]: response parsers (status reports, settings,
-//!   probe results, …).
-//! - [`grbl::dialect`]: command templates and `str.format`-style
-//!   formatting.
-//! - [`grbl::flow`]: character-counting RX-buffer flow control.
-//! - [`grbl::transport`]: async byte transports (serial, telnet,
-//!   mock).
-//! - [`grbl::session`]: the connection/streaming state machines.
-//! - [`grbl::simple`]: the minimal ping-pong session.
+//! - [`core`]: shared primitives — byte transports, device value
+//!   types, dialect command-template formatting, and the session
+//!   event/error primitives.
+//! - [`grbl`]: the GRBL protocol stack (parsing, flow control, the
+//!   full session and the minimal ping-pong session).
+//! - [`smoothie`]: the Smoothieware session.
+//! - [`marlin`]: the Marlin session.
 //!
-//! The crate is layered: `grbl` is pure Rust and must not depend on
-//! PyO3; the optional `python` feature provides bindings that
-//! mirror this structure.
+//! The crate is layered: `core` and the protocol modules are pure
+//! Rust and must not depend on PyO3; the optional `python` feature
+//! provides bindings that mirror this structure.
 
+pub mod core;
 pub mod grbl;
+pub mod marlin;
+pub mod smoothie;
 
 #[cfg(feature = "python")]
 pub(crate) mod python;

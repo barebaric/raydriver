@@ -6,8 +6,8 @@ import asyncio
 import pytest
 from conftest import make_session, sent_bytes, start_device
 
-from raydriver.grbl import SessionEvent
-from raydriver.grbl.types import DeviceStatus
+from raydriver.core import SessionEvent
+from raydriver.core.types import DeviceStatus
 
 
 class TestConnection:

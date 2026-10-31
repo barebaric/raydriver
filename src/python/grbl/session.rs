@@ -9,14 +9,15 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::grbl::dialect::GrblDialect;
-use crate::grbl::session::{SessionConfig, SessionCore, SessionError};
-use crate::grbl::transport::TransportKind;
-use crate::grbl::types::UnitSystem;
+use crate::core::dialect::Dialect;
+use crate::core::session::SessionError;
+use crate::core::transport::TransportKind;
+use crate::core::types::UnitSystem;
+use crate::grbl::session::{SessionConfig, SessionCore};
 
+use crate::python::core::mock::MockTransport;
+use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::mock::MockTransport;
-use crate::python::grbl::types::DeviceState;
 use crate::python::pyfuture::{none_obj, spawn_future};
 
 impl From<SessionError> for PyErr {
@@ -153,7 +154,7 @@ pub(crate) fn transport_kind_from_config(
 
 pub(crate) fn parse_dialect(
     dict: Option<&Bound<'_, PyDict>>,
-) -> PyResult<GrblDialect> {
+) -> PyResult<Dialect> {
     let mut safety_off_commands = None;
     let mut map: HashMap<String, String> = HashMap::new();
     if let Some(dict) = dict {
@@ -168,7 +169,7 @@ pub(crate) fn parse_dialect(
             }
         }
     }
-    let mut dialect = GrblDialect::from_map(&map);
+    let mut dialect = Dialect::from_map(&map);
     if let Some(commands) = safety_off_commands {
         dialect.safety_off_commands = commands;
     }
@@ -196,8 +197,8 @@ impl GrblSession {
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -214,8 +215,8 @@ impl GrblSession {
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {

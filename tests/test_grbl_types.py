@@ -7,8 +7,8 @@ embedders rely on when they keep their own state object and feed it
 back to ``parse_state`` as the default.
 """
 
+from raydriver.core.types import DeviceError, DeviceState, DeviceStatus
 from raydriver.grbl.parser import parse_state
-from raydriver.grbl.types import DeviceError, DeviceState, DeviceStatus
 
 
 def build_state(**overrides) -> DeviceState:

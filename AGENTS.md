@@ -52,19 +52,25 @@ at any time).
 
 ## Layering Rules Specification
 
-The crate is split into two layers that depend only downward:
+The crate is split into layers that depend only downward:
 
 ```
-grbl (protocol + session core)  →  python (PyO3 bindings)
+core (transports, value types, dialects, session primitives)
+  →  grbl | smoothie | marlin (protocol sessions)
+  →  python (PyO3 bindings)
 ```
 
-- `src/grbl/` must not depend on PyO3 or any Python types. It is pure
-  Rust: protocol parsing, flow control, transports, and the session
-  state machines. Python-facing notifications go through the
-  `SessionEvents` trait; the `python` feature provides the
-  implementation that marshals events across the boundary.
-- `src/python/` contains all PyO3 bindings and may use `src/grbl/`
-  freely, never the other way around.
+- `src/core/` is protocol-neutral and pure Rust: byte transports,
+  device value types, dialect command-template formatting, and the
+  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives.
+- `src/grbl/`, `src/smoothie/`, `src/marlin/` hold the protocol
+  sessions; they must not depend on PyO3 or any Python types. They
+  may use `src/core/` freely. Cross-protocol imports between
+  protocol modules need an explicit justification in the importing
+  module's docs (e.g. the Smoothie session reuses the GRBL status
+  parser because Smoothie emits Grbl-style reports).
+- `src/python/` contains all PyO3 bindings and may use `src/core/`
+  and the protocol modules freely, never the other way around.
 
 ## Export Policy: Explicit Paths
 

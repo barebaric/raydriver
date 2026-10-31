@@ -23,11 +23,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::dialect::{format_template, Arg, GrblDialect};
 use super::parser;
-use super::session::{AsyncEvent, SessionError, SessionEvents};
-use super::transport::{Transport, TransportKind};
-use super::types::{
+use crate::core::dialect::{format_template, Arg, Dialect};
+use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::transport::{Transport, TransportKind};
+use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 
@@ -94,7 +94,7 @@ impl PendingCmd {
 /// ping-pong command exchange, all in one small state machine.
 pub struct SimpleCore {
     config: SimpleConfig,
-    dialect: RwLock<GrblDialect>,
+    dialect: RwLock<Dialect>,
     events: Arc<dyn SessionEvents>,
     transport: Arc<dyn Transport>,
     state: Mutex<DeviceState>,
@@ -116,7 +116,7 @@ pub struct SimpleCore {
 impl SimpleCore {
     pub fn new(
         config: SimpleConfig,
-        dialect: GrblDialect,
+        dialect: Dialect,
         events: Arc<dyn SessionEvents>,
     ) -> Arc<Self> {
         let transport = config.transport.build();
@@ -158,11 +158,11 @@ impl SimpleCore {
         self.transport.resource_uri()
     }
 
-    pub fn update_dialect(&self, dialect: GrblDialect) {
+    pub fn update_dialect(&self, dialect: Dialect) {
         *self.dialect.write().unwrap() = dialect;
     }
 
-    fn dialect(&self) -> GrblDialect {
+    fn dialect(&self) -> Dialect {
         self.dialect.read().unwrap().clone()
     }
 
@@ -225,6 +225,15 @@ impl SimpleCore {
         }
     }
 
+    async fn abort_readers(&self) {
+        let tasks: Vec<_> =
+            self.background_tasks.lock().unwrap().drain(..).collect();
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     fn update_connection_status(
         &self,
         status: TransportStatus,
@@ -259,7 +268,7 @@ impl SimpleCore {
                     log::warn!("Handshake timeout. Retrying connection.");
                 }
 
-                self.abort_background_tasks().await;
+                self.abort_readers().await;
                 self.transport.close().await;
                 self.line_buffer.lock().unwrap().clear();
             }
@@ -824,7 +833,7 @@ impl SimpleCore {
             cmd_parts.push(format!(
                 "{}{}",
                 axis_name.to_uppercase(),
-                super::dialect::python_float_repr(*distance)
+                crate::core::dialect::python_float_repr(*distance)
             ));
         }
         if cmd_parts.len() == 1 {
@@ -926,9 +935,9 @@ impl SimpleCore {
             if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
                 let pos = if report_in_inches {
                     (
-                        super::types::inches_to_mm(x),
-                        super::types::inches_to_mm(y),
-                        super::types::inches_to_mm(z),
+                        crate::core::types::inches_to_mm(x),
+                        crate::core::types::inches_to_mm(y),
+                        crate::core::types::inches_to_mm(z),
                     )
                 } else {
                     (x, y, z)
@@ -980,9 +989,9 @@ impl SimpleCore {
                 if success {
                     let pos = if self.report_in_inches.load(Ordering::SeqCst) {
                         (
-                            super::types::inches_to_mm(x),
-                            super::types::inches_to_mm(y),
-                            super::types::inches_to_mm(z),
+                            crate::core::types::inches_to_mm(x),
+                            crate::core::types::inches_to_mm(y),
+                            crate::core::types::inches_to_mm(z),
                         )
                     } else {
                         (x, y, z)

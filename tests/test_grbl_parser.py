@@ -2,6 +2,7 @@
 
 import pytest
 
+from raydriver.core.types import DeviceState, DeviceStatus
 from raydriver.grbl.parser import (
     alarm_code_to_device_error,
     detect_unit_system_from_settings,
@@ -26,7 +27,6 @@ from raydriver.grbl.parser import (
     strip_gcode_comments,
     version_supports_single_axis_homing,
 )
-from raydriver.grbl.types import DeviceState, DeviceStatus
 
 
 class TestParseState:

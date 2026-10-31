@@ -14,62 +14,22 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::dialect::{format_template, Arg, GrblDialect};
+use crate::core::dialect::{format_template, Arg, Dialect};
+use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::transport::{Transport, TransportKind};
+use crate::core::types::{
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
+};
+
 use super::flow::FlowControl;
 use super::flow::GrblResponseType;
 use super::parser;
-use super::transport::TransportKind;
-use super::transport::{Transport, TransportError};
-use super::types::{
-    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
-};
 
 tokio::task_local! {
     /// Set inside the streaming task so `abort_stream_task` can
     /// detect self-interruption (Python: `task is
     /// asyncio.current_task()`).
     static IN_STREAM_TASK: bool;
-}
-
-/// Notifications emitted by the session, implemented by the Python
-/// bindings (or by embedders).
-pub trait SessionEvents: Send + Sync {
-    fn state_changed(&self, state: &DeviceState);
-    fn connection_status(&self, status: TransportStatus, message: Option<&str>);
-    fn command_status(&self, status: TransportStatus, message: Option<&str>);
-    fn job_finished(&self);
-    fn probe_status(&self, message: &str);
-    fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>);
-    fn config_changed(&self, key: &str, value: i64);
-    fn command_done(&self, op_index: i64);
-
-    /// A complete line received from the device, including status
-    /// reports, `ok`/`error:` acknowledgements and `$` replies.
-    fn raw_rx(&self, _line: &str) {}
-
-    /// A complete line sent to the device (interactive commands and
-    /// realtime bytes; not bulk job streaming).
-    fn raw_tx(&self, _line: &str) {}
-}
-
-/// No-op event sink.
-pub struct NoopEvents;
-
-impl SessionEvents for NoopEvents {
-    fn state_changed(&self, _state: &DeviceState) {}
-    fn connection_status(
-        &self,
-        _status: TransportStatus,
-        _message: Option<&str>,
-    ) {
-    }
-    fn command_status(&self, _status: TransportStatus, _message: Option<&str>) {
-    }
-    fn job_finished(&self) {}
-    fn probe_status(&self, _message: &str) {}
-    fn wcs_updated(&self, _offsets: &HashMap<String, (f64, f64, f64)>) {}
-    fn config_changed(&self, _key: &str, _value: i64) {}
-    fn command_done(&self, _op_index: i64) {}
 }
 
 /// Session configuration with the Python driver's default timings.
@@ -121,73 +81,6 @@ impl SessionConfig {
 
     fn secs(v: f64) -> Duration {
         Duration::from_secs_f64(v.max(0.0))
-    }
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum SessionError {
-    #[error("{0}")]
-    Connection(String),
-    #[error("operation timed out")]
-    Timeout,
-    #[error("{0}")]
-    Device(String),
-    #[error("buffer stall: {0}")]
-    BufferStall(String),
-    #[error("{0}")]
-    Other(String),
-}
-
-impl From<TransportError> for SessionError {
-    fn from(err: TransportError) -> Self {
-        match err {
-            TransportError::Connection(msg) => Self::Connection(msg),
-            TransportError::NotConnected => {
-                Self::Connection("not connected".to_string())
-            }
-        }
-    }
-}
-
-/// An asyncio.Event-style latch built on tokio primitives.
-pub(crate) struct AsyncEvent {
-    set: Mutex<bool>,
-    notify: tokio::sync::Notify,
-}
-
-impl AsyncEvent {
-    pub(crate) fn new() -> Self {
-        Self {
-            set: Mutex::new(false),
-            notify: tokio::sync::Notify::new(),
-        }
-    }
-
-    pub(crate) fn set(&self) {
-        *self.set.lock().unwrap() = true;
-        self.notify.notify_waiters();
-        self.notify.notify_one();
-    }
-
-    pub(crate) fn clear(&self) {
-        *self.set.lock().unwrap() = false;
-    }
-
-    pub(crate) fn is_set(&self) -> bool {
-        *self.set.lock().unwrap()
-    }
-
-    pub(crate) async fn wait(&self) {
-        loop {
-            if self.is_set() {
-                return;
-            }
-            let notified = self.notify.notified();
-            if self.is_set() {
-                return;
-            }
-            notified.await;
-        }
     }
 }
 
@@ -290,7 +183,7 @@ impl StreamHandle {
 /// background tasks.
 pub struct SessionCore {
     config: SessionConfig,
-    dialect: RwLock<GrblDialect>,
+    dialect: RwLock<Dialect>,
     events: Arc<dyn SessionEvents>,
     transport: Arc<dyn Transport>,
     flow: FlowControl,
@@ -321,7 +214,7 @@ pub struct SessionCore {
 impl SessionCore {
     pub fn new(
         config: SessionConfig,
-        dialect: GrblDialect,
+        dialect: Dialect,
         events: Arc<dyn SessionEvents>,
     ) -> Arc<Self> {
         let transport: Arc<dyn Transport> = config.transport.build();
@@ -367,11 +260,11 @@ impl SessionCore {
         self.state.lock().unwrap().clone()
     }
 
-    pub fn update_dialect(&self, dialect: GrblDialect) {
+    pub fn update_dialect(&self, dialect: Dialect) {
         *self.dialect.write().unwrap() = dialect;
     }
 
-    fn dialect(&self) -> GrblDialect {
+    fn dialect(&self) -> Dialect {
         self.dialect.read().unwrap().clone()
     }
 
@@ -1933,7 +1826,7 @@ impl SessionCore {
             cmd_parts.push(format!(
                 "{}{}",
                 axis_name.to_uppercase(),
-                super::dialect::python_float_repr(*distance)
+                crate::core::dialect::python_float_repr(*distance)
             ));
         }
         if cmd_parts.len() == 1 {
@@ -2052,9 +1945,9 @@ impl SessionCore {
             if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
                 let pos = if report_in_inches {
                     (
-                        super::types::inches_to_mm(x),
-                        super::types::inches_to_mm(y),
-                        super::types::inches_to_mm(z),
+                        crate::core::types::inches_to_mm(x),
+                        crate::core::types::inches_to_mm(y),
+                        crate::core::types::inches_to_mm(z),
                     )
                 } else {
                     (x, y, z)
@@ -2106,9 +1999,9 @@ impl SessionCore {
                 if success {
                     let pos = if self.report_in_inches.load(Ordering::SeqCst) {
                         (
-                            super::types::inches_to_mm(x),
-                            super::types::inches_to_mm(y),
-                            super::types::inches_to_mm(z),
+                            crate::core::types::inches_to_mm(x),
+                            crate::core::types::inches_to_mm(y),
+                            crate::core::types::inches_to_mm(z),
                         )
                     } else {
                         (x, y, z)

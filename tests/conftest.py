@@ -7,7 +7,9 @@ import time
 
 import pytest
 
-from raydriver.grbl import GrblSession, MockTransport, SessionEvent
+from raydriver.core import SessionEvent
+from raydriver.core.transport import MockTransport
+from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
 
 

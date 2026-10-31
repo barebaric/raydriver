@@ -3,14 +3,14 @@
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
+use crate::core::types::UnitSystem;
 use crate::grbl::errors::{
     alarm_code_to_device_error as alarm_lookup,
     error_code_to_device_error as error_lookup,
 };
 use crate::grbl::parser;
-use crate::grbl::types::UnitSystem;
 
-use super::types::{DeviceError, DeviceState};
+use crate::python::core::types::{DeviceError, DeviceState};
 
 pub(crate) const MODULE_DOC: &str = "\
 Pure parsers for GRBL response data: status reports, build info, \
@@ -20,7 +20,7 @@ All functions are side-effect free.
 
 pyo3_stub_gen::module_doc!("raydriver.grbl.parser", "{}", MODULE_DOC);
 
-fn to_state(state: crate::grbl::types::DeviceState) -> DeviceState {
+fn to_state(state: crate::core::types::DeviceState) -> DeviceState {
     DeviceState::new(state)
 }
 

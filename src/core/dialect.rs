@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 /// The subset of dialect templates used for interactive commands.
 #[derive(Debug, Clone)]
-pub struct GrblDialect {
+pub struct Dialect {
     pub home_all: String,
     pub home_axis: String,
     pub move_to: String,
@@ -30,7 +30,7 @@ pub struct GrblDialect {
     pub emergency_stop: Option<String>,
 }
 
-impl Default for GrblDialect {
+impl Default for Dialect {
     fn default() -> Self {
         Self {
             home_all: "$H".to_string(),
@@ -51,7 +51,7 @@ impl Default for GrblDialect {
     }
 }
 
-impl GrblDialect {
+impl Dialect {
     /// Build from a template dict keyed by the field names.  Missing
     /// keys fall back to the default template.
     pub fn from_map(map: &HashMap<String, String>) -> Self {

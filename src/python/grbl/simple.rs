@@ -8,17 +8,17 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::grbl::dialect::GrblDialect;
+use crate::core::dialect::Dialect;
+use crate::core::transport::TransportKind;
+use crate::core::types::UnitSystem;
 use crate::grbl::simple::{SimpleConfig, SimpleCore};
-use crate::grbl::transport::TransportKind;
-use crate::grbl::types::UnitSystem;
 
+use crate::python::core::mock::MockTransport;
+use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::mock::MockTransport;
 use crate::python::grbl::session::{
     get_bool, get_f64, parse_dialect, transport_kind_from_config,
 };
-use crate::python::grbl::types::DeviceState;
 use crate::python::pyfuture::{none_obj, spawn_future};
 
 pub(crate) const MODULE_DOC: &str = "\
@@ -86,8 +86,8 @@ impl GrblSimpleSession {
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[grbl.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -104,8 +104,8 @@ impl GrblSimpleSession {
         config: Option<Bound<'_, PyDict>>,
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[grbl.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
+            imports = ("collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -459,7 +459,7 @@ impl GrblSimpleSession {
         dialect: Option<Bound<'_, PyDict>>,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
-        let dialect: GrblDialect = parse_dialect(dialect.as_ref())?;
+        let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
         let core = SimpleCore::new(config, dialect, events.clone());
         Ok(Self { core, events })

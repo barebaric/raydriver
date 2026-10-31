@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use super::errors::{alarm_code_to_device_error, error_code_to_device_error};
-use super::types::{
+use crate::core::types::{
     inches_to_mm, DeviceError, DeviceState, DeviceStatus, Pos, UnitSystem,
 };
 

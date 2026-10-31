@@ -2,7 +2,7 @@
 
 from conftest import make_session, start_device
 
-from raydriver.grbl import SessionEvent
+from raydriver.core import SessionEvent
 
 
 class TestRawLines:
