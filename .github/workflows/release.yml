@@ -107,7 +107,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.98.1
 
+      # Cargo's native trusted publishing (1.86+): with id-token: write and
+      # no registry credentials on the runner, cargo exchanges GitHub's
+      # OIDC token for a short-lived crates.io token by itself. Requires
+      # this repository's release.yml to be registered as a trusted
+      # publisher on the crate's crates.io settings page.
       - name: Publish raydriver
-        uses: rust-lang/crates-io-action@v1
-        with:
-          args: --allow-dirty
+        run: cargo publish --allow-dirty
