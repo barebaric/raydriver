@@ -26,6 +26,51 @@ While a job runs, `raydriver run` shows acknowledged lines, a
 progress bar, the device state, machine position, feed rate and ETA;
 `Ctrl-C` cancels the job and runs the safety shutdown.
 
+## Protocol analyzer
+
+The analyzer captures device traffic, decodes it to a readable
+listing, and replays or proxies it — the workflow for developing
+protocols without hardware and for characterizing real controllers.
+Captures are editable JSONL (text lines or base64 for binary
+protocols), and decoders plug in per protocol (`grbl` ships first;
+`raw` and `hex` cover the rest).
+
+```bash
+# Record a session (or --emulator for a hardware-free dry run)
+raydriver analyzer record --port /dev/ttyUSB0 --out cap.jsonl
+raydriver analyzer tui --port /dev/ttyUSB0     # interactive monitor
+
+# Print a capture as a decoded listing
+raydriver analyzer decode cap.jsonl
+
+# Replay captured frames at a device, at up to Nx speed
+raydriver analyzer replay cap.jsonl --to 192.168.1.50:23 --speed 10
+
+# Man-in-the-middle: point an application at the proxy in front of
+# a TCP device and record both directions
+raydriver analyzer proxy --upstream 192.168.1.50:23 --out mitm.jsonl
+```
+
+Golden tests pin wire behavior: deterministic scenarios run
+against the firmware emulators, and their decoded listings are
+diffed against fixtures under `tests/golden/` (regenerate with
+`RAYDRIVER_REGEN_GOLDEN=1`).  Captures from real hardware can be
+dropped in as fixtures the same way, so protocol changes that
+alter what goes over the wire fail loudly.
+
+### Security policy
+
+Analyzer network endpoints are hardened before any socket opens:
+
+- listeners bind loopback (`127.0.0.1`) without authentication by
+  default;
+- non-loopback or wildcard binds require **both** a token and TLS
+  — there is no override;
+- explicitly configured authentication is never dropped.
+
+Token checks and TLS handshakes are covered by tests that drive
+the real sockets and assert on the outcomes.
+
 ## Releases
 
 Releasing mirrors the Raygeo flow:

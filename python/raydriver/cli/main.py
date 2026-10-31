@@ -22,6 +22,7 @@ import sys
 import time
 
 import raydriver.raydriver as _native
+from raydriver.cli.analyzer import add_analyzer_parser
 from raydriver.core import SessionEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
@@ -304,6 +305,8 @@ def build_parser():
         "--seconds", type=float, default=5.0, help="duration to watch"
     )
     status_parser.set_defaults(func=cmd_status)
+
+    add_analyzer_parser(subparsers)
     return parser
 
 
