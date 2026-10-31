@@ -93,7 +93,7 @@ def parse_m211_endstops(lines: typing.Sequence[builtins.str]) -> typing.Optional
     travel, or None.
     """
 
-def parse_m503_settings(lines: typing.Sequence[builtins.str]) -> builtins.list[tuple[builtins.str, builtins.float]]:
+def parse_m503_settings(lines: typing.Sequence[builtins.str]) -> builtins.dict[builtins.str, builtins.float]:
     r"""
     Parse M503 output into key motion settings.
     """

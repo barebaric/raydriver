@@ -1,10 +1,10 @@
 """A Marlin firmware emulator (not a mock) for tests.
 
 Speaks the protocol the Marlin session expects: the `start`
-handshake with a boot banner, one `ok` per command line (deferred
-until the queued motion finishes executing), `M114` position
-reports, `M115` firmware info, `M149` unit output, and the `M410`
-quick stop.
+handshake with a boot banner (no trailing ok, like real firmware),
+one `ok` per command line (deferred until the queued motion finishes
+executing), `M114` position reports, `M115` firmware info, `M149`
+unit output, and the `M410` quick stop.
 """
 
 import asyncio
@@ -17,7 +17,6 @@ BOOT_LINES = (
     "Marlin 2.1.2",
     "echo:Last Updated: 2024-01-01 | Author: none",
     "echo:Compiled: Jan  1 2024",
-    "ok",
 )
 
 
@@ -102,26 +101,42 @@ class MarlinEmulator:
             return
 
         words = self._parse_words(line)
-        if words.get("M") == 114:
-            self._out(self._m114_report())
-            self._out(b"ok\r\n")
-            return
-        if words.get("M") == 115:
-            self._out(
-                b"FIRMWARE_NAME:Marlin 2.1.2 (Github) "
-                b"SOURCE_CODE_URL:github.com\r\n"
-            )
-            self._out(b"MACHINE_TYPE:3D Printer\r\n")
-            self._out(b"ok\r\n")
-            return
-        if words.get("M") == 149:
-            self._out(f"echo: M149 Units in {self.units}\r\n".encode())
-            self._out(b"ok\r\n")
-            return
         if words.get("M") == 410:
+            # Quick stop: takes effect immediately and flushes the
+            # pending queue, so the queued motions never ack.
             self._queue.clear()
             self._current = None
             self._out(b"ok\r\n")
+            return
+        if words.get("M") == 114:
+            self._queue.append(
+                lambda: (
+                    self._out(self._m114_report()),
+                    self._out(b"ok\r\n"),
+                )
+            )
+            return
+        if words.get("M") == 115:
+            self._queue.append(
+                lambda: (
+                    self._out(
+                        b"FIRMWARE_NAME:Marlin 2.1.2 (Github) "
+                        b"SOURCE_CODE_URL:github.com\r\n"
+                    ),
+                    self._out(b"MACHINE_TYPE:3D Printer\r\n"),
+                    self._out(b"ok\r\n"),
+                )
+            )
+            return
+        if words.get("M") == 149:
+            self._queue.append(
+                lambda: (
+                    self._out(
+                        f"echo: M149 Units in {self.units}\r\n".encode()
+                    ),
+                    self._out(b"ok\r\n"),
+                )
+            )
             return
         if words.get("G") == 28:
             target = [0.0, 0.0, self.mpos[2]]
@@ -138,7 +153,7 @@ class MarlinEmulator:
         elif words.get("G") == 91:
             self.absolute = False
 
-        self._out(b"ok\r\n")
+        self._queue.append(lambda: self._out(b"ok\r\n"))
 
     def _m114_report(self) -> bytes:
         x, y, z = self.mpos

@@ -47,8 +47,12 @@ def make_marlin_session(mock, events, config=None):
 
 async def connect_scripted(mock, events):
     """Connect a session to a device that sends the `start`
-    handshake but is otherwise mute."""
-    session = make_marlin_session(mock, events)
+    handshake but is otherwise mute.  The idle M114 poll is
+    disabled so the test's scripted acknowledgements map one-to-one
+    to the streamed lines."""
+    session = make_marlin_session(
+        mock, events, config={"status_poll_interval": 60.0}
+    )
     connect_task = asyncio.ensure_future(session.connect())
     # The session sends nothing on connect; wait for the transport
     # link to open before scripting the handshake.

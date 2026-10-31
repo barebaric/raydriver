@@ -148,8 +148,8 @@ fn parse_m211_endstops(lines: Vec<String>) -> Option<(f64, f64)> {
 /// Parse M503 output into key motion settings.
 #[gen_stub_pyfunction(module = "raydriver.marlin.parser")]
 #[pyfunction]
-fn parse_m503_settings(lines: Vec<String>) -> Vec<(String, f64)> {
-    parser::parse_m503_settings(&lines)
+fn parse_m503_settings(lines: Vec<String>) -> HashMap<String, f64> {
+    parser::parse_m503_settings(&lines).into_iter().collect()
 }
 
 /// Extract a human-readable device name from M115 and boot output.

@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
+use std::collections::VecDeque;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -109,7 +110,7 @@ pub struct MarlinCore {
     handshake_received: AsyncEvent,
     connected: AsyncEvent,
     line_buffer: Mutex<Vec<u8>>,
-    pending: Mutex<Option<Arc<PendingCmd>>>,
+    pending_queue: Mutex<VecDeque<Arc<PendingCmd>>>,
     job_exception: Mutex<Option<SessionError>>,
     last_reported_op_index: Mutex<i64>,
     cmd_lock: tokio::sync::Mutex<()>,
@@ -136,7 +137,7 @@ impl MarlinCore {
             handshake_received: AsyncEvent::new(),
             connected: AsyncEvent::new(),
             line_buffer: Mutex::new(Vec::new()),
-            pending: Mutex::new(None),
+            pending_queue: Mutex::new(VecDeque::new()),
             job_exception: Mutex::new(None),
             last_reported_op_index: Mutex::new(-1),
             cmd_lock: tokio::sync::Mutex::new(()),
@@ -302,12 +303,14 @@ impl MarlinCore {
             if self.config.poll_status_while_running
                 || !self.job_running.load(Ordering::SeqCst)
             {
-                let _guard = self.cmd_lock.lock().await;
-                if self.transport.is_open() {
-                    if let Err(err) = self.transport.write(b"M114\n").await {
-                        log::warn!("Connection lost while polling: {err}");
-                        break;
-                    }
+                // A tracked exchange, not fire-and-forget: M114's ok
+                // must not resolve a later command's pending
+                // acknowledgement.  The FIFO pending queue orders the
+                // responses; no cmd_lock is taken so a slow device
+                // cannot stall interactive commands.
+                if let Err(err) = self.enqueue_and_wait("M114", false).await {
+                    log::warn!("Connection lost while polling: {err}");
+                    break;
                 }
             }
             tokio::time::sleep(MarlinConfig::secs(
@@ -370,22 +373,22 @@ impl MarlinCore {
     }
 
     fn collect_for_pending(&self, line: &str) {
-        if let Some(pending) = self.pending_slot() {
+        let front = self.pending_queue.lock().unwrap().front().cloned();
+        if let Some(pending) = front {
             if !pending.finished.is_set() {
                 pending.add_line(line);
             }
         }
     }
 
-    fn pending_slot(&self) -> Option<Arc<PendingCmd>> {
-        self.pending.lock().unwrap().clone()
-    }
-
-    /// Finish the pending command, optionally collecting one final
-    /// response line first.  The slot stays owned by the waiting
-    /// ping-pong until it takes over.
+    /// Finish the front pending command (responses are wire-ordered,
+    /// so the oldest outstanding command owns the next
+    /// acknowledgement), optionally collecting one final response
+    /// line first.  The waiter holds its own `Arc` and reads the
+    /// lines from it.
     fn finish_pending(&self, last_line: Option<&str>) {
-        if let Some(pending) = self.pending_slot() {
+        let front = self.pending_queue.lock().unwrap().front().cloned();
+        if let Some(pending) = front {
             if !pending.finished.is_set() {
                 if let Some(line) = last_line {
                     pending.add_line(line);
@@ -396,8 +399,9 @@ impl MarlinCore {
     }
 
     fn resolve_pending(&self) {
-        let pending = self.pending.lock().unwrap().take();
-        if let Some(pending) = pending {
+        let queued: Vec<_> =
+            self.pending_queue.lock().unwrap().drain(..).collect();
+        for pending in queued {
             pending.finish();
         }
     }
@@ -458,7 +462,6 @@ impl MarlinCore {
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        let _guard = self.cmd_lock.lock().await;
         if !self.connected.is_set() {
             // Wait out the handshake: sending earlier would let the
             // boot banner's trailing ok resolve this command.
@@ -482,8 +485,39 @@ impl MarlinCore {
                 "Serial transport not connected".to_string(),
             ));
         }
+        self.enqueue_and_wait(command, true).await
+    }
+
+    /// Enqueue *command* and await its acknowledgement.  Outstanding
+    /// commands form a FIFO queue matching the device's wire-ordered
+    /// responses, so a status poll may be in flight while a user
+    /// command waits without either stealing the other's
+    /// acknowledgement.
+    ///
+    /// With `serialize` the write is excluded against other user
+    /// commands; the status poll passes `false` so a slow device
+    /// cannot stall interactive commands while its own response is
+    /// pending.
+    async fn enqueue_and_wait(
+        &self,
+        command: &str,
+        serialize: bool,
+    ) -> Result<Vec<String>, SessionError> {
+        let _guard = if serialize {
+            Some(self.cmd_lock.lock().await)
+        } else {
+            None
+        };
+        if !self.transport.is_open() {
+            return Err(SessionError::Connection(
+                "Serial transport not connected".to_string(),
+            ));
+        }
         let pending = Arc::new(PendingCmd::new());
-        *self.pending.lock().unwrap() = Some(pending.clone());
+        self.pending_queue
+            .lock()
+            .unwrap()
+            .push_back(pending.clone());
         if !self.job_running.load(Ordering::SeqCst) {
             self.events.raw_tx(command);
         }
@@ -502,9 +536,12 @@ impl MarlinCore {
             }
         }
         .await;
-        // Always drop the slot: a late acknowledgement for a timed
-        // out command must not resolve a later one.
-        self.resolve_pending();
+        // Drop the entry on every path: a late acknowledgement for a
+        // timed out command must not resolve a later one.
+        self.pending_queue
+            .lock()
+            .unwrap()
+            .retain(|p| !Arc::ptr_eq(p, &pending));
         match result {
             Ok(()) => Ok(pending.lines()),
             Err(err) => Err(err),
