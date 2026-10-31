@@ -385,6 +385,7 @@ impl SessionCore {
         let deadline = tokio::time::Instant::now()
             + SessionConfig::secs(self.config.handshake_timeout);
         loop {
+            self.events.raw_tx("?");
             self.transport.write(b"?").await?;
             let poll_deadline = tokio::time::Instant::now()
                 + SessionConfig::secs(self.config.handshake_poll_interval);
@@ -495,6 +496,7 @@ impl SessionCore {
             // lock.  Blocking on the lock here would starve status
             // polling, so the driver state would go stale.
             let responses_before = self.device_response_count();
+            self.events.raw_tx("?");
             if let Err(err) = self.transport.write(b"?").await {
                 log::warn!("Connection lost while sending poll: {err}");
                 break;
@@ -996,6 +998,7 @@ impl SessionCore {
             payload.push('\n');
         }
         log::debug!("Sending realtime command: {command}");
+        self.events.raw_tx(command);
         transport.write(payload.as_bytes()).await?;
         Ok(())
     }
@@ -1368,6 +1371,7 @@ impl SessionCore {
         let text = String::from_utf8_lossy(data).to_string();
         self.flow
             .track_command(command_len, op_index, text.trim_end());
+        self.events.raw_tx(text.trim_end());
         self.transport.write(data).await?;
         Ok(())
     }
@@ -1452,6 +1456,7 @@ impl SessionCore {
         *self.raw_grbl_status.lock().unwrap() = DeviceStatus::Unknown;
         let responses_before = self.device_response_count();
         let send = async {
+            self.events.raw_tx("?");
             let transport = self.transport_open()?;
             transport.write(b"?").await.map_err(SessionError::from)
         };
@@ -1581,6 +1586,7 @@ impl SessionCore {
         }
         let text = String::from_utf8_lossy(data).to_string();
         self.flow.track_command(data.len(), None, text.trim_end());
+        self.events.raw_tx(text.trim_end());
         self.transport.write(data).await?;
         Ok(())
     }
