@@ -8,17 +8,16 @@ The central type is GrblSession: it owns the connection lifecycle (handshake, st
 
 import builtins
 import collections.abc
+from raydriver import core
+from raydriver.core import transport
+from raydriver.core import types
 import typing
 from . import parser
 from . import simple
-from . import types
 __all__ = [
     "GrblSession",
-    "MockTransport",
-    "SessionEvent",
     "parser",
     "simple",
-    "types",
 ]
 
 @typing.final
@@ -48,9 +47,9 @@ class GrblSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]] = None) -> GrblSession: ...
+    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession: ...
     @staticmethod
-    def with_transport(transport: MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[SessionEvent], typing.Any]] = None) -> GrblSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
@@ -150,118 +149,4 @@ class GrblSession:
         Swap the dialect command templates at runtime.
         """
     def __repr__(self) -> builtins.str: ...
-
-@typing.final
-class MockTransport:
-    r"""
-    An in-memory byte transport for tests.
-    
-    Feed bytes to the session with `push()` (as if the device had
-    sent them), inspect everything the session sent with `sent()`,
-    and simulate link state with `set_connected()` /
-    `set_write_error()`.
-    """
-    def __new__(cls) -> MockTransport: ...
-    def push(self, data: typing.Sequence[builtins.int]) -> None:
-        r"""
-        Deliver bytes to the session as if the device sent them.
-        """
-    def sent(self) -> builtins.list[bytes]:
-        r"""
-        All bytes written to the device so far.
-        """
-    def take_new_sent(self) -> builtins.list[bytes]:
-        r"""
-        Writes recorded since the previous call (or the last
-        `clear_sent`): a monotonic cursor, so clearing the log never
-        skips or replays chunks.  This is what device emulators
-        should consume.
-        """
-    def clear_sent(self) -> None:
-        r"""
-        Clear the recorded sent bytes.
-        """
-    def set_connected(self, connected: builtins.bool) -> None:
-        r"""
-        Simulate connect/disconnect of the physical link.
-        """
-    def set_write_error(self, message: typing.Optional[builtins.str] = None) -> None:
-        r"""
-        Fail subsequent writes with this message (and mark the link
-        down), simulating an unplugged cable.
-        """
-    def __repr__(self) -> builtins.str: ...
-
-class SessionEvent:
-    r"""
-    One typed session event, delivered to `event_callback`.
-    """
-    @typing.final
-    class StateChanged(SessionEvent):
-        __match_args__ = ("state",)
-        @property
-        def state(self) -> types.DeviceState: ...
-        def __new__(cls, state: types.DeviceState) -> SessionEvent.StateChanged: ...
-    
-    @typing.final
-    class ConnectionStatusChanged(SessionEvent):
-        __match_args__ = ("status", "message",)
-        @property
-        def status(self) -> builtins.str: ...
-        @property
-        def message(self) -> typing.Optional[builtins.str]: ...
-        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.ConnectionStatusChanged: ...
-    
-    @typing.final
-    class CommandStatusChanged(SessionEvent):
-        __match_args__ = ("status", "message",)
-        @property
-        def status(self) -> builtins.str: ...
-        @property
-        def message(self) -> typing.Optional[builtins.str]: ...
-        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.CommandStatusChanged: ...
-    
-    @typing.final
-    class JobFinished(SessionEvent):
-        __match_args__ = ()
-        def __new__(cls) -> SessionEvent.JobFinished: ...
-    
-    @typing.final
-    class ProbeStatusChanged(SessionEvent):
-        __match_args__ = ("message",)
-        @property
-        def message(self) -> builtins.str: ...
-        def __new__(cls, message: builtins.str) -> SessionEvent.ProbeStatusChanged: ...
-    
-    @typing.final
-    class WcsUpdated(SessionEvent):
-        __match_args__ = ("offsets",)
-        @property
-        def offsets(self) -> builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]: ...
-        def __new__(cls, offsets: typing.Mapping[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]) -> SessionEvent.WcsUpdated: ...
-    
-    @typing.final
-    class ConfigChanged(SessionEvent):
-        __match_args__ = ("key", "value",)
-        @property
-        def key(self) -> builtins.str: ...
-        @property
-        def value(self) -> builtins.int: ...
-        def __new__(cls, key: builtins.str, value: builtins.int) -> SessionEvent.ConfigChanged: ...
-    
-    @typing.final
-    class RawRx(SessionEvent):
-        __match_args__ = ("line",)
-        @property
-        def line(self) -> builtins.str: ...
-        def __new__(cls, line: builtins.str) -> SessionEvent.RawRx: ...
-    
-    @typing.final
-    class RawTx(SessionEvent):
-        __match_args__ = ("line",)
-        @property
-        def line(self) -> builtins.str: ...
-        def __new__(cls, line: builtins.str) -> SessionEvent.RawTx: ...
-    
-    ...
 

@@ -5,7 +5,7 @@ Pure parsers for GRBL response data: status reports, build info, settings, WCS o
 """
 
 import builtins
-from raydriver.grbl import types
+from raydriver.core import types
 import typing
 __all__ = [
     "alarm_code_to_device_error",

@@ -11,9 +11,9 @@ from conftest import (
     start_device,
 )
 
-from raydriver.grbl import SessionEvent
+from raydriver.core import SessionEvent
+from raydriver.core.types import DeviceStatus
 from raydriver.grbl.emulator import WELCOME
-from raydriver.grbl.types import DeviceStatus
 
 
 def gcode(n_lines):

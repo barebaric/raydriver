@@ -1,5 +1,6 @@
 //! Root PyO3 module.
 
+pub(crate) mod core;
 pub(crate) mod events;
 pub(crate) mod grbl;
 pub(crate) mod pyfuture;
@@ -150,6 +151,7 @@ fn register_atexit_hook(m: &Bound<'_, PyModule>) -> PyResult<()> {
 /// Register the root `raydriver` module.
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_logging, m)?)?;
+    core::register(m)?;
     grbl::register(m)?;
     register_atexit_hook(m)?;
     Ok(())

@@ -9,10 +9,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use crate::grbl::transport::mock::MockInner;
-use crate::grbl::transport::serial::SerialTransport;
-use crate::grbl::transport::telnet::TelnetTransport;
-use crate::grbl::types::TransportStatus;
+use crate::core::transport::mock::MockInner;
+use crate::core::transport::serial::SerialTransport;
+use crate::core::transport::telnet::TelnetTransport;
+use crate::core::types::TransportStatus;
 
 /// A connection-orientiated byte transport to a device.
 ///

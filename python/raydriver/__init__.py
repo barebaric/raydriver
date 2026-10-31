@@ -7,7 +7,8 @@ the compiled module.
 
 Submodules
 ----------
-- raydriver.grbl — GRBL device sessions, transports and value types
+- raydriver.core — shared transports, value types and session events
+- raydriver.grbl — GRBL device sessions and response parsers
 """
 
 import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]

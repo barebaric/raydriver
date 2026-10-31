@@ -6,7 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::grbl::transport::mock::MockInner;
+use crate::core::transport::mock::MockInner;
 
 /// An in-memory byte transport for tests.
 ///
@@ -15,7 +15,7 @@ use crate::grbl::transport::mock::MockInner;
 /// and simulate link state with `set_connected()` /
 /// `set_write_error()`.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl")]
+#[pyclass(module = "raydriver.core.transport")]
 pub struct MockTransport {
     pub(crate) inner: Arc<MockInner>,
 }

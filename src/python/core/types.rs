@@ -11,19 +11,19 @@ use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyclass_enum, gen_stub_pymethods,
 };
 
-use crate::grbl::types as core;
+use crate::core::types as core;
 
 pub(crate) const MODULE_DOC: &str = "\
-Value types shared by the GRBL drivers: DeviceState, DeviceStatus \
+Shared device value types: DeviceState, DeviceStatus \
 and DeviceError. These mirror the identically-named types in \
 Rayforge so the Python shell can convert losslessly.
 ";
 
-pyo3_stub_gen::module_doc!("raydriver.grbl.types", "{}", MODULE_DOC);
+pyo3_stub_gen::module_doc!("raydriver.core.types", "{}", MODULE_DOC);
 
 /// Machine state as reported in Grbl status reports.
 #[gen_stub_pyclass_enum]
-#[pyclass(module = "raydriver.grbl.types", eq, eq_int, from_py_object)]
+#[pyclass(module = "raydriver.core.types", eq, eq_int, from_py_object)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DeviceStatus {
     #[pyo3(name = "UNKNOWN")]
@@ -138,7 +138,7 @@ impl DeviceStatus {
 
 /// An error or alarm with code, title and description.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl.types", eq, from_py_object)]
+#[pyclass(module = "raydriver.core.types", eq, from_py_object)]
 #[derive(Clone, PartialEq)]
 pub struct DeviceError {
     pub(crate) inner: core::DeviceError,
@@ -185,7 +185,7 @@ impl DeviceError {
 
 /// The complete state of a device at a moment in time.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl.types", eq, from_py_object)]
+#[pyclass(module = "raydriver.core.types", eq, from_py_object)]
 #[derive(Clone, PartialEq)]
 pub struct DeviceState {
     pub(crate) inner: core::DeviceState,

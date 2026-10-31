@@ -17,7 +17,7 @@ from conftest import (
     wait_until,
 )
 
-from raydriver.grbl import SessionEvent
+from raydriver.core import SessionEvent
 from raydriver.grbl.simple import GrblSimpleSession
 
 GCODE = "G1 X1 F1000\nG1 X2 F1000\nG1 X3 F1000\n"

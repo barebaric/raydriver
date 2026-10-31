@@ -22,9 +22,11 @@ import sys
 import time
 
 import raydriver.raydriver as _native
-from raydriver.grbl import GrblSession, MockTransport, SessionEvent
+from raydriver.core import SessionEvent
+from raydriver.core.transport import MockTransport
+from raydriver.core.types import DeviceState
+from raydriver.grbl import GrblSession
 from raydriver.grbl.parser import strip_gcode_comments
-from raydriver.grbl.types import DeviceState
 
 
 def _fmt_seconds(seconds):

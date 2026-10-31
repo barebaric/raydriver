@@ -2,7 +2,7 @@
 //!
 //! Source: <https://github.com/gnea/grbl/wiki/Grbl-v1.1-Interface#message-summary>
 
-use super::types::DeviceError;
+use crate::core::types::DeviceError;
 
 pub fn error_code_to_device_error(error_code: &str) -> DeviceError {
     match error_code.parse::<i32>() {
