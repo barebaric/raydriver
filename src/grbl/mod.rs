@@ -9,5 +9,6 @@ pub mod transport;
 pub mod types;
 
 pub use session::{
-    NoopEvents, SessionConfig, SessionError, SessionEvents, TransportKind,
+    NoopEvents, SessionConfig, SessionCore, SessionError, SessionEvents,
+    TransportKind,
 };

@@ -29,6 +29,8 @@ raydriver = "raydriver.cli.main:main"
 [tool.maturin]
 module-name = "raydriver"
 python-source = "python"
+# The Rust crate has no default features; the Python build opts in.
+features = ["python"]
 
 [tool.pyo3-stub-gen]
 module-name = "raydriver"

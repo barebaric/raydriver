@@ -298,7 +298,7 @@ impl StreamHandle {
 
 /// Shared session state, owned jointly by the public handle and the
 /// background tasks.
-pub(crate) struct SessionCore {
+pub struct SessionCore {
     config: SessionConfig,
     dialect: RwLock<GrblDialect>,
     events: Arc<dyn SessionEvents>,
@@ -329,7 +329,7 @@ pub(crate) struct SessionCore {
 }
 
 impl SessionCore {
-    pub(crate) fn new(
+    pub fn new(
         config: SessionConfig,
         dialect: GrblDialect,
         events: Arc<dyn SessionEvents>,
@@ -381,11 +381,11 @@ impl SessionCore {
         Arc::new(core)
     }
 
-    pub(crate) fn state(&self) -> DeviceState {
+    pub fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
 
-    pub(crate) fn update_dialect(&self, dialect: GrblDialect) {
+    pub fn update_dialect(&self, dialect: GrblDialect) {
         *self.dialect.write().unwrap() = dialect;
     }
 
@@ -393,7 +393,7 @@ impl SessionCore {
         self.dialect.read().unwrap().clone()
     }
 
-    pub(crate) fn is_job_running(&self) -> bool {
+    pub fn is_job_running(&self) -> bool {
         self.job_running.load(Ordering::SeqCst)
     }
 
@@ -414,19 +414,19 @@ impl SessionCore {
         Ok(self.transport.clone())
     }
 
-    pub(crate) fn resource_uri(&self) -> Option<String> {
+    pub fn resource_uri(&self) -> Option<String> {
         self.transport.resource_uri()
     }
 
-    pub(crate) fn buffer_count(&self) -> usize {
+    pub fn buffer_count(&self) -> usize {
         self.flow.buffer_count()
     }
 
-    pub(crate) fn rx_buffer_size(&self) -> usize {
+    pub fn rx_buffer_size(&self) -> usize {
         self.flow.rx_buffer_size()
     }
 
-    pub(crate) fn pending_commands(&self) -> Vec<String> {
+    pub fn pending_commands(&self) -> Vec<String> {
         self.flow
             .pending_queue()
             .iter()
@@ -455,7 +455,7 @@ impl SessionCore {
     // Connect / disconnect
     // ---------------------------------------------------------------
 
-    pub(crate) async fn connect(self: &Arc<Self>) {
+    pub async fn connect(self: &Arc<Self>) {
         self.abort_background_tasks().await;
 
         self.keep_running.store(true, Ordering::SeqCst);
@@ -494,7 +494,7 @@ impl SessionCore {
         self.transport.close().await;
     }
 
-    pub(crate) async fn cleanup(&self) {
+    pub async fn cleanup(&self) {
         self.keep_running.store(false, Ordering::SeqCst);
         self.job_running.store(false, Ordering::SeqCst);
         self.is_cancelled.store(true, Ordering::SeqCst);
@@ -958,7 +958,7 @@ impl SessionCore {
     // Command execution
     // ---------------------------------------------------------------
 
-    pub(crate) async fn execute_interactive_command(
+    pub async fn execute_interactive_command(
         &self,
         command: String,
     ) -> Result<Vec<String>, SessionError> {
@@ -990,7 +990,7 @@ impl SessionCore {
 
     /// Send a command through the queued command processor and await
     /// its full response.
-    pub(crate) async fn execute_command(
+    pub async fn execute_command(
         &self,
         command: String,
     ) -> Result<Vec<String>, SessionError> {
@@ -1207,7 +1207,7 @@ impl SessionCore {
         result
     }
 
-    pub(crate) async fn run(
+    pub async fn run(
         self: &Arc<Self>,
         gcode: &str,
         op_map: HashMap<usize, i64>,
@@ -1237,7 +1237,7 @@ impl SessionCore {
         }
     }
 
-    pub(crate) async fn run_raw(self: &Arc<Self>, machine_code: &str) {
+    pub async fn run_raw(self: &Arc<Self>, machine_code: &str) {
         let lines: Vec<String> = machine_code
             .lines()
             .map(|l| l.trim().to_string())
@@ -1754,10 +1754,7 @@ impl SessionCore {
     // Cancel / hold
     // ---------------------------------------------------------------
 
-    pub(crate) async fn cancel(
-        &self,
-        emergency: bool,
-    ) -> Result<(), SessionError> {
+    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
         log::debug!("Cancel command initiated.");
         let job_was_running = self.job_running.load(Ordering::SeqCst);
         self.is_cancelled.store(true, Ordering::SeqCst);
@@ -1836,10 +1833,7 @@ impl SessionCore {
         }
     }
 
-    pub(crate) async fn set_hold(
-        &self,
-        hold: bool,
-    ) -> Result<(), SessionError> {
+    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
         self.is_holding.store(hold, Ordering::SeqCst);
         // Do not un-cancel a job that is still winding down (issue
         // #428).
@@ -1883,7 +1877,7 @@ impl SessionCore {
     // Device operations
     // ---------------------------------------------------------------
 
-    pub(crate) async fn home(
+    pub async fn home(
         &self,
         axes: Option<Vec<String>>,
         active_wcs: &str,
@@ -1923,7 +1917,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn move_to(
+    pub async fn move_to(
         &self,
         speed: f64,
         pos_x: f64,
@@ -1943,7 +1937,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn jog(
+    pub async fn jog(
         &self,
         speed: f64,
         deltas: &[(String, f64)],
@@ -1968,7 +1962,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn select_tool(
+    pub async fn select_tool(
         &self,
         tool_number: i64,
     ) -> Result<(), SessionError> {
@@ -1982,7 +1976,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn set_power(
+    pub async fn set_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
@@ -1998,7 +1992,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn set_focus_power(
+    pub async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
@@ -2032,7 +2026,7 @@ impl SessionCore {
         }
     }
 
-    pub(crate) async fn read_settings(
+    pub async fn read_settings(
         &self,
     ) -> Result<Vec<(String, String)>, SessionError> {
         let lines = self.execute_interactive_command("$$".to_string()).await?;
@@ -2041,7 +2035,7 @@ impl SessionCore {
         Ok(parser::parse_setting_pairs(&lines))
     }
 
-    pub(crate) async fn write_setting(
+    pub async fn write_setting(
         &self,
         key: &str,
         value: &str,
@@ -2050,7 +2044,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn set_wcs_offset(
+    pub async fn set_wcs_offset(
         &self,
         wcs_slot: &str,
         x: f64,
@@ -2066,7 +2060,7 @@ impl SessionCore {
         Ok(())
     }
 
-    pub(crate) async fn read_wcs_offsets(
+    pub async fn read_wcs_offsets(
         &self,
     ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
         let lines = self.execute_interactive_command("$#".to_string()).await?;
@@ -2090,14 +2084,14 @@ impl SessionCore {
         Ok(offsets)
     }
 
-    pub(crate) async fn read_parser_state(
+    pub async fn read_parser_state(
         &self,
     ) -> Result<Option<String>, SessionError> {
         let lines = self.execute_interactive_command("$G".to_string()).await?;
         Ok(parser::parse_grbl_parser_state(&lines))
     }
 
-    pub(crate) async fn run_probe_cycle(
+    pub async fn run_probe_cycle(
         &self,
         axis_letter: &str,
         max_travel: f64,
@@ -2149,7 +2143,7 @@ impl SessionCore {
         Ok(None)
     }
 
-    pub(crate) async fn detect_unit_system(
+    pub async fn detect_unit_system(
         &self,
     ) -> Result<Option<UnitSystem>, SessionError> {
         let lines =
