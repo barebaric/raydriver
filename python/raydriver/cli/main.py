@@ -122,7 +122,7 @@ def _open_session(args, on_event):
     poll = not getattr(args, "no_poll", False)
     config = {"poll_status_while_running": poll}
     if args.emulator:
-        from raydriver.emulator import GrblEmulator
+        from raydriver.grbl.emulator import GrblEmulator
 
         mock = MockTransport()
         emulator = GrblEmulator(mock, speed_factor=args.speed_factor)

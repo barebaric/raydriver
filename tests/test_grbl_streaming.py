@@ -11,8 +11,8 @@ from conftest import (
     start_device,
 )
 
-from raydriver.emulator import WELCOME
 from raydriver.grbl import SessionEvent
+from raydriver.grbl.emulator import WELCOME
 from raydriver.grbl.types import DeviceStatus
 
 
