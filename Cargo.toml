@@ -3,6 +3,8 @@ name = "raydriver"
 version = "0.0.0"
 edition = "2021"
 description = "Rust-native machine drivers for Rayforge, with Python bindings"
+license = "MIT"
+repository = "https://github.com/barebaric/raydriver"
 
 [features]
 # No defaults: embedding applications consume the pure Rust core with
