@@ -7,6 +7,7 @@ use pyo3::types::PyBytes;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::transport::mock::MockInner;
+use crate::core::transport::Transport;
 
 /// An in-memory byte transport for tests.
 ///
@@ -64,6 +65,13 @@ impl MockTransport {
     /// Simulate connect/disconnect of the physical link.
     fn set_connected(&self, connected: bool) {
         self.inner.set_open(connected);
+    }
+
+    /// True while the transport link is open (i.e. a session
+    /// connected through this mock).
+    #[getter]
+    fn is_connected(&self) -> bool {
+        self.inner.is_open()
     }
 
     /// Fail subsequent writes with this message (and mark the link

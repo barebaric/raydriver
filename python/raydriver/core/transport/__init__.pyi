@@ -17,6 +17,12 @@ class MockTransport:
     and simulate link state with `set_connected()` /
     `set_write_error()`.
     """
+    @property
+    def is_connected(self) -> builtins.bool:
+        r"""
+        True while the transport link is open (i.e. a session
+        connected through this mock).
+        """
     def __new__(cls) -> MockTransport: ...
     def push(self, data: typing.Sequence[builtins.int]) -> None:
         r"""

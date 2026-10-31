@@ -225,6 +225,15 @@ impl SimpleCore {
         }
     }
 
+    async fn abort_readers(&self) {
+        let tasks: Vec<_> =
+            self.background_tasks.lock().unwrap().drain(..).collect();
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     fn update_connection_status(
         &self,
         status: TransportStatus,
@@ -259,7 +268,7 @@ impl SimpleCore {
                     log::warn!("Handshake timeout. Retrying connection.");
                 }
 
-                self.abort_background_tasks().await;
+                self.abort_readers().await;
                 self.transport.close().await;
                 self.line_buffer.lock().unwrap().clear();
             }

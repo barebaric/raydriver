@@ -3,8 +3,10 @@
 pub(crate) mod core;
 pub(crate) mod events;
 pub(crate) mod grbl;
+pub(crate) mod marlin;
 pub(crate) mod pyfuture;
 pub(crate) mod runtime;
+pub(crate) mod smoothie;
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -153,6 +155,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(init_logging, m)?)?;
     core::register(m)?;
     grbl::register(m)?;
+    marlin::register(m)?;
+    smoothie::register(m)?;
     register_atexit_hook(m)?;
     Ok(())
 }

@@ -5,10 +5,14 @@ import builtins
 import typing
 from . import core
 from . import grbl
+from . import marlin
+from . import smoothie
 __all__ = [
     "core",
     "grbl",
     "init_logging",
+    "marlin",
+    "smoothie",
 ]
 
 def init_logging(filter: typing.Optional[builtins.str] = None, path: typing.Optional[builtins.str] = None) -> None:
