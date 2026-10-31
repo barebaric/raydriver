@@ -524,9 +524,7 @@ impl MarlinCore {
             .lock()
             .unwrap()
             .push_back(pending.clone());
-        if !self.job_running.load(Ordering::SeqCst) {
-            self.events.raw_tx(command);
-        }
+        self.events.raw_tx(command);
         let result = async {
             self.transport
                 .write(format!("{command}\n").as_bytes())

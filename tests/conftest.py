@@ -157,3 +157,10 @@ async def rig(mock, events):
 
 def sent_bytes(session_mock):
     return b"".join(session_mock.sent())
+
+
+def server_port(server) -> int:
+    """The port a just-started asyncio server is listening on."""
+    sockets = server.sockets
+    assert sockets, "server has no listening sockets"
+    return sockets[0].getsockname()[1]

@@ -289,6 +289,7 @@ impl SimpleCore {
         let deadline = tokio::time::Instant::now()
             + SimpleConfig::secs(self.config.handshake_timeout);
         loop {
+            self.events.raw_tx("?");
             if let Err(err) = self.transport.write(b"?").await {
                 log::error!("Connection error during handshake: {err}");
                 return false;
@@ -315,6 +316,7 @@ impl SimpleCore {
             {
                 let _guard = self.cmd_lock.lock().await;
                 if self.transport.is_open() {
+                    self.events.raw_tx("?");
                     if let Err(err) = self.transport.write(b"?").await {
                         log::warn!("Connection lost while polling: {err}");
                         break;
@@ -504,9 +506,7 @@ impl SimpleCore {
         }
         let pending = Arc::new(PendingCmd::new());
         *self.pending.lock().unwrap() = Some(pending.clone());
-        if !self.job_running.load(Ordering::SeqCst) {
-            self.events.raw_tx(command);
-        }
+        self.events.raw_tx(command);
         let result = async {
             self.transport
                 .write(format!("{command}\n").as_bytes())
@@ -558,9 +558,10 @@ impl SimpleCore {
     async fn send_realtime(&self, command: &str) -> Result<(), SessionError> {
         if !self.transport.is_open() {
             return Err(SessionError::Connection(
-                "Serial transport not connected".to_string(),
+                "Serial transport disconnected".to_string(),
             ));
         }
+        self.events.raw_tx(command);
         self.transport.write(command.as_bytes()).await?;
         Ok(())
     }
