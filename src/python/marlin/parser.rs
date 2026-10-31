@@ -30,6 +30,9 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "parse_marlin_version",
             "parse_error_message",
             "parse_m115_firmware_info",
+            "parse_m211_endstops",
+            "parse_m503_settings",
+            "extract_marlin_device_name",
             "detect_unit_system_from_m149",
         ],
     )?;
@@ -45,6 +48,9 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_marlin_version, m)?)?;
     m.add_function(wrap_pyfunction!(parse_error_message, m)?)?;
     m.add_function(wrap_pyfunction!(parse_m115_firmware_info, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_m211_endstops, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_m503_settings, m)?)?;
+    m.add_function(wrap_pyfunction!(extract_marlin_device_name, m)?)?;
     m.add_function(wrap_pyfunction!(detect_unit_system_from_m149, m)?)?;
     Ok(())
 }
@@ -129,6 +135,34 @@ fn parse_m115_firmware_info(lines: Vec<String>) -> HashMap<String, String> {
     parser::parse_m115_firmware_info(&lines)
         .into_iter()
         .collect()
+}
+
+/// Parse M211 output into (x_max, y_max) software endstop
+/// travel, or None.
+#[gen_stub_pyfunction(module = "raydriver.marlin.parser")]
+#[pyfunction]
+fn parse_m211_endstops(lines: Vec<String>) -> Option<(f64, f64)> {
+    parser::parse_m211_endstops(&lines)
+}
+
+/// Parse M503 output into key motion settings.
+#[gen_stub_pyfunction(module = "raydriver.marlin.parser")]
+#[pyfunction]
+fn parse_m503_settings(lines: Vec<String>) -> Vec<(String, f64)> {
+    parser::parse_m503_settings(&lines)
+}
+
+/// Extract a human-readable device name from M115 and boot output.
+#[gen_stub_pyfunction(module = "raydriver.marlin.parser")]
+#[pyfunction]
+fn extract_marlin_device_name(
+    m115_lines: Vec<String>,
+    boot_lines: Option<Vec<String>>,
+) -> String {
+    parser::extract_marlin_device_name(
+        &m115_lines,
+        &boot_lines.unwrap_or_default(),
+    )
 }
 
 /// Infer the device unit system from M149 response lines

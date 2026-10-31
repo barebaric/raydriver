@@ -146,6 +146,88 @@ pub fn parse_m115_firmware_info(lines: &[String]) -> Vec<(String, String)> {
     info
 }
 
+static M203_FEEDRATE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"echo:\s*M203\s+X([+-]?\d+\.?\d*)\s+Y([+-]?\d+\.?\d*)")
+        .expect("valid regex")
+});
+
+static M204_ACCEL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"echo:\s*M204\s*S([+-]?\d+\.?\d*)").expect("valid regex")
+});
+
+static M211_MAX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"X:?\s*([+-]?\d+\.?\d*)\s+Y:?\s*([+-]?\d+\.?\d*)")
+        .expect("valid regex")
+});
+
+/// Parse M211 output to extract X/Y max travel from software
+/// endstops.
+pub fn parse_m211_endstops(lines: &[String]) -> Option<(f64, f64)> {
+    for line in lines {
+        if let Some(caps) = M211_MAX_RE.captures(line) {
+            return Some((caps[1].parse().ok()?, caps[2].parse().ok()?));
+        }
+    }
+    None
+}
+
+/// Parse M503 output into key motion settings: `max_feedrate_x`,
+/// `max_feedrate_y` (mm/s from M203) and `acceleration` (mm/s^2
+/// from M204).
+pub fn parse_m503_settings(lines: &[String]) -> Vec<(String, f64)> {
+    let mut settings = Vec::new();
+    for line in lines {
+        if let Some(caps) = M203_FEEDRATE_RE.captures(line) {
+            if let (Ok(x), Ok(y)) = (caps[1].parse(), caps[2].parse()) {
+                settings.push(("max_feedrate_x".to_string(), x));
+                settings.push(("max_feedrate_y".to_string(), y));
+            }
+        }
+        if let Some(caps) = M204_ACCEL_RE.captures(line) {
+            if let Ok(accel) = caps[1].parse() {
+                settings.push(("acceleration".to_string(), accel));
+            }
+        }
+    }
+    settings
+}
+
+/// Extract a human-readable device name from M115 and boot output:
+/// `MACHINE_TYPE` first (unless it is a generic placeholder), then
+/// the firmware name, then the version from the boot banner.
+pub fn extract_marlin_device_name(
+    m115_lines: &[String],
+    boot_lines: &[String],
+) -> String {
+    let machine_type = parse_m115_firmware_info(m115_lines)
+        .into_iter()
+        .find(|(key, _)| key == "machine_type")
+        .map(|(_, value)| value);
+    if let Some(name) = machine_type {
+        let generic = ["3d printer", "default"]
+            .iter()
+            .any(|g| name.to_lowercase() == *g);
+        if !generic {
+            return name;
+        }
+    }
+    let firmware_name = parse_m115_firmware_info(m115_lines)
+        .into_iter()
+        .find(|(key, _)| key == "firmware_name")
+        .map(|(_, value)| value);
+    if let Some(name) = firmware_name {
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    for line in boot_lines {
+        if let Some(version) = parse_marlin_version(line) {
+            return format!("Marlin {version}");
+        }
+    }
+    "Unknown Marlin Device".to_string()
+}
+
 /// Inspect Marlin `M149` response lines and infer the device's unit
 /// system (`echo: M149 Units in inches` / `... in mm`).
 pub fn detect_unit_system_from_m149(lines: &[String]) -> Option<UnitSystem> {

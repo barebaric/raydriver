@@ -9,6 +9,7 @@ import typing
 __all__ = [
     "detect_unit_system_from_m149",
     "extract_marlin_banner_from_output",
+    "extract_marlin_device_name",
     "is_boot_message",
     "is_error_response",
     "is_m114_position",
@@ -18,6 +19,8 @@ __all__ = [
     "parse_m114_line",
     "parse_m114_position",
     "parse_m115_firmware_info",
+    "parse_m211_endstops",
+    "parse_m503_settings",
     "parse_marlin_version",
 ]
 
@@ -31,6 +34,11 @@ def extract_marlin_banner_from_output(data: typing.Sequence[builtins.int]) -> ty
     r"""
     Extract the first boot message line from raw serial output, or
     None.
+    """
+
+def extract_marlin_device_name(m115_lines: typing.Sequence[builtins.str], boot_lines: typing.Optional[typing.Sequence[builtins.str]]) -> builtins.str:
+    r"""
+    Extract a human-readable device name from M115 and boot output.
     """
 
 def is_boot_message(line: builtins.str) -> builtins.bool:
@@ -77,6 +85,17 @@ def parse_m114_position(lines: typing.Sequence[builtins.str]) -> typing.Optional
 def parse_m115_firmware_info(lines: typing.Sequence[builtins.str]) -> builtins.dict[builtins.str, builtins.str]:
     r"""
     Parse M115 response lines into firmware name and machine type.
+    """
+
+def parse_m211_endstops(lines: typing.Sequence[builtins.str]) -> typing.Optional[tuple[builtins.float, builtins.float]]:
+    r"""
+    Parse M211 output into (x_max, y_max) software endstop
+    travel, or None.
+    """
+
+def parse_m503_settings(lines: typing.Sequence[builtins.str]) -> builtins.list[tuple[builtins.str, builtins.float]]:
+    r"""
+    Parse M503 output into key motion settings.
     """
 
 def parse_marlin_version(line: builtins.str) -> typing.Optional[builtins.str]:
