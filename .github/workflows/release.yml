@@ -84,3 +84,30 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: dist/*
+
+  # Publishes the pure Rust crate for embedding consumers. The version
+  # never lives in git: it is stamped from the release tag before publishing.
+  # One-time setup: register raydriver as a trusted publisher for this
+  # repository on crates.io and create the "crates-io" environment.
+  publish-crates:
+    name: Publish to crates.io
+    needs: [build-wheels, build-sdist]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set version from tag
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+
+      - uses: dtolnay/rust-toolchain@1.98.1
+
+      - name: Publish raydriver
+        uses: rust-lang/crates-io-action@v1
+        with:
+          args: --allow-dirty

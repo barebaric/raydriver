@@ -5,7 +5,10 @@ edition = "2021"
 description = "Rust-native machine drivers for Rayforge, with Python bindings"
 
 [features]
-default = ["python"]
+# No defaults: embedding applications consume the pure Rust core with
+# `default-features = false`. The Python build enables `python` (see
+# [tool.maturin] in pyproject.toml).
+default = []
 python = ["dep:pyo3", "dep:pyo3-stub-gen"]
 
 [dependencies]
