@@ -132,6 +132,29 @@ class TestStrictOrdering:
         assert b"\x18" in sent_bytes(mock)
         await session.disconnect()
 
+    async def test_hold_parks_sender_until_resume(self, mock, events):
+        session = await connect_scripted(mock, events)
+        job = asyncio.ensure_future(session.run(GCODE))
+        await wait_until(lambda: len(gcode_sends(mock)) >= 1)
+        mock.push(b"ok\r\n")
+        await wait_until(lambda: len(gcode_sends(mock)) >= 2)
+
+        await session.set_hold(True)
+        assert b"!" in sent_bytes(mock)
+        # Parked deterministically: without the acknowledgement for
+        # line 2, nothing can send line 3, hold or not.
+        assert len(gcode_sends(mock)) == 2
+        assert session.job_running
+
+        await session.set_hold(False)
+        assert b"~" in sent_bytes(mock)
+        mock.push(b"ok\r\n")
+        await wait_until(lambda: len(gcode_sends(mock)) >= 3)
+        mock.push(b"ok\r\n")
+        await asyncio.wait_for(job, 5)
+        await events.wait_for(SessionEvent.JobFinished)
+        await session.disconnect()
+
 
 @pytest.fixture
 async def simple_rig(mock, events):
@@ -180,28 +203,6 @@ class TestEmulatorJobs:
         session, mock, emulator, events = simple_rig
         lines = await session.execute_interactive_command("G999")
         assert lines == ["error:20"]
-
-    async def test_hold_and_resume(self, simple_rig):
-        session, mock, emulator, events = simple_rig
-        emulator.speed_factor = 50
-        # Alternating 50 mm moves: ~100 ms per block, 200 blocks ≈
-        # 20 s of motion.  The hold must land long before the job
-        # can drain, on slow runners too.
-        text = "\n".join(f"G1 X{50 if i % 2 else 0} F600" for i in range(200))
-        job = asyncio.ensure_future(session.run(text))
-        await wait_until(lambda: gcode_sends(mock))
-
-        await session.set_hold(True)
-        await asyncio.sleep(1.0)
-        # Held: the planner stops draining, so the sender parks
-        # waiting for an ack instead of failing the job.
-        assert session.job_running
-        assert not job.done()
-        assert len(gcode_sends(mock)) < 200
-
-        await session.set_hold(False)
-        await asyncio.wait_for(job, 120)
-        await events.wait_for(SessionEvent.JobFinished, timeout=60)
 
 
 class TestConfig:
