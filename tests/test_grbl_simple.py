@@ -183,10 +183,11 @@ class TestEmulatorJobs:
 
     async def test_hold_and_resume(self, simple_rig):
         session, mock, emulator, events = simple_rig
-        emulator.speed_factor = 100
-        # Alternating 50 mm moves: ~50 ms per block, so the planner
-        # fills and the sender parks while the hold is active.
-        text = "\n".join(f"G1 X{50 if i % 2 else 0} F600" for i in range(30))
+        emulator.speed_factor = 50
+        # Alternating 50 mm moves: ~100 ms per block, 200 blocks ≈
+        # 20 s of motion.  The hold must land long before the job
+        # can drain, on slow runners too.
+        text = "\n".join(f"G1 X{50 if i % 2 else 0} F600" for i in range(200))
         job = asyncio.ensure_future(session.run(text))
         await wait_until(lambda: gcode_sends(mock))
 
@@ -196,11 +197,11 @@ class TestEmulatorJobs:
         # waiting for an ack instead of failing the job.
         assert session.job_running
         assert not job.done()
-        assert len(gcode_sends(mock)) < 30
+        assert len(gcode_sends(mock)) < 200
 
         await session.set_hold(False)
-        await asyncio.wait_for(job, 60)
-        await events.wait_for(SessionEvent.JobFinished, timeout=30)
+        await asyncio.wait_for(job, 120)
+        await events.wait_for(SessionEvent.JobFinished, timeout=60)
 
 
 class TestConfig:

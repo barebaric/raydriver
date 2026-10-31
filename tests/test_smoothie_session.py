@@ -180,8 +180,10 @@ class TestEmulatorJobs:
 
     async def test_hold_parks_job_until_resume(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
-        emulator.speed_factor = 100
-        text = "\n".join(f"G1 X{50 if i % 2 else 0} F600" for i in range(30))
+        emulator.speed_factor = 50
+        # 200 blocks ≈ 20 s of motion: the hold must land long
+        # before the job can drain, on slow runners too.
+        text = "\n".join(f"G1 X{50 if i % 2 else 0} F600" for i in range(200))
         job = asyncio.ensure_future(session.run(text))
         await wait_until(lambda: gcode_sends(mock))
 
@@ -189,11 +191,11 @@ class TestEmulatorJobs:
         await asyncio.sleep(1.0)
         assert session.job_running
         assert not job.done()
-        assert len(gcode_sends(mock)) < 30
+        assert len(gcode_sends(mock)) < 200
 
         await session.set_hold(False)
-        await asyncio.wait_for(job, 60)
-        await events.wait_for(SessionEvent.JobFinished, timeout=30)
+        await asyncio.wait_for(job, 120)
+        await events.wait_for(SessionEvent.JobFinished, timeout=60)
 
     async def test_cancel_aborts_job(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
