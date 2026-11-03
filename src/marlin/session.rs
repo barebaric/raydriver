@@ -2,8 +2,10 @@
 //! firmware over serial.
 //!
 //! Port of Rayforge's `MarlinSerialDriver` protocol behavior.  The
-//! device announces itself with a `start` line (its absence marks a
-//! phantom port), positions are polled with `M114` instead of `?`
+//! device announces itself by sending output unprompted — stock
+//! Marlin prints a `start` line, but custom forks may emit only a
+//! boot banner or ack with bare `ok`; a port that stays silent
+//! marks a phantom.  Positions are polled with `M114` instead of `?`
 //! status reports, and there is no feed-hold support — pausing is
 //! the caller's concern.  Commands use the same strict ping-pong as
 //! the other minimal sessions: send one line, wait for its
@@ -246,7 +248,8 @@ impl MarlinCore {
                 self.background_tasks.lock().unwrap().push(reader);
 
                 if self.await_handshake().await {
-                    // The device needs a moment after `start`.
+                    // The device needs a moment after announcing
+                    // itself.
                     tokio::time::sleep(MarlinConfig::secs(
                         self.config.connect_settle,
                     ))
@@ -262,8 +265,8 @@ impl MarlinCore {
                     self.position_poll_loop().await;
                 } else {
                     log::warn!(
-                        "No 'start' received. Port may be a phantom COM \
-                         port without a connected device."
+                        "Device sent no output. Port may be a phantom \
+                         COM port without a connected device."
                     );
                     self.update_connection_status(
                         TransportStatus::Error,
@@ -285,8 +288,9 @@ impl MarlinCore {
         }
     }
 
-    /// Wait for the `start` handshake line; booting devices send it
-    /// unprompted, so this simply waits.
+    /// Wait for the device to announce itself.  Booting devices
+    /// speak unprompted — with `start`, a banner or an ack — so
+    /// this simply waits for the first output line.
     async fn await_handshake(&self) -> bool {
         let deadline = tokio::time::Instant::now()
             + MarlinConfig::secs(self.config.handshake_timeout);
@@ -352,6 +356,7 @@ impl MarlinCore {
     }
 
     fn handle_line(&self, line: &str) {
+        self.maybe_announce_handshake(line);
         if parser::is_ok(line) {
             self.events.raw_rx(line);
             self.finish_pending(Some(line));
@@ -362,12 +367,6 @@ impl MarlinCore {
             self.handle_error_line(line);
             return;
         }
-        if line.trim() == "start" {
-            self.events.raw_rx(line);
-            self.handshake_received.set();
-            self.collect_for_pending(line);
-            return;
-        }
         if parser::is_m114_position(line) {
             self.events.raw_rx(line);
             self.handle_position_report(line);
@@ -376,6 +375,23 @@ impl MarlinCore {
         }
         self.events.raw_rx(line);
         self.collect_for_pending(line);
+    }
+
+    /// Accepts the first device output as the handshake.  The
+    /// session transmits nothing until the handshake resolves, so
+    /// any complete line here is unprompted device output: proof of
+    /// a live device.  Stock Marlin announces itself with `start`,
+    /// but custom firmware forks may only print a banner or ack
+    /// with bare `ok`; requiring the exact line locked those out.
+    /// Only a fully silent port is a phantom.
+    fn maybe_announce_handshake(&self, line: &str) {
+        if self.handshake_received.is_set() {
+            return;
+        }
+        if line.trim() != "start" {
+            log::debug!("Handshake satisfied by unsolicited output: {line:?}");
+        }
+        self.handshake_received.set();
     }
 
     fn collect_for_pending(&self, line: &str) {
@@ -482,7 +498,7 @@ impl MarlinCore {
                 .is_err()
             {
                 return Err(SessionError::Connection(
-                    "device did not announce itself (no 'start')".to_string(),
+                    "device did not announce itself".to_string(),
                 ));
             }
         }

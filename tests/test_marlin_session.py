@@ -93,6 +93,39 @@ class TestHandshake:
         )
         await session.disconnect()
 
+    async def test_unsolicited_ack_connects_without_start(self, mock, events):
+        # Custom forks announce themselves with a banner and bare
+        # `ok` acks instead of `start` (e.g. plotter firmware
+        # printing `PR` on boot); any unprompted output proves a
+        # live device.
+        session = make_marlin_session(
+            mock, events, config={"status_poll_interval": 60.0}
+        )
+        await session.connect()
+        await wait_until(lambda: mock.is_connected)
+        mock.push(b"PR\r\n")
+        mock.push(b"ok\r\n")
+        await events.wait_for(
+            SessionEvent.ConnectionStatusChanged,
+            lambda event: event.status == "CONNECTED",
+            timeout=5,
+        )
+        await session.disconnect()
+
+    async def test_boot_banner_connects_without_start(self, mock, events):
+        session = make_marlin_session(
+            mock, events, config={"status_poll_interval": 60.0}
+        )
+        await session.connect()
+        await wait_until(lambda: mock.is_connected)
+        mock.push(b"Marlin 2.1.2\r\necho:SD card ok\r\n")
+        await events.wait_for(
+            SessionEvent.ConnectionStatusChanged,
+            lambda event: event.status == "CONNECTED",
+            timeout=5,
+        )
+        await session.disconnect()
+
 
 class TestPositionReports:
     async def test_m114_updates_state(self, mock, events):
