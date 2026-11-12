@@ -1,6 +1,7 @@
 //! The `raydriver.core` Python submodule: shared device primitives.
 
 pub(crate) mod mock;
+pub(crate) mod serial;
 pub(crate) mod types;
 
 use pyo3::prelude::*;
@@ -18,8 +19,15 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let core_mod = PyModule::new(py, "core")?;
 
     core_mod.setattr("__doc__", MODULE_DOC)?;
-    core_mod.add("__all__", vec!["SessionEvent", "types", "transport"])?;
+    core_mod.add(
+        "__all__",
+        vec!["SessionEvent", "list_serial_ports", "types", "transport"],
+    )?;
     core_mod.add_class::<crate::python::events::SessionEvent>()?;
+    core_mod.add_function(wrap_pyfunction!(
+        serial::list_serial_ports,
+        &core_mod
+    )?)?;
 
     let transport_mod = PyModule::new(py, "transport")?;
     transport_mod.setattr(

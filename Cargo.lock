@@ -902,6 +902,7 @@ dependencies = [
  "pyo3",
  "pyo3-stub-gen",
  "regex",
+ "serialport",
  "thiserror",
  "tokio",
  "tokio-serial",

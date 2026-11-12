@@ -104,3 +104,11 @@ async fn reader_loop(
         }
     }
 }
+
+/// Enumerate the serial ports this host can reach, for device
+/// pickers and the remote daemon's device listing.
+pub fn list_serial_ports(
+) -> Result<Vec<serialport::SerialPortInfo>, TransportError> {
+    serialport::available_ports()
+        .map_err(|e| TransportError::Connection(e.to_string()))
+}
