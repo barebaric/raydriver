@@ -6,4 +6,6 @@ Submodules
   codecs (v1)
 - raydriver.remote.daemon — session host: listener, registry,
   lease, event ring and fan-out
+- raydriver.remote.client — RemoteSession proxy and the
+  create_session factory
 """

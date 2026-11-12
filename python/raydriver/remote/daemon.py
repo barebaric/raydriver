@@ -64,8 +64,8 @@ def _raydriver_version() -> str:
 def default_session_factory(
     protocol_name: str,
     config: dict[str, Any],
-    dialect: dict[str, Any],
-    event_callback: Callable[[Any], None],
+    dialect: dict[str, Any] | None,
+    event_callback: Callable[[Any], None] | None,
 ) -> Any:
     """Construct a session exactly as the driver shells do."""
     cls = SESSION_CLASSES[protocol_name]
