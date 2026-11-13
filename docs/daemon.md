@@ -12,7 +12,7 @@ Everything here works on Linux, macOS and Windows.
 ## Install and first run
 
 ```sh
-pip install raydriver              # add [daemon] for mDNS announce
+pip install raydriver              # includes network discovery
 raydriver daemon add /dev/ttyUSB0  # config + generated token + device
 raydriver daemon install           # install + start the platform service
 ```
@@ -100,7 +100,7 @@ WantedBy=default.target
 | `ring_size`          | `1000`             | replayable events per session        |
 | `cameras`            | `[]`               | advertised stream endpoints (below)  |
 | `sessions`           | `[]`               | sessions to auto-open at boot        |
-| `mdns`               | `false`            | announce `_raydriver._tcp`           |
+| `mdns`               | `true`             | announce `_raydriver._tcp` for discovery |
 
 Auto-open example:
 

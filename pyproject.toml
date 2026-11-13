@@ -14,12 +14,14 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+    "zeroconf",
+]
 
 [project.optional-dependencies]
-daemon = [
-    "python-zeroconf",
-]
+# Kept for backward compatibility; daemon support (zeroconf) is now a
+# default dependency, so plain `pip install raydriver` includes it.
+daemon = []
 test = [
     "pytest",
     "pytest-asyncio",

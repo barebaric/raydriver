@@ -42,7 +42,7 @@ def test_config_from_dict_defaults():
     assert config.port == defaults.port
     assert config.keepalive_interval == defaults.keepalive_interval
     assert config.keepalive_misses == defaults.keepalive_misses
-    assert config.mdns is False
+    assert config.mdns is True
 
 
 def test_config_from_dict_overrides():
@@ -276,11 +276,6 @@ def test_cli_setup_and_serve(tmp_path):
         proc.wait(timeout=10)
 
 
-async def test_mdns_without_extra(monkeypatch):
-    monkeypatch.setattr(mdns, "Zeroconf", None)
-    assert await mdns.announce(DaemonConfig(), 8765) is None
-
-
 async def test_mdns_announce_registers_service():
     pytest.importorskip("zeroconf")
     config = DaemonConfig(
@@ -291,8 +286,41 @@ async def test_mdns_announce_registers_service():
     assert announcer is not None
     try:
         assert announcer.info.port == 8765
+        # A loopback bind advertises loopback, not the hostname address.
+        assert announcer.info.parsed_addresses() == ["127.0.0.1"]
         assert announcer.info.properties[b"requires_auth"] == b"true"
         assert announcer.info.properties[b"tls"] == b"false"
         assert announcer.info.properties[b"cameras"] == b"1"
     finally:
         await announcer.close()
+
+
+def test_mdns_announce_address_matches_bind(monkeypatch):
+    monkeypatch.setattr(mdns, "_local_ip", lambda: "192.168.1.99")
+    assert (
+        mdns._announce_address(DaemonConfig(host="127.0.0.1")) == "127.0.0.1"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="localhost")) == "127.0.0.1"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="0.0.0.0")) == "192.168.1.99"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="192.168.1.50"))
+        == "192.168.1.50"
+    )
+
+
+def test_mdns_service_name_short_hostname(monkeypatch):
+    monkeypatch.setattr(mdns.socket, "gethostname", lambda: "myhost")
+    assert mdns._service_name() == "raydriver-myhost._raydriver._tcp.local."
+
+
+def test_mdns_service_name_long_hostname(monkeypatch):
+    # CI runners can have hostnames that overflow the 63-char DNS
+    # label limit; the instance name must stay valid.
+    monkeypatch.setattr(mdns.socket, "gethostname", lambda: "a" * 100)
+    label = mdns._service_name().split(".")[0]
+    assert len(label) <= 63
+    assert label.startswith("raydriver-")
