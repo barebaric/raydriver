@@ -117,6 +117,7 @@ async def test_open_by_device_resolves_protocol(rig):
     try:
         await asyncio.wait_for(session.connect(), timeout=10)
         assert session.protocol == "grbl"
+        assert session.metadata is not None
         assert session.metadata["dialect_family"] == "grbl"
         reply = await asyncio.wait_for(
             session.execute_interactive_command("$I"), timeout=10
