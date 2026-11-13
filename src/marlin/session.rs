@@ -211,6 +211,21 @@ impl MarlinCore {
         }
     }
 
+    /// Abort every background task without awaiting, for use from
+    /// `Drop`.  A session dropped without `disconnect()` must not
+    /// leave its tasks running on the shared runtime: the orphans
+    /// keep marshaling events onto an event loop that may already be
+    /// closed (access violations on Windows).
+    pub fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Some(task) = self.connection_task.lock().unwrap().take() {
+            task.abort();
+        }
+        for task in self.background_tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
     async fn abort_readers(&self) {
         let tasks: Vec<_> =
             self.background_tasks.lock().unwrap().drain(..).collect();
