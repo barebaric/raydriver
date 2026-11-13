@@ -34,6 +34,11 @@ where
         let outcome = fut.await;
         let schedule: PyResult<()> = Python::attach(|py| {
             let loop_bound = loop_py.bind(py);
+            // The awaiting loop may be gone (e.g. the test ended);
+            // scheduling onto a closed loop crashes on Windows.
+            if loop_bound.call_method0("is_closed")?.is_truthy()? {
+                return Ok(());
+            }
             match outcome {
                 Ok(value) => {
                     let set_result = future_py.getattr(py, "set_result")?;

@@ -161,6 +161,12 @@ impl PyEvents {
                 };
                 let loop_py = loop_.clone_ref(py);
                 drop(loop_guard);
+                // Never marshal onto a closed loop: writing to its
+                // self-pipe from a worker thread crashes on Windows.
+                if loop_py.bind(py).call_method0("is_closed")?.is_truthy()? {
+                    self.queue.unschedule();
+                    return Ok(());
+                }
                 let callback = self
                     .event_callback
                     .as_ref()
@@ -209,6 +215,10 @@ impl PyEvents {
             };
             let loop_py = loop_.clone_ref(py);
             drop(loop_guard);
+            // Never marshal onto a closed loop (see schedule()).
+            if loop_py.bind(py).call_method0("is_closed")?.is_truthy()? {
+                return Ok(());
+            }
             if self.queue.push(QueuedEvent::Progress(op_index)) {
                 let drainer = Py::new(
                     py,

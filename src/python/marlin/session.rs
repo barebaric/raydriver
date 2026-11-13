@@ -371,3 +371,12 @@ impl MarlinSession {
         Ok(Self { core, events })
     }
 }
+
+impl Drop for MarlinSession {
+    fn drop(&mut self) {
+        // Stop the background tasks even when the session is dropped
+        // without disconnect(); otherwise they orphan on the shared
+        // runtime and marshal events onto a possibly-closed loop.
+        self.core.abort_background_tasks_now();
+    }
+}

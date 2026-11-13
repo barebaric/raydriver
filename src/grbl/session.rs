@@ -369,6 +369,25 @@ impl SessionCore {
         self.transport.close().await;
     }
 
+    /// Abort every background task without awaiting, for use from
+    /// `Drop`.  A session dropped without `disconnect()` must not
+    /// leave its tasks running on the shared runtime: the orphans
+    /// keep marshaling events onto an event loop that may already be
+    /// closed (access violations on Windows).
+    pub fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.stream_task.lock().unwrap().take() {
+            handle.abort.abort();
+        }
+        for slot in
+            [&self.connection_task, &self.command_task, &self.reader_task]
+        {
+            if let Some(task) = slot.lock().unwrap().take() {
+                task.abort();
+            }
+        }
+    }
+
     pub async fn cleanup(&self) {
         self.keep_running.store(false, Ordering::SeqCst);
         self.job_running.store(false, Ordering::SeqCst);
