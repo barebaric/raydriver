@@ -5,6 +5,7 @@ import os
 import socket
 import subprocess
 import sys
+import uuid
 
 import pytest
 
@@ -276,8 +277,15 @@ def test_cli_setup_and_serve(tmp_path):
         proc.wait(timeout=10)
 
 
-async def test_mdns_announce_registers_service():
+async def test_mdns_announce_registers_service(monkeypatch):
     pytest.importorskip("zeroconf")
+    # A unique service name so the test does not collide with a daemon
+    # already announcing on this machine.
+    monkeypatch.setattr(
+        mdns,
+        "_service_name",
+        lambda: f"raydriver-test-{uuid.uuid4().hex}.{mdns.SERVICE_TYPE}",
+    )
     config = DaemonConfig(
         token="t",
         cameras=[{"name": "c", "uri": "u", "type": "http_stream"}],

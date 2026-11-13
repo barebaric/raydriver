@@ -127,6 +127,26 @@ async def test_open_by_device_resolves_protocol(rig):
         await session.disconnect()
 
 
+async def test_disconnect_releases_control_lease(rig):
+    # A probe-like client connects, then disconnects; a second client
+    # (the machine) must then be able to take control of the device.
+    _, port = rig
+    endpoint = {"remote_host": "127.0.0.1", "remote_port": port}
+    first = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
+    await asyncio.wait_for(first.connect(), timeout=10)
+    await first.disconnect()
+
+    second = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
+    try:
+        await asyncio.wait_for(second.connect(), timeout=10)
+        reply = await asyncio.wait_for(
+            second.execute_interactive_command("$I"), timeout=10
+        )
+        assert any("VER:" in line for line in reply)
+    finally:
+        await second.disconnect()
+
+
 async def test_open_by_url_endpoint(rig):
     _, port = rig
     session = open_session(
