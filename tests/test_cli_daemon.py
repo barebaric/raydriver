@@ -276,11 +276,6 @@ def test_cli_setup_and_serve(tmp_path):
         proc.wait(timeout=10)
 
 
-async def test_mdns_without_extra(monkeypatch):
-    monkeypatch.setattr(mdns, "Zeroconf", None)
-    assert await mdns.announce(DaemonConfig(), 8765) is None
-
-
 async def test_mdns_announce_registers_service():
     pytest.importorskip("zeroconf")
     config = DaemonConfig(

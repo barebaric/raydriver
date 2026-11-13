@@ -1,9 +1,7 @@
 """mDNS announce and browse for the daemon (``_raydriver._tcp``).
 
 Uses zeroconf, a default dependency, so discovery works out of the
-box. The imports are guarded so a broken install degrades gracefully
-(:func:`announce` returns ``None``, :func:`browse_daemons` returns an
-empty list) rather than failing.
+box with a plain ``pip install raydriver``.
 """
 
 from __future__ import annotations
@@ -13,22 +11,10 @@ import logging
 import socket
 from typing import Any
 
-from raydriver.analyzer.listener import is_loopback
+from zeroconf import ServiceInfo, ServiceListener, Zeroconf
+from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
-try:
-    from zeroconf import (  # pyright: ignore[reportMissingImports]
-        ServiceInfo,
-        Zeroconf,
-    )
-    from zeroconf.asyncio import (  # pyright: ignore[reportMissingImports]
-        AsyncServiceBrowser,
-        AsyncZeroconf,
-    )
-except ImportError:  # optional extra: raydriver[daemon]
-    ServiceInfo = None  # type: ignore[assignment,misc]
-    Zeroconf = None  # type: ignore[assignment,misc]
-    AsyncServiceBrowser = None  # type: ignore[assignment,misc]
-    AsyncZeroconf = None  # type: ignore[assignment,misc]
+from raydriver.analyzer.listener import is_loopback
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +55,8 @@ class Announcer:
         self._zeroconf.close()
 
 
-async def announce(config: Any, port: int) -> Announcer | None:
-    """Announce the daemon on the LAN; None without the extra."""
-    if Zeroconf is None or ServiceInfo is None:
-        logger.warning("mdns enabled but zeroconf is not available")
-        return None
+async def announce(config: Any, port: int) -> Announcer:
+    """Announce the daemon on the LAN so clients discover it."""
     zeroconf = Zeroconf()
     name = f"raydriver-{socket.gethostname()}.{SERVICE_TYPE}"
     info = ServiceInfo(
@@ -93,14 +76,11 @@ async def announce(config: Any, port: int) -> Announcer | None:
 
 
 async def browse_daemons(timeout: float = 3.0) -> list[dict[str, Any]]:
-    """Browse for daemons for *timeout* seconds; [] without the
-    extra. Each entry has name, host, port and txt fields."""
-    if AsyncZeroconf is None or AsyncServiceBrowser is None:
-        logger.warning("mdns browse requires zeroconf, which is not available")
-        return []
+    """Browse for daemons for *timeout* seconds. Each entry has name,
+    host, port and txt fields."""
     found: set[str] = set()
 
-    class _Listener:
+    class _Listener(ServiceListener):
         def add_service(self, zc: Any, type_: str, name: str) -> None:
             found.add(name)
 
