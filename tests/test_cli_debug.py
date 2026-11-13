@@ -6,6 +6,7 @@ import json
 import pytest_asyncio
 
 from raydriver.cli import debug
+from raydriver.cli.main import amain
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 
@@ -99,3 +100,33 @@ async def test_connection_daemon_stopped(tmp_path, capsys):
         json.dumps({"host": "127.0.0.1", "port": 1, "sessions": []})
     )
     assert await debug.cmd_connection(ns(config=str(config_path))) == 1
+
+
+# Entry-point regressions: these go through amain (the real CLI
+# path), unlike the cmd_* tests above which bypass argument parsing.
+
+
+async def test_amain_scan_runs_without_log_file(capsys):
+    # amain used to read args.log_file unconditionally, but the debug
+    # subcommands do not define --log-file (AttributeError on scan).
+    assert await amain(["scan", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert isinstance(data["ports"], list)
+
+
+async def test_amain_list_without_config_file(tmp_path, capsys):
+    # No config yet (before `daemon --setup`): list must not crash on
+    # a missing file; it falls back to defaults.
+    missing = tmp_path / "missing.json"
+    assert await amain(["list", "--json", "--config", str(missing)]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["configured"] == []
+    assert "daemon" in data
+
+
+async def test_amain_connection_without_config_file(tmp_path, capsys):
+    # Missing config must not crash; with no daemon at the default
+    # endpoint this is a graceful error (1), or 0 if one is running.
+    missing = tmp_path / "missing.json"
+    result = await amain(["connection", "--json", "--config", str(missing)])
+    assert result in (0, 1)

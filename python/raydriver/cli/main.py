@@ -316,10 +316,13 @@ def build_parser():
 
 async def amain(argv) -> int:
     args = build_parser().parse_args(argv)
-    if args.log_file and "RUST_LOG" not in os.environ:
+    # Not every subcommand defines --log-file (e.g. the debug
+    # commands); default to stderr logging when it is absent.
+    log_file = getattr(args, "log_file", None)
+    if log_file and "RUST_LOG" not in os.environ:
         # Diagnostics belong in the log file; info level by default.
         os.environ["RUST_LOG"] = "info"
-    _native.init_logging(path=args.log_file)
+    _native.init_logging(path=log_file)
     return await args.func(args)
 
 
