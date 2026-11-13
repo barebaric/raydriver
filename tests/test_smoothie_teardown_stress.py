@@ -76,3 +76,34 @@ async def test_cancel_disconnect_churn():
 async def test_cancel_drop_without_disconnect_churn():
     for _ in range(60):
         await _cancel_cycle(disconnect=False)
+
+
+@pytest.mark.asyncio
+async def test_drop_without_disconnect_stops_background_tasks():
+    """A session dropped without disconnect() must not orphan its
+    polling tasks on the shared runtime (the leak that destabilized
+    the Windows CI): after the drop, no further status polls reach
+    the transport."""
+    status = b"<Idle|MPos:0.000,0.000,0.000|WPos:0.000,0.000,0.000|FS:0,0>\r\n"
+    mock = MockTransport()
+    session = SmoothieSession.with_transport(
+        mock,
+        config={**TIMINGS, "status_poll_interval": 0.05},
+        dialect=DIALECT,
+        event_callback=lambda event: None,
+    )
+    connect_task = asyncio.ensure_future(session.connect())
+    for _ in range(200):
+        if mock.sent():
+            break
+        await asyncio.sleep(0.005)
+    mock.push(status)
+    await connect_task
+    await asyncio.sleep(0.1)
+    mock.clear_sent()
+
+    del session
+    gc.collect()
+    await asyncio.sleep(0.5)
+
+    assert [chunk for chunk in mock.sent() if chunk == b"?"] == []

@@ -205,6 +205,22 @@ impl SmoothieCore {
         }
     }
 
+    /// Abort every background task without awaiting, for use from
+    /// `Drop` where blocking is not allowed.  A session dropped
+    /// without `disconnect()` must not leave its connection, polling
+    /// and reader tasks running on the shared runtime: such orphans
+    /// accumulate across sessions and starve the worker threads
+    /// (hangs on Linux, access violations on Windows).
+    pub fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Some(task) = self.connection_task.lock().unwrap().take() {
+            task.abort();
+        }
+        for task in self.background_tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
     async fn abort_readers(&self) {
         let tasks: Vec<_> =
             self.background_tasks.lock().unwrap().drain(..).collect();
