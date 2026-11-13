@@ -184,11 +184,9 @@ control channel.
 
 ## Clients
 
-**Rayforge** (landing in
-[rayforge#703](https://github.com/barebaric/rayforge/pull/703)):
-the driver setup page gains a *Remote device* option with fields
-for the daemon hostname, port, token and TLS pin — in the machine
-wizard and in an existing machine's settings.
+**Rayforge**: machine setup is documented on the Rayforge website
+— see the
+[first-time setup guide](https://rayforge.org/docs/getting-started/first-time-setup).
 
 Any raydriver consumer can connect through
 `raydriver.remote.client.create_session`, which routes to a remote

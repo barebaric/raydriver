@@ -76,17 +76,11 @@ raydriver info 127.0.0.1:8765  # sessions, devices and cameras
 
 ### Connecting clients
 
-**Rayforge**: remote-machine support is being added in
-[rayforge#703](https://github.com/barebaric/rayforge/pull/703).
-Once it ships, the driver setup page — in the machine wizard and
-in an existing machine's settings — gains a *Remote device*
-option: enable it and enter the daemon's hostname (`127.0.0.1`
-when it runs on the same computer), port `8765` and the token
-printed by `daemon add`.
-
-Until then, any raydriver consumer can already connect through
-the client API — see [docs/daemon.md](docs/daemon.md) for the
-endpoint formats and an example.
+- **Rayforge**: follow the
+  [first-time setup guide](https://rayforge.org/docs/getting-started/first-time-setup)
+  on the Rayforge website.
+- **Any other raydriver consumer**: connect through the client
+  API — see [docs/daemon.md](docs/daemon.md).
 
 ### Exposing the daemon to the LAN
 
