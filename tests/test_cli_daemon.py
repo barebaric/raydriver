@@ -1,7 +1,6 @@
 """Tests for the daemon CLI, config handling and mDNS announce."""
 
 import json
-import select
 import socket
 import subprocess
 import sys
@@ -123,10 +122,11 @@ def test_cli_setup_and_serve(tmp_path):
     try:
         stdout = proc.stdout
         assert stdout is not None
-        ready = select.select([stdout], [], [], 15)[0]
-        assert ready, "daemon did not announce its listener"
+        # readline is portable (select on pipes is not, on Windows);
+        # the daemon flushes the listening line, and a dead process
+        # yields EOF. pytest-timeout backstops a silent hang.
         line = stdout.readline()
-        assert "listening" in line
+        assert "listening" in line, "daemon did not announce its listener"
         port = int(line.strip().rsplit(":", 1)[1])
         with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
             prefix = sock.recv(4)

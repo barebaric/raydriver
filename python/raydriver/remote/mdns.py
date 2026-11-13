@@ -1,13 +1,15 @@
-"""Optional mDNS announce for the daemon (``_raydriver._tcp``).
+"""Optional mDNS announce and browse for the daemon
+(``_raydriver._tcp``).
 
 Requires the ``raydriver[daemon]`` extra (python-zeroconf). When
 the extra is missing, :func:`announce` logs a warning and returns
-``None`` — mDNS is opt-in and never a hard dependency. Discovery
-consumers stay in Rayforge, which already runs an mDNS channel.
+``None`` and :func:`browse_daemons` returns an empty list — mDNS is
+opt-in and never a hard dependency.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import socket
 from typing import Any
@@ -17,9 +19,15 @@ try:
         ServiceInfo,
         Zeroconf,
     )
+    from zeroconf.asyncio import (  # pyright: ignore[reportMissingImports]
+        AsyncServiceBrowser,
+        AsyncZeroconf,
+    )
 except ImportError:  # optional extra: raydriver[daemon]
     ServiceInfo = None  # type: ignore[assignment,misc]
     Zeroconf = None  # type: ignore[assignment,misc]
+    AsyncServiceBrowser = None  # type: ignore[assignment,misc]
+    AsyncZeroconf = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -69,3 +77,48 @@ async def announce(config: Any, port: int) -> Announcer | None:
     )
     await zeroconf.async_register_service(info)
     return Announcer(zeroconf, info)
+
+
+async def browse_daemons(timeout: float = 3.0) -> list[dict[str, Any]]:
+    """Browse for daemons for *timeout* seconds; [] without the
+    extra. Each entry has name, host, port and txt fields."""
+    if AsyncZeroconf is None or AsyncServiceBrowser is None:
+        logger.warning(
+            "mdns browse requires python-zeroconf "
+            "(pip install raydriver[daemon])"
+        )
+        return []
+    found: set[str] = set()
+
+    class _Listener:
+        def add_service(self, zc: Any, type_: str, name: str) -> None:
+            found.add(name)
+
+        def remove_service(self, zc: Any, type_: str, name: str) -> None:
+            found.discard(name)
+
+        def update_service(self, zc: Any, type_: str, name: str) -> None:
+            pass
+
+    results: list[dict[str, Any]] = []
+    async with AsyncZeroconf() as azc:
+        browser = AsyncServiceBrowser(azc.zeroconf, SERVICE_TYPE, _Listener())
+        await asyncio.sleep(timeout)
+        await browser.async_cancel()
+        for name in sorted(found):
+            info = await azc.async_get_service_info(SERVICE_TYPE, name)
+            if info is None:
+                continue
+            addresses = info.parsed_addresses()
+            results.append(
+                {
+                    "name": name,
+                    "host": addresses[0] if addresses else "",
+                    "port": info.port,
+                    "txt": {
+                        key.decode(): value.decode()
+                        for key, value in info.properties.items()
+                    },
+                }
+            )
+    return results

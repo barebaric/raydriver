@@ -8,6 +8,8 @@ Submodules
   lease, event ring and fan-out
 - raydriver.remote.client — RemoteSession proxy and the
   create_session factory
-- raydriver.remote.mdns — optional _raydriver._tcp announce
-  (extra: daemon)
+- raydriver.remote.mdns — optional _raydriver._tcp announce and
+  browse (extra: daemon)
+- raydriver.remote.inspect — read-only daemon inspection for the
+  debug CLI
 """

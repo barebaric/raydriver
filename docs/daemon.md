@@ -7,16 +7,65 @@ survive client disconnects; reattaching clients resync progress
 exactly. The daemon hosts *sessions*, not machines: machine
 configs and dialects stay client-side.
 
+Everything here works on Linux, macOS and Windows.
+
 ## Install and first run
 
 ```sh
 pip install raydriver            # add [daemon] for mDNS announce
-raydriver daemon --setup         # writes ~/.config/raydriver/daemon.json
-raydriver daemon                 # serves the config
+raydriver daemon --setup         # write a config with a generated token
+raydriver daemon install         # install + start the platform service
 ```
 
 `--setup` generates a token (config written mode 0600) and prints
-the certificate one-liner. `python -m raydriver daemon` works too.
+the certificate one-liner. The config lives in the platform's
+per-user location:
+
+| Platform | Config path                                        |
+| -------- | -------------------------------------------------- |
+| Linux    | `~/.config/raydriver/daemon.json` (or `$XDG_CONFIG_HOME`) |
+| macOS    | `~/Library/Application Support/raydriver/daemon.json` |
+| Windows  | `%APPDATA%\raydriver\daemon.json`                  |
+
+`--config PATH` overrides it everywhere; `python -m raydriver
+daemon` works too. To run in the foreground instead of as a
+service: `raydriver daemon`.
+
+## Service installation
+
+`raydriver daemon install` uses the platform's native mechanism:
+
+- **Linux**: a systemd *user* unit
+  (`~/.config/systemd/user/raydriver-daemon.service`), enabled and
+  started immediately. For boot start without login:
+  `loginctl enable-linger $USER`. `--system` installs a system unit
+  instead (run with sudo).
+- **macOS**: a launchd LaunchAgent
+  (`~/Library/LaunchAgents/org.raydriver.daemon.plist`), loaded at
+  login and kept alive; logs go to `~/Library/Logs/raydriver-daemon.log`.
+- **Windows**: a scheduled task (`raydriver-daemon`) running at
+  logon, using `pythonw.exe` when available so no console window
+  stays open.
+
+`raydriver daemon uninstall` stops and removes it;
+`raydriver daemon status` shows the service state plus a live
+probe of the daemon (version, auth mode).
+
+Manual systemd example (what `install` writes):
+
+```ini
+[Unit]
+Description=raydriver device daemon
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 -m raydriver daemon --config /etc/raydriver/daemon.json
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+```
 
 ## Config reference (`daemon.json`)
 
@@ -48,13 +97,34 @@ Auto-open example:
 }
 ```
 
+## Debug commands
+
+```sh
+raydriver scan                    # local serial ports (vid:pid, product)
+raydriver scan --network          # also browse for daemons via mDNS
+raydriver info /dev/ttyUSB0       # one serial port's details
+raydriver info 192.168.1.50:8765  # a daemon: sessions, devices, cameras
+raydriver list                    # configured devices + live connection state
+raydriver connection              # Rayforge clients connected to the daemon
+raydriver daemon status           # service state + daemon probe
+```
+
+Every command accepts `--json` for machine-readable output. Daemon
+commands read the endpoint and credentials from the config
+(`--config` to override, `--token`/`--tls-ca` to override
+credentials). `info` also accepts `raydriver://host:port#token`
+URLs. `connection` shows each client's address, authentication
+state and per-session roles, plus the control lease holder — the
+daemon-side view of "who is driving the machine right now".
+
 ## Security policy
 
 The analyzer's bind policy applies unchanged: loopback may run
 without auth; a non-loopback or wildcard bind refuses to open
 without **both** a token and TLS; explicitly configured auth is
 never dropped. Clients refuse to send a token over a non-TLS
-connection. Generate a certificate with:
+connection (except local diagnostic tools on loopback). Generate a
+certificate with:
 
 ```sh
 openssl req -x509 -newkey rsa:2048 -nodes \
@@ -66,24 +136,6 @@ openssl req -x509 -newkey rsa:2048 -nodes \
 Add the LAN hostname/IP to `subjectAltName` for remote clients,
 and pin the certificate on the client (`tls_ca`). Keep the daemon
 port firewalled to the LAN; there is no WAN/NAT traversal.
-
-## systemd
-
-```ini
-[Unit]
-Description=raydriver device daemon
-After=network-online.target
-
-[Service]
-ExecStart=/usr/bin/raydriver daemon --config /etc/raydriver/daemon.json
-Restart=on-failure
-User=raydriver
-# Serial access:
-SupplementaryGroups=dialout
-
-[Install]
-WantedBy=multi-user.target
-```
 
 ## Cameras on the device host
 

@@ -133,6 +133,9 @@ class Client:
         self.id = uuid.uuid4().hex[:12]
         self.reader = reader
         self.writer = writer
+        peer = writer.get_extra_info("peername")
+        self.address = f"{peer[0]}:{peer[1]}" if peer else "unknown"
+        self.connected_at = time.time()
         self.queue = ClientQueue()
         self.authenticated = False
         self.closed = False
@@ -193,6 +196,7 @@ class Daemon:
             protocol.SESSION_CLOSE: self._session_close,
             protocol.SESSION_COMMAND: self._session_command,
             protocol.SESSION_PROPERTY: self._session_property,
+            protocol.CLIENT_LIST: self._client_list,
         }
 
     async def start(self) -> asyncio.Server:
@@ -384,11 +388,28 @@ class Daemon:
                     "session_id": host.id,
                     "protocol": host.protocol_name,
                     "config": host.config,
+                    "connection_status": host.connection_status,
                     "job": host.job,
                     "lease_holder": host.lease_holder,
                     "watchers": len(host.subscribers),
                 }
                 for host in self._hosts.values()
+            ]
+        }
+
+    async def _client_list(
+        self, client: Client, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return {
+            "clients": [
+                {
+                    "id": c.id,
+                    "address": c.address,
+                    "authenticated": c.authenticated,
+                    "connected_at": c.connected_at,
+                    "roles": dict(c.roles),
+                }
+                for c in self._clients.values()
             ]
         }
 

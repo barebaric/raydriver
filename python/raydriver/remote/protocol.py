@@ -49,6 +49,7 @@ SESSION_DETACH = "session/detach"
 SESSION_CLOSE = "session/close"
 SESSION_COMMAND = "session/command"
 SESSION_PROPERTY = "session/property"
+CLIENT_LIST = "client/list"
 
 # Daemon → client pushes (no correlation id).
 WELCOME = "welcome"
@@ -69,6 +70,7 @@ REQUEST_TYPES = frozenset(
         SESSION_CLOSE,
         SESSION_COMMAND,
         SESSION_PROPERTY,
+        CLIENT_LIST,
     }
 )
 

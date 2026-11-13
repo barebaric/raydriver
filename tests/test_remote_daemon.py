@@ -585,3 +585,19 @@ async def test_client_queue_overflow_without_raw():
     queue.put(state)
     with pytest.raises(OverflowError):
         queue.put(state)
+
+
+async def test_client_list_and_connection_status(rig):
+    daemon, port, mock = rig
+    client = await connect_client(port)
+    sid = await client.open_session()
+    reply = await client.request(protocol.CLIENT_LIST)
+    assert reply["ok"]
+    clients = reply["payload"]["clients"]
+    assert len(clients) == 1
+    assert clients[0]["address"].startswith("127.0.0.1:")
+    assert clients[0]["authenticated"] is True
+    assert clients[0]["roles"] == {sid: "control"}
+    listing = await client.request(protocol.SESSION_LIST)
+    session = listing["payload"]["sessions"][0]
+    assert session["connection_status"] == "DISCONNECTED"

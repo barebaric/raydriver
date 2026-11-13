@@ -3,14 +3,20 @@
     raydriver daemon --setup             # write a token config
     raydriver daemon                     # serve the default config
     raydriver daemon --config my.json    # explicit config
+    raydriver daemon install             # install + start the service
+    raydriver daemon uninstall           # stop + remove the service
+    raydriver daemon status              # service + daemon state
 
-The config file is JSON (stdlib-parseable on Python 3.10). See
-docs/daemon.md for the full reference, a systemd unit example and
-the certificate one-liner. Network endpoints follow the analyzer
-security policy: loopback by default, token and TLS required for
-exposed listeners.
+Service installation is platform-native: systemd on Linux (user
+unit by default, --system for a system unit), launchd on macOS, a
+logon scheduled task on Windows. The config file is JSON
+(stdlib-parseable on Python 3.10) in the platform's per-user config
+location. See docs/daemon.md for the full reference. Network
+endpoints follow the analyzer security policy: loopback by default,
+token and TLS required for exposed listeners.
 """
 
+import argparse
 import asyncio
 import json
 import os
@@ -19,10 +25,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from raydriver import service
+from raydriver.paths import default_config_path
+from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
-DEFAULT_CONFIG_PATH = Path.home() / ".config" / "raydriver" / "daemon.json"
+DEFAULT_CONFIG_PATH = default_config_path()
 
 OPENSSL_HINT = (
     "openssl req -x509 -newkey rsa:2048 -nodes "
@@ -76,8 +85,41 @@ def write_setup_config(path: Path) -> str:
     return token
 
 
+async def _service_action(args: argparse.Namespace, path: Path) -> int:
+    try:
+        if args.action == "install":
+            print(service.install(path, system=args.system))
+            return 0
+        if args.action == "uninstall":
+            print(service.uninstall())
+            return 0
+        print(service.status())
+    except service.ServiceError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    if path.exists():
+        config = load_config(path)
+        host = config.host
+        if host in ("0.0.0.0", "::", "*", ""):
+            host = "127.0.0.1"
+        try:
+            welcome = await rins.welcome_probe(host, config.port)
+            auth = (
+                "auth required" if welcome.get("auth_required") else "no auth"
+            )
+            print(
+                f"daemon: listening on {host}:{config.port} "
+                f"(raydriver {welcome.get('raydriver')}, {auth})"
+            )
+        except (ConnectionError, OSError, asyncio.TimeoutError):
+            print("daemon: not reachable")
+    return 0
+
+
 async def cmd_daemon(args) -> int:
     path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+    if args.action in ("install", "uninstall", "status"):
+        return await _service_action(args, path)
     if args.setup:
         try:
             write_setup_config(path)
@@ -124,6 +166,13 @@ def add_daemon_parser(subparsers) -> None:
         "daemon", help="host sessions for remote clients"
     )
     parser.add_argument(
+        "action",
+        nargs="?",
+        choices=["install", "uninstall", "status"],
+        default=None,
+        help="manage the platform service instead of serving",
+    )
+    parser.add_argument(
         "--config",
         default=None,
         help=f"config file (default: {DEFAULT_CONFIG_PATH})",
@@ -132,6 +181,11 @@ def add_daemon_parser(subparsers) -> None:
         "--setup",
         action="store_true",
         help="write a config with a generated token and exit",
+    )
+    parser.add_argument(
+        "--system",
+        action="store_true",
+        help="install a system-wide service (Linux systemd; requires root)",
     )
     parser.add_argument(
         "--log-file",
