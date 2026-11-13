@@ -310,3 +310,17 @@ def test_mdns_announce_address_matches_bind(monkeypatch):
         mdns._announce_address(DaemonConfig(host="192.168.1.50"))
         == "192.168.1.50"
     )
+
+
+def test_mdns_service_name_short_hostname(monkeypatch):
+    monkeypatch.setattr(mdns.socket, "gethostname", lambda: "myhost")
+    assert mdns._service_name() == "raydriver-myhost._raydriver._tcp.local."
+
+
+def test_mdns_service_name_long_hostname(monkeypatch):
+    # CI runners can have hostnames that overflow the 63-char DNS
+    # label limit; the instance name must stay valid.
+    monkeypatch.setattr(mdns.socket, "gethostname", lambda: "a" * 100)
+    label = mdns._service_name().split(".")[0]
+    assert len(label) <= 63
+    assert label.startswith("raydriver-")

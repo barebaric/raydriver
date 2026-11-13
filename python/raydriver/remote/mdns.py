@@ -7,6 +7,7 @@ box with a plain ``pip install raydriver``.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import socket
 from typing import Any
@@ -43,6 +44,20 @@ def _announce_address(config: Any) -> str:
     return host
 
 
+def _service_name() -> str:
+    """A DNS-safe service instance name (each label <= 63 chars).
+
+    Long hostnames (e.g. CI runners) would overflow the label limit,
+    so truncate and append a short hash to stay unique.
+    """
+    host = socket.gethostname().replace(".", "-")
+    label = f"raydriver-{host}"
+    if len(label) > 63:
+        digest = hashlib.sha1(host.encode("utf-8")).hexdigest()[:8]
+        label = f"raydriver-{host[:44]}-{digest}"
+    return f"{label}.{SERVICE_TYPE}"
+
+
 class Announcer:
     """A registered mDNS service; close() unregisters it."""
 
@@ -55,24 +70,33 @@ class Announcer:
         self._zeroconf.close()
 
 
-async def announce(config: Any, port: int) -> Announcer:
-    """Announce the daemon on the LAN so clients discover it."""
-    zeroconf = Zeroconf()
-    name = f"raydriver-{socket.gethostname()}.{SERVICE_TYPE}"
-    info = ServiceInfo(
-        SERVICE_TYPE,
-        name,
-        addresses=[socket.inet_aton(_announce_address(config))],
-        port=port,
-        properties={
-            "protocol": "1",
-            "requires_auth": str(config.token is not None).lower(),
-            "tls": str(config.tls_cert is not None).lower(),
-            "cameras": str(len(config.cameras)),
-        },
-    )
-    await zeroconf.async_register_service(info)
-    return Announcer(zeroconf, info)
+async def announce(config: Any, port: int) -> Announcer | None:
+    """Announce the daemon on the LAN so clients discover it.
+
+    Best-effort: returns None (and logs) if mDNS cannot be set up, so
+    a discovery problem never prevents the daemon from serving.
+    """
+    try:
+        zeroconf = Zeroconf()
+        info = ServiceInfo(
+            SERVICE_TYPE,
+            _service_name(),
+            addresses=[socket.inet_aton(_announce_address(config))],
+            port=port,
+            properties={
+                "protocol": "1",
+                "requires_auth": str(config.token is not None).lower(),
+                "tls": str(config.tls_cert is not None).lower(),
+                "cameras": str(len(config.cameras)),
+            },
+        )
+        await zeroconf.async_register_service(info)
+        return Announcer(zeroconf, info)
+    except Exception:
+        logger.warning(
+            "mDNS announce failed; discovery disabled", exc_info=True
+        )
+        return None
 
 
 async def browse_daemons(timeout: float = 3.0) -> list[dict[str, Any]]:
