@@ -104,6 +104,11 @@ async def test_drop_without_disconnect_stops_background_tasks():
 
     del session
     gc.collect()
+    # Let the Drop-triggered abort take effect. A poll already in
+    # flight when the session is dropped may still land, so settle
+    # first, then assert that no *further* polling happens.
+    await asyncio.sleep(0.3)
+    mock.clear_sent()
     await asyncio.sleep(0.5)
 
     assert [chunk for chunk in mock.sent() if chunk == b"?"] == []
