@@ -37,7 +37,7 @@ Linux, macOS and Windows; full reference in
 ### 1. Add your machine
 
 ```bash
-pip install raydriver          # add [daemon] for mDNS announce
+pip install raydriver[daemon]  # [daemon] adds network discovery
 raydriver scan                 # find your machine's serial port
 raydriver daemon add /dev/ttyUSB0
 ```
@@ -48,6 +48,11 @@ token; `raydriver daemon status` shows it again later. The config
 lives in `~/.config/raydriver/daemon.json` (Linux),
 `~/Library/Application Support/raydriver/daemon.json` (macOS) or
 `%APPDATA%\raydriver\daemon.json` (Windows).
+
+With the `[daemon]` extra the daemon announces itself over mDNS, so
+Rayforge's machine wizard discovers it automatically (no manual
+setup). Plain `raydriver` still works; you then enter the daemon's
+address by hand.
 
 Defaults are GRBL at 115200 baud; for other firmware use
 `raydriver daemon add PORT --protocol smoothie --baudrate 115200`

@@ -95,7 +95,9 @@ class DaemonConfig:
     ring_size: int = DEFAULT_RING_SIZE
     cameras: list[dict[str, Any]] = field(default_factory=list)
     sessions: list[dict[str, Any]] = field(default_factory=list)
-    mdns: bool = False
+    # Announce _raydriver._tcp so clients discover the daemon. On by
+    # default; a no-op unless the [daemon] extra (zeroconf) is present.
+    mdns: bool = True
 
 
 class ClientQueue:

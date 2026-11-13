@@ -42,7 +42,7 @@ def test_config_from_dict_defaults():
     assert config.port == defaults.port
     assert config.keepalive_interval == defaults.keepalive_interval
     assert config.keepalive_misses == defaults.keepalive_misses
-    assert config.mdns is False
+    assert config.mdns is True
 
 
 def test_config_from_dict_overrides():
@@ -291,8 +291,27 @@ async def test_mdns_announce_registers_service():
     assert announcer is not None
     try:
         assert announcer.info.port == 8765
+        # A loopback bind advertises loopback, not the hostname address.
+        assert announcer.info.parsed_addresses() == ["127.0.0.1"]
         assert announcer.info.properties[b"requires_auth"] == b"true"
         assert announcer.info.properties[b"tls"] == b"false"
         assert announcer.info.properties[b"cameras"] == b"1"
     finally:
         await announcer.close()
+
+
+def test_mdns_announce_address_matches_bind(monkeypatch):
+    monkeypatch.setattr(mdns, "_local_ip", lambda: "192.168.1.99")
+    assert (
+        mdns._announce_address(DaemonConfig(host="127.0.0.1")) == "127.0.0.1"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="localhost")) == "127.0.0.1"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="0.0.0.0")) == "192.168.1.99"
+    )
+    assert (
+        mdns._announce_address(DaemonConfig(host="192.168.1.50"))
+        == "192.168.1.50"
+    )
