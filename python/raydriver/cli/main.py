@@ -23,6 +23,8 @@ import time
 
 import raydriver.raydriver as _native
 from raydriver.cli.analyzer import add_analyzer_parser
+from raydriver.cli.daemon import add_daemon_parser
+from raydriver.cli.debug import add_debug_parser
 from raydriver.core import SessionEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
@@ -307,6 +309,8 @@ def build_parser():
     status_parser.set_defaults(func=cmd_status)
 
     add_analyzer_parser(subparsers)
+    add_daemon_parser(subparsers)
+    add_debug_parser(subparsers)
     return parser
 
 

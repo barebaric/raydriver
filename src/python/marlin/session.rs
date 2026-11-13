@@ -17,13 +17,6 @@ use crate::python::grbl::session::{
 };
 use crate::python::pyfuture::{none_obj, spawn_future};
 
-pub(crate) const MODULE_DOC: &str = "\
-The Marlin session: one line at a time, waiting for each \
-ok/error acknowledgement, with M114 position polling.
-";
-
-pyo3_stub_gen::module_doc!("raydriver.marlin", "{}", MODULE_DOC);
-
 fn build_marlin_config(
     kind: TransportKind,
     dict: Option<&Bound<'_, PyDict>>,

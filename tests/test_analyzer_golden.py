@@ -30,7 +30,14 @@ GOLDEN_DIR = Path(__file__).parent / "golden"
 
 SMOOTHIE_MARLIN_TIMINGS = {
     "handshake_timeout": 2.0,
-    "handshake_poll_interval": 0.02,
+    # The smoothie handshake polls `?` until the first status report
+    # answers. Keep the interval far above emulator startup jitter
+    # and the Windows timer granularity (~15.6 ms): the first
+    # response then always wins, so the listing shows exactly one
+    # handshake poll on every platform instead of however many fit
+    # into the startup. (Marlin's handshake waits for the banner
+    # without polling and is unaffected.)
+    "handshake_poll_interval": 0.5,
     "status_poll_interval": 60.0,
     "reconnect_delay": 0.2,
     "command_timeout": 2.0,

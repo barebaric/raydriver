@@ -10,6 +10,7 @@ from . import transport
 from . import types
 __all__ = [
     "SessionEvent",
+    "list_serial_ports",
     "transport",
     "types",
 ]
@@ -86,4 +87,13 @@ class SessionEvent:
         def __new__(cls, line: builtins.str) -> SessionEvent.RawTx: ...
     
     ...
+
+def list_serial_ports() -> builtins.list[dict]:
+    r"""
+    Enumerate the serial ports this host can reach.
+    
+    Returns one dict per port with the keys ``port`` (the OS device
+    path), ``vid``, ``pid``, ``serial_number``, ``manufacturer`` and
+    ``product``. The USB fields are ``None`` for non-USB ports.
+    """
 

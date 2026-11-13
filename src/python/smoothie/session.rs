@@ -17,13 +17,6 @@ use crate::python::grbl::session::{
 use crate::python::pyfuture::{none_obj, spawn_future};
 use crate::smoothie::session::{SmoothieConfig, SmoothieCore};
 
-pub(crate) const MODULE_DOC: &str = "\
-The Smoothieware session: one line at a time, waiting for each \
-ok/error acknowledgement, with Grbl-style status reports.
-";
-
-pyo3_stub_gen::module_doc!("raydriver.smoothie", "{}", MODULE_DOC);
-
 fn build_smoothie_config(
     kind: TransportKind,
     dict: Option<&Bound<'_, PyDict>>,
