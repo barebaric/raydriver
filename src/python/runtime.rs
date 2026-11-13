@@ -34,7 +34,18 @@ static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 /// Heartbeat that periodically attaches to the GIL and prints a
 /// line.  If the interpreter ever deadlocks on the GIL, the
 /// heartbeats stop, which the CI logs will show.
+///
+/// Opt-in via ``RAYDRIVER_GIL_WATCHDOG=1``.  Disabled by default:
+/// this is a temporary freeze diagnostic, and the periodic
+/// ``PyGILState_Ensure`` from a tokio worker thread can race with
+/// session teardown on Windows and crash the interpreter with an
+/// access violation.  The freeze it was added to diagnose is fixed
+/// by the atexit runtime shutdown below, so the heartbeat is no
+/// longer needed in normal runs.
 fn spawn_gil_watchdog(runtime: &tokio::runtime::Runtime) {
+    if std::env::var("RAYDRIVER_GIL_WATCHDOG").ok().as_deref() != Some("1") {
+        return;
+    }
     runtime.spawn(async {
         let start = Instant::now();
         loop {
