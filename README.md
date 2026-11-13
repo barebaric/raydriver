@@ -28,57 +28,83 @@ progress bar, the device state, machine position, feed rate and ETA;
 
 ## Daemon (remote sessions)
 
-The daemon hosts driver sessions next to the hardware — e.g. on a
-Raspberry Pi in the workshop — while Rayforge runs elsewhere on the
-LAN. Jobs run daemon-side and survive client disconnects. Works on
+The daemon runs the driver next to the hardware — e.g. on a
+Raspberry Pi in the workshop — while Rayforge runs on your desk.
+Jobs run daemon-side and survive client disconnects. Works on
 Linux, macOS and Windows; full reference in
 [docs/daemon.md](docs/daemon.md).
 
-### Quickstart
+### 1. Set up
 
 ```bash
 pip install raydriver          # add [daemon] for mDNS announce
-raydriver scan                 # find your device's serial port
-raydriver daemon --setup       # write a config with a generated token
+raydriver scan                 # find your machine's serial port
+raydriver daemon --setup       # create the config file
 ```
 
-`--setup` writes `daemon.json` to the per-user config location:
-`~/.config/raydriver/` (Linux), `~/Library/Application Support/raydriver/`
-(macOS) or `%APPDATA%\raydriver\` (Windows).
+`--setup` writes `daemon.json` and generates a **token** — the
+password clients use to connect. The file lives in
+`~/.config/raydriver/` (Linux),
+`~/Library/Application Support/raydriver/` (macOS) or
+`%APPDATA%\raydriver\` (Windows); `--setup` prints the exact path.
 
-### Configure a device
+### 2. Add your machine
 
-Add the device to the `sessions` list in `daemon.json`; configured
-sessions open automatically when the daemon starts:
+Add a `sessions` entry to that file, using the port from `scan`:
 
 ```json
-{
-  "host": "127.0.0.1",
-  "port": 8765,
-  "token": "…",
-  "sessions": [
-    {
-      "protocol": "grbl",
-      "config": {"port": "/dev/ttyUSB0", "baudrate": 115200}
-    }
-  ]
-}
+"sessions": [
+  {
+    "protocol": "grbl",
+    "config": {"port": "/dev/ttyUSB0", "baudrate": 115200}
+  }
+]
 ```
 
 `protocol` is one of `grbl`, `grbl_simple`, `smoothie`, `marlin`;
-`config` takes the same keys as a local session.
+`config` takes the same keys as a local session. Configured
+sessions open automatically when the daemon starts.
 
-### Run it
+### 3. Run the daemon
 
 ```bash
 raydriver daemon               # foreground
-raydriver daemon install       # or as a platform service
-raydriver daemon status        # service state + live daemon probe
-raydriver daemon uninstall     # stop + remove the service
+raydriver daemon install       # or as a service
 ```
 
 `install` uses a systemd user unit on Linux, a launchd LaunchAgent
 on macOS and a logon scheduled task on Windows.
+`raydriver daemon status` shows the service state and probes the
+daemon; `raydriver daemon uninstall` stops and removes it.
+
+### 4. Connect Rayforge
+
+In the machine's driver settings, select the remote endpoint and
+enter the daemon's address (`127.0.0.1` when it runs on the same
+machine), port `8765`, and the token from `daemon.json`.
+
+Any raydriver consumer can connect the same way, with the same
+dialect and events as a local session (see [Usage](#usage)):
+
+```python
+from raydriver.remote.client import create_session
+
+session = create_session(
+    "grbl",
+    {
+        "port": "/dev/ttyUSB0",
+        "baudrate": 115200,
+        "url": "raydriver://127.0.0.1:8765#<token from daemon.json>",
+    },
+    dialect={},
+    event_callback=on_event,
+)
+await session.connect()
+```
+
+The device config (`port`, `baudrate`) is sent to the daemon, which
+opens the serial connection; the URL selects the daemon and carries
+the token.
 
 ### Check it
 
@@ -88,34 +114,15 @@ raydriver connection           # connected clients + control lease
 raydriver info 127.0.0.1:8765  # sessions, devices and cameras
 ```
 
-### Connect a client
+### Exposing the daemon to the LAN
 
-Rayforge's migrated drivers take a remote endpoint; any raydriver
-consumer can use `create_session` with the same dialect and events
-as a local session (see [Usage](#usage)):
-
-```python
-from raydriver.remote.client import create_session
-
-session = create_session(
-    "grbl",
-    {"url": "raydriver://pi.local:8765#<token>", "tls_ca": "daemon-cert.pem"},
-    dialect={},
-    event_callback=on_event,
-)
-await session.connect()
-```
-
-**Clients require TLS whenever a token is set** — even on loopback.
-Two working setups:
-
-- *Same machine, no TLS*: remove `token` from `daemon.json` and keep
-  `host: "127.0.0.1"` (loopback-only, no auth). Clients connect with
-  `{"url": "raydriver://127.0.0.1:8765"}`.
-- *LAN*: keep the token, set `host: "0.0.0.0"` and add `tls_cert` /
-  `tls_key` (`--setup` prints the openssl one-liner). Clients pin the
-  certificate with `tls_ca`. A non-loopback bind refuses to start
-  without both a token and TLS.
+On loopback the token never leaves the machine, so no TLS is
+needed. To reach the daemon from another machine, set
+`"host": "0.0.0.0"` in `daemon.json` and add `tls_cert` / `tls_key`
+— an exposed listener refuses to start without both a token and
+TLS. `--setup` prints the openssl one-liner for a certificate;
+clients pin it with `tls_ca` (details in
+[docs/daemon.md](docs/daemon.md)).
 
 ## Protocol analyzer
 
