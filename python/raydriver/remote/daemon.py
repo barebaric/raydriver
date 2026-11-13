@@ -87,6 +87,7 @@ class DaemonConfig:
     ring_size: int = DEFAULT_RING_SIZE
     cameras: list[dict[str, Any]] = field(default_factory=list)
     sessions: list[dict[str, Any]] = field(default_factory=list)
+    mdns: bool = False
 
 
 class ClientQueue:

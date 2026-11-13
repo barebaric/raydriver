@@ -17,6 +17,9 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+daemon = [
+    "python-zeroconf",
+]
 test = [
     "pytest",
     "pytest-asyncio",
