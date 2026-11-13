@@ -57,6 +57,52 @@ async def test_info_serial_missing(capsys):
     assert await debug.cmd_info(ns(target="/dev/nonexistent-raydriver")) == 1
 
 
+@pytest_asyncio.fixture
+async def token_daemon_fixture(tmp_path):
+    token = "test-token-123"
+    daemon = Daemon(DaemonConfig(port=0, token=token))
+    server = await daemon.start()
+    port = server.sockets[0].getsockname()[1]
+    config_path = tmp_path / "daemon.json"
+    config_path.write_text(
+        json.dumps({"host": "127.0.0.1", "port": port, "token": token})
+    )
+    try:
+        yield port, config_path, token
+    finally:
+        await daemon.stop()
+
+
+async def test_info_daemon_token_from_config(token_daemon_fixture, capsys):
+    # info must read the token from the config like list/connection
+    # do; it used to fail with "daemon authentication failed".
+    port, config_path, _ = token_daemon_fixture
+    result = await debug.cmd_info(
+        ns(target=f"127.0.0.1:{port}", config=str(config_path))
+    )
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["welcome"]["auth_required"] is True
+
+
+async def test_info_daemon_explicit_token(token_daemon_fixture, capsys):
+    port, _, token = token_daemon_fixture
+    result = await debug.cmd_info(ns(target=f"127.0.0.1:{port}", token=token))
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["welcome"]["auth_required"] is True
+
+
+async def test_info_daemon_url_token(token_daemon_fixture, capsys):
+    port, _, token = token_daemon_fixture
+    result = await debug.cmd_info(
+        ns(target=f"raydriver://127.0.0.1:{port}#{token}")
+    )
+    assert result == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["welcome"]["auth_required"] is True
+
+
 async def test_list_configured(daemon_fixture, capsys):
     _, config_path = daemon_fixture
     assert await debug.cmd_list(ns(config=str(config_path))) == 0

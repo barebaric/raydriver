@@ -113,6 +113,8 @@ async def cmd_info(args: argparse.Namespace) -> int:
         print(f"error: no serial port {args.target!r} found", file=sys.stderr)
         return 1
     token = args.token if args.token is not None else url_token
+    if token is None:
+        token = _load_config(args).token
     try:
         snap = await rins.snapshot(host, port, token, args.tls_ca)
     except (ConnectionError, OSError, asyncio.TimeoutError) as err:
@@ -265,6 +267,7 @@ def add_debug_parser(subparsers) -> None:
         "info", help="show a serial port or a daemon (host:port)"
     )
     info.add_argument("target", help="serial port path or host:port")
+    _add_config_option(info)
     _add_daemon_options(info)
     info.set_defaults(func=cmd_info)
 
