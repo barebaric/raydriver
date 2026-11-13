@@ -34,38 +34,27 @@ Jobs run daemon-side and survive client disconnects. Works on
 Linux, macOS and Windows; full reference in
 [docs/daemon.md](docs/daemon.md).
 
-### 1. Set up
+### 1. Add your machine
 
 ```bash
 pip install raydriver          # add [daemon] for mDNS announce
 raydriver scan                 # find your machine's serial port
-raydriver daemon --setup       # create the config file
+raydriver daemon add /dev/ttyUSB0
 ```
 
-`--setup` writes `daemon.json` and generates a **token** — the
-password clients use to connect. The file lives in
-`~/.config/raydriver/` (Linux),
-`~/Library/Application Support/raydriver/` (macOS) or
-`%APPDATA%\raydriver\` (Windows); `--setup` prints the exact path.
+`add` creates the config file on first use and generates a
+**token** — the password clients use to connect. It prints the
+token; `raydriver daemon status` shows it again later. The config
+lives in `~/.config/raydriver/daemon.json` (Linux),
+`~/Library/Application Support/raydriver/daemon.json` (macOS) or
+`%APPDATA%\raydriver\daemon.json` (Windows).
 
-### 2. Add your machine
+Defaults are GRBL at 115200 baud; for other firmware use
+`raydriver daemon add PORT --protocol smoothie --baudrate 115200`
+(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`).
+`raydriver daemon remove PORT` unconfigures a device.
 
-Add a `sessions` entry to that file, using the port from `scan`:
-
-```json
-"sessions": [
-  {
-    "protocol": "grbl",
-    "config": {"port": "/dev/ttyUSB0", "baudrate": 115200}
-  }
-]
-```
-
-`protocol` is one of `grbl`, `grbl_simple`, `smoothie`, `marlin`;
-`config` takes the same keys as a local session. Configured
-sessions open automatically when the daemon starts.
-
-### 3. Run the daemon
+### 2. Run the daemon
 
 ```bash
 raydriver daemon               # foreground
@@ -77,11 +66,12 @@ on macOS and a logon scheduled task on Windows.
 `raydriver daemon status` shows the service state and probes the
 daemon; `raydriver daemon uninstall` stops and removes it.
 
-### 4. Connect Rayforge
+### 3. Connect Rayforge
 
 In the machine's driver settings, select the remote endpoint and
 enter the daemon's address (`127.0.0.1` when it runs on the same
-machine), port `8765`, and the token from `daemon.json`.
+machine), port `8765`, and the token printed by `daemon add`
+(also shown by `daemon status`).
 
 Any raydriver consumer can connect the same way, with the same
 dialect and events as a local session (see [Usage](#usage)):
@@ -94,7 +84,7 @@ session = create_session(
     {
         "port": "/dev/ttyUSB0",
         "baudrate": 115200,
-        "url": "raydriver://127.0.0.1:8765#<token from daemon.json>",
+        "url": "raydriver://127.0.0.1:8765#<your token>",
     },
     dialect={},
     event_callback=on_event,

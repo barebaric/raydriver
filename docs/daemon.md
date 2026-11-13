@@ -12,14 +12,17 @@ Everything here works on Linux, macOS and Windows.
 ## Install and first run
 
 ```sh
-pip install raydriver            # add [daemon] for mDNS announce
-raydriver daemon --setup         # write a config with a generated token
-raydriver daemon install         # install + start the platform service
+pip install raydriver              # add [daemon] for mDNS announce
+raydriver daemon add /dev/ttyUSB0  # config + generated token + device
+raydriver daemon install           # install + start the platform service
 ```
 
-`--setup` generates a token (config written mode 0600) and prints
-the certificate one-liner. The config lives in the platform's
-per-user location:
+`add` writes the config on first use (mode 0600) with a generated
+**token** — the password clients use to connect — and prints it;
+`daemon status` shows it again. `daemon --setup` is the
+config-only variant (no device) and also prints the certificate
+one-liner for exposed listeners. The config lives in the
+platform's per-user location:
 
 | Platform | Config path                                        |
 | -------- | -------------------------------------------------- |
@@ -48,8 +51,24 @@ service: `raydriver daemon`.
   stays open.
 
 `raydriver daemon uninstall` stops and removes it;
-`raydriver daemon status` shows the service state plus a live
-probe of the daemon (version, auth mode).
+`raydriver daemon status` shows the service state, the token, and
+a live probe of the daemon (version, auth mode). Without a
+service it reports `service: not installed` and still probes.
+
+## Managing devices
+
+```sh
+raydriver daemon add /dev/ttyUSB0    # grbl at 115200 (the defaults)
+raydriver daemon add /dev/ttyACM0 --protocol marlin --baudrate 250000
+raydriver daemon remove /dev/ttyUSB0
+raydriver list                       # configured devices + live state
+```
+
+`add` upserts by serial port and creates the config with a
+generated token when none exists; `--protocol` is one of `grbl`,
+`grbl_simple`, `smoothie`, `marlin`. Configured sessions open at
+daemon start, so restart the daemon to apply changes. The config
+can also be edited by hand — see the reference below.
 
 Manual systemd example (what `install` writes):
 

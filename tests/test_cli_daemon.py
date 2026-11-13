@@ -8,11 +8,15 @@ import sys
 
 import pytest
 
+from raydriver import service
 from raydriver.cli.daemon import (
+    add_device,
     config_from_dict,
     load_config,
+    remove_device,
     write_setup_config,
 )
+from raydriver.cli.main import amain
 from raydriver.remote import mdns
 from raydriver.remote.daemon import DaemonConfig
 
@@ -83,6 +87,132 @@ def test_load_config(tmp_path):
     path = tmp_path / "daemon.json"
     path.write_text(json.dumps({"port": 1234}))
     assert load_config(path).port == 1234
+
+
+def test_add_device_creates_config(tmp_path):
+    path = tmp_path / "sub" / "daemon.json"
+    message = add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    assert "token:" in message
+    assert "added grbl /dev/ttyUSB0" in message
+    data = json.loads(path.read_text())
+    assert data["token"]
+    assert data["host"] == "127.0.0.1"
+    assert data["sessions"] == [
+        {
+            "protocol": "grbl",
+            "config": {"port": "/dev/ttyUSB0", "baudrate": 115200},
+        }
+    ]
+    if os.name != "nt":
+        assert (path.stat().st_mode & 0o777) == 0o600
+
+
+def test_add_device_preserves_config_and_upserts(tmp_path):
+    path = tmp_path / "daemon.json"
+    path.write_text(
+        json.dumps(
+            {
+                "host": "127.0.0.1",
+                "port": 9000,
+                "token": "t",
+                "sessions": [
+                    {
+                        "protocol": "grbl",
+                        "config": {
+                            "port": "/dev/ttyUSB0",
+                            "baudrate": 9600,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    message = add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    assert "updated" in message
+    data = json.loads(path.read_text())
+    assert data["port"] == 9000
+    assert data["token"] == "t"
+    assert len(data["sessions"]) == 1
+    assert data["sessions"][0]["config"]["baudrate"] == 115200
+    add_device(path, "/dev/ttyACM0", "marlin", 250000)
+    data = json.loads(path.read_text())
+    assert len(data["sessions"]) == 2
+    assert data["sessions"][1]["protocol"] == "marlin"
+
+
+def test_add_device_unknown_protocol(tmp_path):
+    with pytest.raises(ValueError, match="unknown protocol"):
+        add_device(tmp_path / "daemon.json", "/dev/ttyUSB0", "nope", 115200)
+
+
+def test_remove_device(tmp_path):
+    path = tmp_path / "daemon.json"
+    add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    assert "removed /dev/ttyUSB0" in remove_device(path, "/dev/ttyUSB0")
+    assert json.loads(path.read_text())["sessions"] == []
+    with pytest.raises(ValueError, match="no configured device"):
+        remove_device(path, "/dev/ttyUSB0")
+
+
+def test_remove_device_no_config(tmp_path):
+    with pytest.raises(ValueError, match="no config"):
+        remove_device(tmp_path / "missing.json", "/dev/ttyUSB0")
+
+
+async def test_amain_daemon_add_remove(tmp_path, capsys):
+    config = tmp_path / "daemon.json"
+    result = await amain(
+        ["daemon", "add", "/dev/ttyUSB0", "--config", str(config)]
+    )
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "added grbl /dev/ttyUSB0" in out
+    assert "token:" in out
+    result = await amain(
+        ["daemon", "remove", "/dev/ttyUSB0", "--config", str(config)]
+    )
+    assert result == 0
+    assert json.loads(config.read_text())["sessions"] == []
+
+
+async def test_amain_daemon_add_requires_port(tmp_path, capsys):
+    result = await amain(
+        ["daemon", "add", "--config", str(tmp_path / "d.json")]
+    )
+    assert result == 2
+
+
+async def test_amain_daemon_port_without_action(tmp_path):
+    # argparse rejects a bare port: the first positional is the action.
+    with pytest.raises(SystemExit) as exc:
+        await amain(
+            ["daemon", "/dev/ttyUSB0", "--config", str(tmp_path / "d.json")]
+        )
+    assert exc.value.code == 2
+
+
+async def test_amain_daemon_status_without_service(
+    tmp_path, capsys, monkeypatch
+):
+    # Foreground users have no service: status must still show the
+    # token and probe the daemon instead of erroring out.
+    config = tmp_path / "daemon.json"
+    add_device(config, "/dev/ttyUSB0", "grbl", 115200)
+    data = json.loads(config.read_text())
+    data["port"] = 1
+    config.write_text(json.dumps(data))
+    capsys.readouterr()
+
+    def not_installed():
+        raise service.ServiceError("unit not found")
+
+    monkeypatch.setattr(service, "status", not_installed)
+    result = await amain(["daemon", "status", "--config", str(config)])
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "service: not installed" in out
+    assert "token:" in out
+    assert "daemon: not reachable" in out
 
 
 def test_cli_setup_and_serve(tmp_path):
