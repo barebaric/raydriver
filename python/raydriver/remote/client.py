@@ -16,7 +16,7 @@ import logging
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from raydriver.analyzer.listener import make_client_ssl_context
+from raydriver.analyzer.listener import is_loopback, make_client_ssl_context
 from raydriver.core import SessionEvent
 from raydriver.core.types import DeviceState
 from raydriver.remote import protocol
@@ -196,7 +196,7 @@ class RemoteSession:
         port = int(endpoint.get("remote_port") or DEFAULT_PORT)
         token = endpoint.get("token")
         tls_ca = endpoint.get("tls_ca")
-        if token and not tls_ca:
+        if token and not tls_ca and not is_loopback(host):
             raise ConnectionError("refusing to send a token without TLS")
         ssl_context = make_client_ssl_context(tls_ca) if tls_ca else None
         self._reader, self._writer = await asyncio.open_connection(
