@@ -66,37 +66,7 @@ on macOS and a logon scheduled task on Windows.
 `raydriver daemon status` shows the service state and probes the
 daemon; `raydriver daemon uninstall` stops and removes it.
 
-### 3. Connect Rayforge
-
-In the machine's driver settings, select the remote endpoint and
-enter the daemon's address (`127.0.0.1` when it runs on the same
-machine), port `8765`, and the token printed by `daemon add`
-(also shown by `daemon status`).
-
-Any raydriver consumer can connect the same way, with the same
-dialect and events as a local session (see [Usage](#usage)):
-
-```python
-from raydriver.remote.client import create_session
-
-session = create_session(
-    "grbl",
-    {
-        "port": "/dev/ttyUSB0",
-        "baudrate": 115200,
-        "url": "raydriver://127.0.0.1:8765#<your token>",
-    },
-    dialect={},
-    event_callback=on_event,
-)
-await session.connect()
-```
-
-The device config (`port`, `baudrate`) is sent to the daemon, which
-opens the serial connection; the URL selects the daemon and carries
-the token.
-
-### Check it
+### 3. Check it
 
 ```bash
 raydriver list                 # configured devices + connection state
@@ -104,15 +74,27 @@ raydriver connection           # connected clients + control lease
 raydriver info 127.0.0.1:8765  # sessions, devices and cameras
 ```
 
+### Connecting clients
+
+**Rayforge**: remote-machine support is being added in
+[rayforge#703](https://github.com/barebaric/rayforge/pull/703).
+Once it ships, the driver setup page — in the machine wizard and
+in an existing machine's settings — gains a *Remote device*
+option: enable it and enter the daemon's hostname (`127.0.0.1`
+when it runs on the same computer), port `8765` and the token
+printed by `daemon add`.
+
+Until then, any raydriver consumer can already connect through
+the client API — see [docs/daemon.md](docs/daemon.md) for the
+endpoint formats and an example.
+
 ### Exposing the daemon to the LAN
 
 On loopback the token never leaves the machine, so no TLS is
-needed. To reach the daemon from another machine, set
-`"host": "0.0.0.0"` in `daemon.json` and add `tls_cert` / `tls_key`
-— an exposed listener refuses to start without both a token and
-TLS. `--setup` prints the openssl one-liner for a certificate;
-clients pin it with `tls_ca` (details in
-[docs/daemon.md](docs/daemon.md)).
+needed. Reaching the daemon from another computer requires a
+certificate and a non-loopback bind — an exposed listener refuses
+to start without both a token and TLS. See
+[docs/daemon.md](docs/daemon.md) for the setup.
 
 ## Protocol analyzer
 
