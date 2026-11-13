@@ -268,9 +268,48 @@ async def test_update_dialect_is_synchronous(remote_rig):
 
 async def test_token_requires_tls(remote_rig):
     port, mock = remote_rig
-    proxy = make_proxy(port, EventRecorder(), token="secret")
+    # Non-loopback endpoint: the refusal fires before any connect.
+    proxy = make_proxy(
+        port, EventRecorder(), token="secret", remote_host="192.0.2.1"
+    )
     with pytest.raises(ConnectionError, match="without TLS"):
         await proxy.connect()
+
+
+async def test_token_loopback_without_tls():
+    # On loopback the token never leaves the machine, so TLS is not
+    # required — this is the `daemon --setup` quickstart path.
+    mock = MockTransport()
+    emulator = GrblEmulator(mock, speed_factor=10)
+    device_task = asyncio.ensure_future(emulator.run())
+
+    def factory(protocol_name, config, dialect, event_callback):
+        return GrblSession.with_transport(
+            mock,
+            config={**FAST_TIMINGS, **(config or {})},
+            dialect={**DEFAULT_DIALECT, **(dialect or {})},
+            event_callback=event_callback,
+        )
+
+    daemon = Daemon(
+        DaemonConfig(port=0, token="secret", keepalive_interval=0.5),
+        session_factory=factory,
+    )
+    server = await daemon.start()
+    events = EventRecorder()
+    proxy = make_proxy(server_port(server), events, token="secret")
+    try:
+        await proxy.connect()
+        lines = await proxy.execute_interactive_command("$I")
+        assert any("VER:" in line for line in lines)
+    finally:
+        await proxy.aclose()
+        await daemon.stop()
+        device_task.cancel()
+        try:
+            await device_task
+        except asyncio.CancelledError:
+            pass
 
 
 async def test_tls_token_roundtrip():

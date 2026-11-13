@@ -26,6 +26,70 @@ While a job runs, `raydriver run` shows acknowledged lines, a
 progress bar, the device state, machine position, feed rate and ETA;
 `Ctrl-C` cancels the job and runs the safety shutdown.
 
+## Daemon (remote sessions)
+
+The daemon runs the driver next to the hardware — e.g. on a
+Raspberry Pi in the workshop — while Rayforge runs on your desk.
+Jobs run daemon-side and survive client disconnects. Works on
+Linux, macOS and Windows; full reference in
+[docs/daemon.md](docs/daemon.md).
+
+### 1. Add your machine
+
+```bash
+pip install raydriver          # add [daemon] for mDNS announce
+raydriver scan                 # find your machine's serial port
+raydriver daemon add /dev/ttyUSB0
+```
+
+`add` creates the config file on first use and generates a
+**token** — the password clients use to connect. It prints the
+token; `raydriver daemon status` shows it again later. The config
+lives in `~/.config/raydriver/daemon.json` (Linux),
+`~/Library/Application Support/raydriver/daemon.json` (macOS) or
+`%APPDATA%\raydriver\daemon.json` (Windows).
+
+Defaults are GRBL at 115200 baud; for other firmware use
+`raydriver daemon add PORT --protocol smoothie --baudrate 115200`
+(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`).
+`raydriver daemon remove PORT` unconfigures a device.
+
+### 2. Run the daemon
+
+```bash
+raydriver daemon               # foreground
+raydriver daemon install       # or as a service
+```
+
+`install` uses a systemd user unit on Linux, a launchd LaunchAgent
+on macOS and a logon scheduled task on Windows.
+`raydriver daemon status` shows the service state and probes the
+daemon; `raydriver daemon uninstall` stops and removes it.
+
+### 3. Check it
+
+```bash
+raydriver list                 # configured devices + connection state
+raydriver connection           # connected clients + control lease
+raydriver info 127.0.0.1:8765  # sessions, devices and cameras
+```
+
+### Connecting clients
+
+- **Rayforge**: follow the
+  [first-time setup guide](https://rayforge.org/docs/getting-started/first-time-setup)
+  on the Rayforge website.
+- **Any other raydriver consumer**: connect through the client
+  API — see [docs/daemon.md](docs/daemon.md).
+
+### Exposing the daemon to the LAN
+
+On loopback the token never leaves the machine, so no TLS is
+needed. Reaching the daemon from another computer requires a
+certificate and a non-loopback bind — an exposed listener refuses
+to start without both a token and TLS. See
+[docs/daemon.md](docs/daemon.md) for the setup.
+
 ## Protocol analyzer
 
 The analyzer captures device traffic, decodes it to a readable

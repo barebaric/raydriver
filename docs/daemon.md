@@ -12,14 +12,17 @@ Everything here works on Linux, macOS and Windows.
 ## Install and first run
 
 ```sh
-pip install raydriver            # add [daemon] for mDNS announce
-raydriver daemon --setup         # write a config with a generated token
-raydriver daemon install         # install + start the platform service
+pip install raydriver              # add [daemon] for mDNS announce
+raydriver daemon add /dev/ttyUSB0  # config + generated token + device
+raydriver daemon install           # install + start the platform service
 ```
 
-`--setup` generates a token (config written mode 0600) and prints
-the certificate one-liner. The config lives in the platform's
-per-user location:
+`add` writes the config on first use (mode 0600) with a generated
+**token** — the password clients use to connect — and prints it;
+`daemon status` shows it again. `daemon --setup` is the
+config-only variant (no device) and also prints the certificate
+one-liner for exposed listeners. The config lives in the
+platform's per-user location:
 
 | Platform | Config path                                        |
 | -------- | -------------------------------------------------- |
@@ -48,8 +51,24 @@ service: `raydriver daemon`.
   stays open.
 
 `raydriver daemon uninstall` stops and removes it;
-`raydriver daemon status` shows the service state plus a live
-probe of the daemon (version, auth mode).
+`raydriver daemon status` shows the service state, the token, and
+a live probe of the daemon (version, auth mode). Without a
+service it reports `service: not installed` and still probes.
+
+## Managing devices
+
+```sh
+raydriver daemon add /dev/ttyUSB0    # grbl at 115200 (the defaults)
+raydriver daemon add /dev/ttyACM0 --protocol marlin --baudrate 250000
+raydriver daemon remove /dev/ttyUSB0
+raydriver list                       # configured devices + live state
+```
+
+`add` upserts by serial port and creates the config with a
+generated token when none exists; `--protocol` is one of `grbl`,
+`grbl_simple`, `smoothie`, `marlin`. Configured sessions open at
+daemon start, so restart the daemon to apply changes. The config
+can also be edited by hand — see the reference below.
 
 Manual systemd example (what `install` writes):
 
@@ -123,8 +142,10 @@ The analyzer's bind policy applies unchanged: loopback may run
 without auth; a non-loopback or wildcard bind refuses to open
 without **both** a token and TLS; explicitly configured auth is
 never dropped. Clients refuse to send a token over a non-TLS
-connection (except local diagnostic tools on loopback). Generate a
-certificate with:
+connection, except to loopback endpoints (`127.0.0.1`, `::1`,
+`localhost`), where the token never leaves the machine — so the
+config `--setup` writes works as-is for same-machine use. For an
+exposed listener, generate a certificate with:
 
 ```sh
 openssl req -x509 -newkey rsa:2048 -nodes \
@@ -163,7 +184,35 @@ control channel.
 
 ## Clients
 
-Rayforge's migrated drivers gain a remote endpoint group
-(`remote_host`, `remote_port`, `token`, TLS pin), or a single URL:
-`raydriver://host:8765#token`. Any raydriver consumer can use
-`raydriver.remote.client.create_session` the same way.
+**Rayforge**: machine setup is documented on the Rayforge website
+— see the
+[first-time setup guide](https://rayforge.org/docs/getting-started/first-time-setup).
+
+Any raydriver consumer can connect through
+`raydriver.remote.client.create_session`, which routes to a remote
+proxy when the config carries an endpoint: either the explicit
+keys (`remote_host`, `remote_port`, `token`, `tls_ca`,
+`tls_hostname`) or a single URL `raydriver://host:8765#token`. The
+token is the one printed by `daemon add` / `daemon status` (stored
+in `daemon.json`). The device config travels with the request: the
+daemon opens the serial connection from it.
+
+```python
+from raydriver.remote.client import create_session
+
+session = create_session(
+    "grbl",
+    {
+        "port": "/dev/ttyUSB0",
+        "baudrate": 115200,
+        "url": "raydriver://127.0.0.1:8765#<your token>",
+    },
+    dialect={},
+    event_callback=on_event,
+)
+await session.connect()
+```
+
+The proxy exposes the same method and event surface as a local
+session, so a driver shell works locally or remotely with a
+one-line construction change.
