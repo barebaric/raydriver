@@ -1,10 +1,9 @@
-"""Optional mDNS announce and browse for the daemon
-(``_raydriver._tcp``).
+"""mDNS announce and browse for the daemon (``_raydriver._tcp``).
 
-Requires the ``raydriver[daemon]`` extra (zeroconf). When the extra
-is missing, :func:`announce` logs a warning and returns ``None`` and
-:func:`browse_daemons` returns an empty list — mDNS is never a hard
-dependency.
+Uses zeroconf, a default dependency, so discovery works out of the
+box. The imports are guarded so a broken install degrades gracefully
+(:func:`announce` returns ``None``, :func:`browse_daemons` returns an
+empty list) rather than failing.
 """
 
 from __future__ import annotations
@@ -73,10 +72,7 @@ class Announcer:
 async def announce(config: Any, port: int) -> Announcer | None:
     """Announce the daemon on the LAN; None without the extra."""
     if Zeroconf is None or ServiceInfo is None:
-        logger.warning(
-            "mdns enabled but zeroconf is not installed "
-            "(pip install raydriver[daemon])"
-        )
+        logger.warning("mdns enabled but zeroconf is not available")
         return None
     zeroconf = Zeroconf()
     name = f"raydriver-{socket.gethostname()}.{SERVICE_TYPE}"
@@ -100,9 +96,7 @@ async def browse_daemons(timeout: float = 3.0) -> list[dict[str, Any]]:
     """Browse for daemons for *timeout* seconds; [] without the
     extra. Each entry has name, host, port and txt fields."""
     if AsyncZeroconf is None or AsyncServiceBrowser is None:
-        logger.warning(
-            "mdns browse requires zeroconf (pip install raydriver[daemon])"
-        )
+        logger.warning("mdns browse requires zeroconf, which is not available")
         return []
     found: set[str] = set()
 
