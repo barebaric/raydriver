@@ -25,6 +25,7 @@ from raydriver.core import list_serial_ports
 from raydriver.paths import default_config_path
 from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
+from raydriver.remote.daemon import DaemonConfig
 
 _WILDCARD_HOSTS = ("0.0.0.0", "::", "*", "")
 
@@ -33,10 +34,19 @@ def _config_path(args: argparse.Namespace) -> Path:
     return Path(args.config) if args.config else default_config_path()
 
 
+def _load_config(args: argparse.Namespace) -> DaemonConfig:
+    """The daemon config, or defaults when no config file exists yet
+    (so the debug commands work before ``daemon --setup``)."""
+    path = _config_path(args)
+    if not path.exists():
+        return DaemonConfig()
+    return load_config(path)
+
+
 def _endpoint(
     args: argparse.Namespace,
 ) -> tuple[str, int, str | None, str | None]:
-    config = load_config(_config_path(args))
+    config = _load_config(args)
     host = config.host
     if host in _WILDCARD_HOSTS:
         host = "127.0.0.1"
@@ -132,7 +142,7 @@ async def cmd_info(args: argparse.Namespace) -> int:
 
 async def cmd_list(args: argparse.Namespace) -> int:
     path = _config_path(args)
-    config = load_config(path)
+    config = _load_config(args)
     host, port, token, tls_ca = _endpoint(args)
     live: list[dict[str, Any]] = []
     state = "daemon not running"
