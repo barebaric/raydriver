@@ -147,6 +147,37 @@ async def test_disconnect_releases_control_lease(rig):
         await second.disconnect()
 
 
+async def test_remote_jog_accepts_deltas(rig):
+    # Jog deltas cross the wire as JSON lists; the daemon must restore
+    # the tuples the Rust session expects.
+    from raydriver.core import SessionEvent
+
+    _, port = rig
+    ready = asyncio.Event()
+
+    def on_event(event):
+        if (
+            isinstance(event, SessionEvent.ConnectionStatusChanged)
+            and event.status == "CONNECTED"
+        ):
+            ready.set()
+
+    session = open_session(
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        device="/dev/ttyUSB0",
+        dialect={},
+        event_callback=on_event,
+    )
+    try:
+        await asyncio.wait_for(session.connect(), timeout=10)
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        await asyncio.wait_for(
+            session.jog(1000, [("X", 1.0), ("Y", 2.0)]), timeout=10
+        )
+    finally:
+        await session.disconnect()
+
+
 async def test_open_by_url_endpoint(rig):
     _, port = rig
     session = open_session(

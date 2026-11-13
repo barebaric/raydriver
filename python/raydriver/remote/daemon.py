@@ -80,6 +80,21 @@ def _device_ref(config: dict[str, Any]) -> str:
     return config.get("port") or config.get("host") or ""
 
 
+def _json_to_tuples(value: Any) -> Any:
+    """Restore tuples lost to JSON framing.
+
+    JSON has no tuple type, so sequence arguments arrive as lists.
+    The Rust session methods extract tuples (e.g. jog deltas), which
+    reject lists; PyO3 ``Vec`` accepts tuples as well, so converting
+    lists back to tuples is safe for every method.
+    """
+    if isinstance(value, list):
+        return tuple(_json_to_tuples(item) for item in value)
+    if isinstance(value, dict):
+        return {key: _json_to_tuples(item) for key, item in value.items()}
+    return value
+
+
 @dataclass
 class DaemonConfig:
     """Listener and session-host settings (the daemon.json shape)."""
@@ -610,6 +625,7 @@ class Daemon:
             )
         if method == "run":
             return self._start_job(host, args)
+        args = _json_to_tuples(args)
         result = getattr(host.session, method)(**args)
         if inspect.isawaitable(result):
             result = await result
