@@ -35,6 +35,8 @@ from raydriver.core import SessionEvent, list_serial_ports
 from raydriver.grbl import GrblSession
 from raydriver.grbl.simple import GrblSimpleSession
 from raydriver.marlin import MarlinSession
+from raydriver.protocols import PROTOCOLS as PROTOCOL_REGISTRY
+from raydriver.protocols import protocol_info, protocols_payload
 from raydriver.remote import protocol
 from raydriver.smoothie import SmoothieSession
 
@@ -70,6 +72,12 @@ def default_session_factory(
     """Construct a session exactly as the driver shells do."""
     cls = SESSION_CLASSES[protocol_name]
     return cls(config=config, dialect=dialect, event_callback=event_callback)
+
+
+def _device_ref(config: dict[str, Any]) -> str:
+    """The canonical reference of a device: its serial port, or the
+    telnet host when it is network-attached."""
+    return config.get("port") or config.get("host") or ""
 
 
 @dataclass
@@ -189,6 +197,7 @@ class Daemon:
         self._server: asyncio.Server | None = None
         self._handlers: dict[str, Any] = {
             protocol.DEVICE_LIST: self._device_list,
+            protocol.PROTOCOL_LIST: self._protocol_list,
             protocol.SESSION_LIST: self._session_list,
             protocol.SESSION_OPEN: self._session_open,
             protocol.SESSION_ATTACH: self._session_attach,
@@ -377,7 +386,110 @@ class Daemon:
         return {
             "ports": list_serial_ports(),
             "cameras": self.config.cameras,
+            "devices": self._devices(),
         }
+
+    async def _protocol_list(
+        self, client: Client, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        return protocols_payload()
+
+    def _devices(self) -> list[dict[str, Any]]:
+        """Devices this daemon knows about: configured sessions plus
+        any open ad-hoc sessions, keyed by device reference. Each
+        carries the protocol and label as info, so a client can list
+        and pick a device without naming a protocol."""
+        devices: dict[str, dict[str, Any]] = {}
+        for entry in self.config.sessions:
+            config = entry.get("config") or {}
+            ref = _device_ref(config)
+            name = entry.get("protocol", "")
+            if not ref or name not in PROTOCOL_REGISTRY:
+                continue
+            devices[ref] = {
+                "device": ref,
+                "protocol": name,
+                "label": protocol_info(name).label,
+                "config": config,
+                "session_id": None,
+                "connection_status": None,
+            }
+        for host in self._hosts.values():
+            ref = _device_ref(host.config)
+            if not ref:
+                continue
+            devices[ref] = {
+                "device": ref,
+                "protocol": host.protocol_name,
+                "label": protocol_info(host.protocol_name).label,
+                "config": host.config,
+                "session_id": host.id,
+                "connection_status": host.connection_status,
+            }
+        return list(devices.values())
+
+    def _resolve_device(
+        self, ref: str
+    ) -> tuple[str, dict[str, Any], dict[str, Any], SessionHost | None] | None:
+        """Resolve a device reference to (protocol, config, dialect,
+        open host or None) from open hosts then configured sessions."""
+        for host in self._hosts.values():
+            if _device_ref(host.config) == ref:
+                return host.protocol_name, host.config, host.dialect, host
+        for entry in self.config.sessions:
+            config = entry.get("config") or {}
+            if _device_ref(config) == ref:
+                return (
+                    entry.get("protocol", ""),
+                    config,
+                    entry.get("dialect") or {},
+                    None,
+                )
+        return None
+
+    async def _probe_device(
+        self, ref: str
+    ) -> tuple[str, dict[str, Any], dict[str, Any], None] | None:
+        """Best-effort firmware detection for an unconfigured serial
+        device. Tries a short identification exchange per protocol;
+        returns None when nothing answers conclusively."""
+        candidates = (
+            ("grbl", "$I", "VER:"),
+            ("marlin", "M115", "FIRMWARE"),
+        )
+        for name, command, signature in candidates:
+            config = {"port": ref, "baudrate": 115200}
+            session = None
+            try:
+                session = self._factory(
+                    name,
+                    {
+                        **config,
+                        "handshake_timeout": 1.0,
+                        "command_timeout": 1.0,
+                    },
+                    {},
+                    lambda event: None,
+                )
+                await asyncio.wait_for(session.connect(), timeout=3.0)
+                reply = await asyncio.wait_for(
+                    session.execute_interactive_command(command), timeout=3.0
+                )
+                if any(signature in str(line) for line in reply or []):
+                    return name, config, {}, None
+            except Exception:
+                logger.debug(
+                    "probe of %s as %s failed", ref, name, exc_info=True
+                )
+            finally:
+                if session is not None:
+                    try:
+                        await asyncio.wait_for(
+                            session.disconnect(), timeout=2.0
+                        )
+                    except Exception:
+                        pass
+        return None
 
     async def _session_list(
         self, client: Client, payload: dict[str, Any]
@@ -416,17 +528,35 @@ class Daemon:
     async def _session_open(
         self, client: Client, payload: dict[str, Any]
     ) -> dict[str, Any]:
-        host = self._open_host(
-            payload.get("protocol", ""),
-            payload.get("config") or {},
-            payload.get("dialect") or {},
-        )
+        device = payload.get("device")
+        if device:
+            # Protocol-agnostic open: the daemon resolves the device's
+            # protocol; the caller never names it.
+            resolved = self._resolve_device(device)
+            if resolved is None:
+                resolved = await self._probe_device(device)
+            if resolved is None:
+                raise protocol.ProtocolError(
+                    protocol.UNKNOWN_DEVICE,
+                    f"device {device!r} is not configured on this daemon; "
+                    "add it with 'raydriver daemon add'",
+                )
+            name, config, dialect, host = resolved
+            if host is None:
+                host = self._open_host(name, config, dialect)
+        else:
+            host = self._open_host(
+                payload.get("protocol", ""),
+                payload.get("config") or {},
+                payload.get("dialect") or {},
+            )
         self._subscribe(host, client, payload)
         return {
             "session_id": host.id,
             "protocol": host.protocol_name,
             "role": client.roles[host.id],
             "lease_holder": host.lease_holder,
+            "metadata": protocol_info(host.protocol_name).to_dict(),
         }
 
     async def _session_attach(
@@ -470,9 +600,9 @@ class Daemon:
         self._require_control(host, client)
         method = payload.get("method", "")
         args = payload.get("args") or {}
-        if method not in protocol.SESSION_METHODS or not hasattr(
-            host.session, method
-        ):
+        if method not in protocol_info(
+            host.protocol_name
+        ).methods or not hasattr(host.session, method):
             raise protocol.ProtocolError(
                 protocol.UNKNOWN_METHOD, f"unknown method {method!r}"
             )
@@ -488,9 +618,9 @@ class Daemon:
     ) -> dict[str, Any]:
         host = self._host(payload.get("session_id"))
         name = payload.get("name", "")
-        if name not in protocol.SESSION_PROPERTIES or not hasattr(
-            host.session, name
-        ):
+        if name not in protocol_info(
+            host.protocol_name
+        ).properties or not hasattr(host.session, name):
             raise protocol.ProtocolError(
                 protocol.UNKNOWN_PROPERTY,
                 f"unknown property {name!r}",
@@ -561,6 +691,7 @@ class Daemon:
 
     def _snapshot(self, host: SessionHost) -> dict[str, Any]:
         return {
+            "protocol": host.protocol_name,
             "config": host.config,
             "dialect": host.dialect,
             "state": protocol.encode_state(host.session.state),

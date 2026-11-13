@@ -20,6 +20,7 @@ from typing import Any
 
 from raydriver.core import SessionEvent
 from raydriver.core.types import DeviceError, DeviceState, DeviceStatus
+from raydriver.protocols import PROTOCOLS as _PROTOCOL_REGISTRY
 
 #: The only protocol version this library speaks. v1 is exact-match
 #: until a v2 exists.
@@ -42,6 +43,7 @@ AUTH = "auth"
 PING = "ping"
 PONG = "pong"
 DEVICE_LIST = "device/list"
+PROTOCOL_LIST = "protocol/list"
 SESSION_LIST = "session/list"
 SESSION_OPEN = "session/open"
 SESSION_ATTACH = "session/attach"
@@ -63,6 +65,7 @@ REQUEST_TYPES = frozenset(
         PING,
         PONG,
         DEVICE_LIST,
+        PROTOCOL_LIST,
         SESSION_LIST,
         SESSION_OPEN,
         SESSION_ATTACH,
@@ -80,6 +83,7 @@ BAD_VERSION = "bad_version"
 AUTH_FAILED = "auth_failed"
 UNKNOWN_TYPE = "unknown_type"
 UNKNOWN_SESSION = "unknown_session"
+UNKNOWN_DEVICE = "unknown_device"
 UNKNOWN_METHOD = "unknown_method"
 UNKNOWN_PROPERTY = "unknown_property"
 LEASE_TAKEN = "lease_taken"
@@ -88,50 +92,18 @@ JOB_RUNNING = "job_running"
 FRAME_TOO_LARGE = "frame_too_large"
 INTERNAL = "internal"
 
-#: Session protocols the daemon can host.
-PROTOCOLS = ("grbl", "grbl_simple", "smoothie", "marlin")
+#: Session protocols the daemon can host, and the union of their
+#: command/property surfaces. The per-protocol surfaces and metadata
+#: live in :mod:`raydriver.protocols`; the daemon validates a call
+#: against the specific protocol's surface, not this union.
+PROTOCOLS = tuple(_PROTOCOL_REGISTRY)
 
-#: The full session command surface. ``clear_alarm`` exists on
-#: Smoothie only; the daemon rejects methods a session does not
-#: implement.
-SESSION_METHODS = frozenset(
-    {
-        "connect",
-        "disconnect",
-        "run",
-        "run_raw",
-        "cancel",
-        "set_hold",
-        "execute_command",
-        "execute_interactive_command",
-        "home",
-        "move_to",
-        "jog",
-        "select_tool",
-        "set_power",
-        "set_focus_power",
-        "read_settings",
-        "write_setting",
-        "set_wcs_offset",
-        "read_wcs_offsets",
-        "read_parser_state",
-        "run_probe_cycle",
-        "detect_unit_system",
-        "update_dialect",
-        "clear_alarm",
-    }
+SESSION_METHODS = frozenset().union(
+    *(info.methods for info in _PROTOCOL_REGISTRY.values())
 )
 
-#: Readable session properties. The last three are full-GRBL only.
-SESSION_PROPERTIES = frozenset(
-    {
-        "state",
-        "job_running",
-        "resource_uri",
-        "buffer_count",
-        "rx_buffer_size",
-        "pending_commands",
-    }
+SESSION_PROPERTIES = frozenset().union(
+    *(info.properties for info in _PROTOCOL_REGISTRY.values())
 )
 
 #: Daemon-synthesized event kinds (not SessionEvent variants):

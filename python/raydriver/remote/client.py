@@ -19,6 +19,8 @@ from urllib.parse import urlsplit
 from raydriver.analyzer.listener import is_loopback, make_client_ssl_context
 from raydriver.core import SessionEvent
 from raydriver.core.types import DeviceState
+from raydriver.protocols import protocol_info
+from raydriver.remote import inspect as rins
 from raydriver.remote import protocol
 from raydriver.remote.daemon import DEFAULT_PORT, default_session_factory
 
@@ -90,6 +92,84 @@ def create_session(
     )
 
 
+def _normalize_endpoint(endpoint: dict[str, Any] | str) -> dict[str, Any]:
+    """Accept an endpoint dict or a ``raydriver://host:port#token`` URL."""
+    if isinstance(endpoint, str):
+        endpoint = {"url": endpoint}
+    normalized = _remote_endpoint(endpoint)
+    if normalized is None:
+        raise ValueError("endpoint needs remote_host or a raydriver:// url")
+    return normalized
+
+
+def open_session(
+    endpoint: dict[str, Any] | str,
+    *,
+    device: str | None = None,
+    session_id: str | None = None,
+    config: dict[str, Any] | None = None,
+    dialect: dict[str, Any] | None = None,
+    event_callback: Callable[[Any], None] | None = None,
+) -> "RemoteSession":
+    """Open a remote session **without naming a protocol**.
+
+    The caller identifies a device (its serial port or host, as
+    listed by :func:`list_devices`) or an existing ``session_id``;
+    the daemon resolves the protocol and returns it as info on the
+    proxy (``.protocol`` / ``.metadata``) once connected. This is the
+    protocol-agnostic entry point applications should use; the
+    protocol is the daemon's knowledge, not the caller's.
+    """
+    if device is None and session_id is None:
+        raise ValueError("open_session needs a device or session_id")
+    return RemoteSession(
+        None,
+        config or {},
+        dialect,
+        event_callback,
+        _normalize_endpoint(endpoint),
+        device=device,
+        session_id=session_id,
+    )
+
+
+async def list_devices(endpoint: dict[str, Any] | str) -> list[dict[str, Any]]:
+    """The devices a daemon knows about, each with its protocol and
+    label as info — the source for a device picker."""
+    ep = _normalize_endpoint(endpoint)
+    _, replies = await rins.daemon_rpc(
+        ep["remote_host"],
+        int(ep.get("remote_port") or DEFAULT_PORT),
+        ep.get("token"),
+        ep.get("tls_ca"),
+        [(protocol.DEVICE_LIST, {})],
+    )
+    reply = replies[0]
+    if not reply.get("ok"):
+        raise ConnectionError(
+            reply.get("error", {}).get("message", "device/list failed")
+        )
+    return reply["payload"].get("devices", [])
+
+
+async def list_protocols(
+    endpoint: dict[str, Any] | str,
+) -> list[dict[str, Any]]:
+    """The daemon's protocol metadata (label, capabilities, config)."""
+    ep = _normalize_endpoint(endpoint)
+    _, replies = await rins.daemon_rpc(
+        ep["remote_host"],
+        int(ep.get("remote_port") or DEFAULT_PORT),
+        ep.get("token"),
+        ep.get("tls_ca"),
+        [(protocol.PROTOCOL_LIST, {})],
+    )
+    reply = replies[0]
+    if not reply.get("ok"):
+        raise ConnectionError("protocol/list failed")
+    return reply["payload"].get("protocols", [])
+
+
 class RemoteSession:
     """Proxy with the union of the sessions' method surfaces.
 
@@ -102,23 +182,28 @@ class RemoteSession:
 
     def __init__(
         self,
-        protocol_name: str,
+        protocol_name: str | None,
         config: dict[str, Any],
         dialect: dict[str, Any] | None,
         event_callback: Callable[[Any], None] | None,
         endpoint: dict[str, Any],
+        *,
+        device: str | None = None,
+        session_id: str | None = None,
     ) -> None:
         self._protocol_name = protocol_name
         self._config = config
         self._dialect = dialect
         self._event_callback = event_callback
         self._endpoint = endpoint
+        self._device = device
+        self._metadata: dict[str, Any] | None = None
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
         self._reader_task: asyncio.Task | None = None
         self._writer_task: asyncio.Task | None = None
         self._outgoing: asyncio.Queue | None = None
-        self._session_id: str | None = None
+        self._session_id: str | None = session_id
         self._next_id = 0
         self._pending: dict[int, asyncio.Future] = {}
         self._last_seq = 0
@@ -135,6 +220,17 @@ class RemoteSession:
         self._job_done: asyncio.Future | None = None
 
     # -- cached properties -------------------------------------------
+
+    @property
+    def protocol(self) -> str | None:
+        """The protocol the daemon resolved for this session. ``None``
+        until connected when opened protocol-agnostically."""
+        return self._protocol_name
+
+    @property
+    def metadata(self) -> dict[str, Any] | None:
+        """The daemon's protocol metadata (label, capabilities, …)."""
+        return self._metadata
 
     @property
     def state(self) -> DeviceState:
@@ -170,17 +266,29 @@ class RemoteSession:
                 return
             await self._open_connection()
             if self._session_id is None:
-                reply = await self._request(
-                    protocol.SESSION_OPEN,
-                    {
+                if self._device is not None:
+                    open_payload = {
+                        "device": self._device,
+                        "dialect": self._dialect,
+                        "role": "control",
+                    }
+                else:
+                    open_payload = {
                         "protocol": self._protocol_name,
                         "config": self._config,
                         "dialect": self._dialect,
                         "role": "control",
-                    },
+                    }
+                reply = await self._request(
+                    protocol.SESSION_OPEN, open_payload
                 )
                 self._check(reply)
-                self._session_id = reply["payload"]["session_id"]
+                payload = reply["payload"]
+                self._session_id = payload["session_id"]
+                self._protocol_name = payload.get(
+                    "protocol", self._protocol_name
+                )
+                self._metadata = payload.get("metadata")
             else:
                 await self._reattach()
             self._connected = True
@@ -248,6 +356,10 @@ class RemoteSession:
             self._apply_snapshot(snapshot)
 
     def _apply_snapshot(self, snapshot: dict[str, Any]) -> None:
+        name = snapshot.get("protocol")
+        if name:
+            self._protocol_name = name
+            self._metadata = protocol_info(name).to_dict()
         self._state = protocol.decode_state(snapshot["state"])
         self._last_seq = snapshot["next_seq"] - 1
         job = snapshot.get("job")

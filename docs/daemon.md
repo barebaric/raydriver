@@ -188,31 +188,44 @@ control channel.
 — see the
 [first-time setup guide](https://rayforge.org/docs/getting-started/first-time-setup).
 
-Any raydriver consumer can connect through
-`raydriver.remote.client.create_session`, which routes to a remote
-proxy when the config carries an endpoint: either the explicit
-keys (`remote_host`, `remote_port`, `token`, `tls_ca`,
-`tls_hostname`) or a single URL `raydriver://host:8765#token`. The
-token is the one printed by `daemon add` / `daemon status` (stored
-in `daemon.json`). The device config travels with the request: the
-daemon opens the serial connection from it.
+### Protocol-agnostic access (recommended)
+
+The protocol a device speaks is the **daemon's** knowledge, not the
+client's. A client connects to a *device* and lets the daemon
+resolve the protocol, exposing it as info afterwards:
 
 ```python
-from raydriver.remote.client import create_session
+from raydriver.remote.client import list_devices, open_session
 
-session = create_session(
-    "grbl",
-    {
-        "port": "/dev/ttyUSB0",
-        "baudrate": 115200,
-        "url": "raydriver://127.0.0.1:8765#<your token>",
-    },
-    dialect={},
-    event_callback=on_event,
-)
+endpoint = "raydriver://127.0.0.1:8765#<your token>"
+
+for device in await list_devices(endpoint):
+    print(device["device"], device["label"])   # /dev/ttyUSB0  GRBL
+
+session = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
 await session.connect()
+print(session.protocol)            # "grbl" — resolved by the daemon
+print(session.metadata["capabilities"])
 ```
 
-The proxy exposes the same method and event surface as a local
-session, so a driver shell works locally or remotely with a
-one-line construction change.
+`list_devices` returns the daemon's configured (and open) devices,
+each with its `protocol` and `label` as info; `list_protocols`
+returns the full metadata table (label, capabilities, config keys,
+dialect family). `open_session` accepts a device reference or an
+existing `session_id` — never a protocol. The token is the one
+printed by `daemon add` / `daemon status`. The endpoint may be a
+URL or a dict (`remote_host`, `remote_port`, `token`, `tls_ca`,
+`tls_hostname`).
+
+The returned proxy exposes the same method and event surface as a
+local session. A device that is not configured on the daemon is
+resolved by a best-effort firmware probe, or rejected with
+`unknown_device` (add it with `raydriver daemon add`).
+
+### Explicit protocol (lower level)
+
+`create_session(protocol_name, config, …)` still exists for callers
+that already know the protocol and want to open an ad-hoc session
+with a specific config; it routes to a remote proxy when the config
+carries an endpoint. Prefer `open_session` for application code so
+the protocol stays the daemon's responsibility.
