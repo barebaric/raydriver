@@ -479,7 +479,9 @@ async def test_auto_open_sessions():
     try:
         client = await connect_client(server_port(server))
         listing = await client.request(protocol.SESSION_LIST)
-        assert len(listing["payload"]["sessions"]) == 1
+        sessions = listing["payload"]["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["config"] == {}
     finally:
         await daemon.stop()
 

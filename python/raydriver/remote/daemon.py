@@ -383,6 +383,7 @@ class Daemon:
                 {
                     "session_id": host.id,
                     "protocol": host.protocol_name,
+                    "config": host.config,
                     "job": host.job,
                     "lease_holder": host.lease_holder,
                     "watchers": len(host.subscribers),
