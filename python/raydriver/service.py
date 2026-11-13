@@ -18,7 +18,7 @@ import os
 import shlex
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePath
 from xml.sax.saxutils import escape
 
 SERVICE_NAME = "raydriver-daemon"
@@ -37,7 +37,7 @@ def _run(cmd: list[str]) -> str:
     return result.stdout
 
 
-def _exec_command(config_path: Path) -> list[str]:
+def _exec_command(config_path: PurePath) -> list[str]:
     return [
         sys.executable,
         "-m",
@@ -52,7 +52,7 @@ def _is_root() -> bool:
     return getattr(os, "geteuid", lambda: 0)() == 0
 
 
-def systemd_unit(config_path: Path, system: bool = False) -> str:
+def systemd_unit(config_path: PurePath, system: bool = False) -> str:
     """The systemd unit file content for the daemon."""
     target = "multi-user.target" if system else "default.target"
     user_line = ""
@@ -75,7 +75,7 @@ def systemd_unit(config_path: Path, system: bool = False) -> str:
     )
 
 
-def launchd_plist(config_path: Path) -> str:
+def launchd_plist(config_path: PurePath) -> str:
     """The launchd LaunchAgent plist content for the daemon."""
     args = "".join(
         f"<string>{escape(arg)}</string>" for arg in _exec_command(config_path)
@@ -99,7 +99,7 @@ def launchd_plist(config_path: Path) -> str:
     )
 
 
-def windows_task_command(config_path: Path) -> list[str]:
+def windows_task_command(config_path: PurePath) -> list[str]:
     """The schtasks command that creates the logon task."""
     python = Path(sys.executable)
     pythonw = python.with_name("pythonw.exe")

@@ -1,6 +1,7 @@
 """Tests for the daemon CLI, config handling and mDNS announce."""
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -20,7 +21,9 @@ def test_setup_writes_token_config(tmp_path):
     path = tmp_path / "sub" / "daemon.json"
     token = write_setup_config(path)
     assert path.exists()
-    assert (path.stat().st_mode & 0o777) == 0o600
+    # Windows maps chmod onto ACLs, not POSIX mode bits.
+    if os.name != "nt":
+        assert (path.stat().st_mode & 0o777) == 0o600
     data = json.loads(path.read_text())
     assert data["token"] == token
     assert data["host"] == "127.0.0.1"

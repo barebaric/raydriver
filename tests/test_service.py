@@ -6,7 +6,7 @@ on every platform.
 """
 
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -28,7 +28,7 @@ def mock_run(monkeypatch):
 
 
 def test_systemd_unit_user():
-    unit = service.systemd_unit(Path("/cfg/daemon.json"))
+    unit = service.systemd_unit(PurePosixPath("/cfg/daemon.json"))
     assert "-m raydriver daemon --config /cfg/daemon.json" in unit
     assert "WantedBy=default.target" in unit
     assert "User=" not in unit
@@ -36,18 +36,18 @@ def test_systemd_unit_user():
 
 
 def test_systemd_unit_system():
-    unit = service.systemd_unit(Path("/cfg/daemon.json"), system=True)
+    unit = service.systemd_unit(PurePosixPath("/cfg/daemon.json"), system=True)
     assert "WantedBy=multi-user.target" in unit
     assert "User=" in unit
 
 
 def test_systemd_unit_quotes_spaces():
-    unit = service.systemd_unit(Path("/cfg with space/daemon.json"))
+    unit = service.systemd_unit(PurePosixPath("/cfg with space/daemon.json"))
     assert "'/cfg with space/daemon.json'" in unit
 
 
 def test_launchd_plist():
-    plist = service.launchd_plist(Path("/cfg/daemon.json"))
+    plist = service.launchd_plist(PurePosixPath("/cfg/daemon.json"))
     assert plist.startswith("<?xml")
     assert "<string>org.raydriver.daemon</string>" in plist
     assert "<key>RunAtLoad</key><true/>" in plist
