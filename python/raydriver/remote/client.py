@@ -537,7 +537,13 @@ class RemoteSession:
         await self._command("connect")
 
     async def disconnect(self) -> None:
-        await self._command("disconnect")
+        # Detach, releasing the control lease. A disconnected client
+        # must not keep holding control, or another client (e.g. a
+        # machine connecting after a probe) cannot take over. The
+        # daemon keeps the session alive; reconnect re-attaches via
+        # connect(). Do not issue a command here: that would try to
+        # re-establish the connection and re-acquire the lease.
+        await self.aclose()
 
     async def execute_interactive_command(self, command: str) -> Any:
         return await self._command(

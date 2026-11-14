@@ -127,6 +127,57 @@ async def test_open_by_device_resolves_protocol(rig):
         await session.disconnect()
 
 
+async def test_disconnect_releases_control_lease(rig):
+    # A probe-like client connects, then disconnects; a second client
+    # (the machine) must then be able to take control of the device.
+    _, port = rig
+    endpoint = {"remote_host": "127.0.0.1", "remote_port": port}
+    first = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
+    await asyncio.wait_for(first.connect(), timeout=10)
+    await first.disconnect()
+
+    second = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
+    try:
+        await asyncio.wait_for(second.connect(), timeout=10)
+        reply = await asyncio.wait_for(
+            second.execute_interactive_command("$I"), timeout=10
+        )
+        assert any("VER:" in line for line in reply)
+    finally:
+        await second.disconnect()
+
+
+async def test_remote_jog_accepts_deltas(rig):
+    # Jog deltas cross the wire as JSON lists; the daemon must restore
+    # the tuples the Rust session expects.
+    from raydriver.core import SessionEvent
+
+    _, port = rig
+    ready = asyncio.Event()
+
+    def on_event(event):
+        if (
+            isinstance(event, SessionEvent.ConnectionStatusChanged)
+            and event.status == "CONNECTED"
+        ):
+            ready.set()
+
+    session = open_session(
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        device="/dev/ttyUSB0",
+        dialect={},
+        event_callback=on_event,
+    )
+    try:
+        await asyncio.wait_for(session.connect(), timeout=10)
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        await asyncio.wait_for(
+            session.jog(1000, [("X", 1.0), ("Y", 2.0)]), timeout=10
+        )
+    finally:
+        await session.disconnect()
+
+
 async def test_open_by_url_endpoint(rig):
     _, port = rig
     session = open_session(
