@@ -4,12 +4,30 @@
 import builtins
 import typing
 __all__ = [
+    "find_subnet_devices",
     "local_subnets",
     "scan_mdns_services",
     "scan_serial_ports",
     "scan_subnet",
     "subnet_hosts",
 ]
+
+def find_subnet_devices(specs: typing.Sequence[dict], subnets: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.int]]] = None) -> typing.Any:
+    r"""
+    Scan the local subnets for declared TCP ports and confirm each
+    reachable host with its spec's probe.
+    
+    *specs* is a list of dicts with the keys ``id`` (opaque caller
+    identifier), ``port``, and optionally ``probe_command`` (sent to
+    confirm the firmware) and ``match_prefix`` (response-line prefix
+    identifying it). Without a probe command any listener on the
+    port is claimed. Returns one dict per claimed host with the keys
+    ``id``, ``host``, ``port`` and ``banner`` (the matched response
+    line, or None). The first matching spec claims a host.
+    
+    *subnets* overrides the interface enumeration as (address,
+    prefixlen) pairs; None scans the local interfaces.
+    """
 
 def local_subnets() -> builtins.list[tuple[builtins.str, builtins.int]]:
     r"""

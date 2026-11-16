@@ -187,3 +187,120 @@ class TestScanMdnsServices:
 
     async def test_empty_types_yield_nothing(self):
         assert await discovery.scan_mdns_services([], 0.1) == []
+
+
+class TestFindSubnetDevices:
+    async def _serve(self, handler):
+        return await asyncio.start_server(handler, "127.0.0.1", 0)
+
+    async def test_confirms_grblhal_device(self):
+        async def device(reader, writer):
+            await reader.read(256)
+            writer.write(b"[VER:1.1f.20230812:]\r\n[OPT:VNMSL,35,1024]\r\n")
+            await writer.drain()
+            await asyncio.sleep(0.5)
+            writer.close()
+
+        server = await self._serve(device)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            hits = await discovery.find_subnet_devices(
+                [
+                    {
+                        "id": "grbl",
+                        "port": port,
+                        "probe_command": "$I\n",
+                        "match_prefix": "[VER:",
+                    }
+                ],
+                [("127.0.0.1", 32)],
+            )
+            assert len(hits) == 1
+            assert hits[0]["id"] == "grbl"
+            assert hits[0]["host"] == "127.0.0.1"
+            assert hits[0]["port"] == port
+            assert hits[0]["banner"] == "[VER:1.1f.20230812:]"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_non_matching_listener_is_not_claimed(self):
+        async def device(reader, writer):
+            await reader.read(256)
+            writer.write(b"220 router.example.com ESMTP\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await self._serve(device)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            hits = await discovery.find_subnet_devices(
+                [
+                    {
+                        "id": "grbl",
+                        "port": port,
+                        "probe_command": "$I\n",
+                        "match_prefix": "[VER:",
+                    }
+                ],
+                [("127.0.0.1", 32)],
+            )
+            assert hits == []
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_spec_without_probe_claims_any_listener(self):
+        async def device(reader, writer):
+            writer.close()
+
+        server = await self._serve(device)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            hits = await discovery.find_subnet_devices(
+                [{"id": "any", "port": port}], [("127.0.0.1", 32)]
+            )
+            assert len(hits) == 1
+            assert hits[0]["id"] == "any"
+            assert hits[0]["banner"] is None
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_first_matching_spec_claims_host(self):
+        async def device(reader, writer):
+            await reader.read(256)
+            writer.write(b"[VER:1.1f.20230812:]\r\n")
+            await writer.drain()
+            await asyncio.sleep(0.5)
+            writer.close()
+
+        server = await self._serve(device)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            hits = await discovery.find_subnet_devices(
+                [
+                    {
+                        "id": "first",
+                        "port": port,
+                        "probe_command": "$I\n",
+                        "match_prefix": "[VER:",
+                    },
+                    {
+                        "id": "second",
+                        "port": port,
+                        "probe_command": "$I\n",
+                        "match_prefix": "[VER:",
+                    },
+                ],
+                [("127.0.0.1", 32)],
+            )
+            assert len(hits) == 1
+            assert hits[0]["id"] == "first"
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_no_specs_yields_nothing(self):
+        hits = await discovery.find_subnet_devices([], [("127.0.0.1", 32)])
+        assert hits == []
