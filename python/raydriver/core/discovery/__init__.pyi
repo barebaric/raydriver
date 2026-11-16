@@ -4,6 +4,9 @@
 import builtins
 import typing
 __all__ = [
+    "DeviceIdentity",
+    "DiscoveredDevice",
+    "device_key",
     "find_subnet_devices",
     "local_subnets",
     "scan_mdns_services",
@@ -11,6 +14,78 @@ __all__ = [
     "scan_subnet",
     "subnet_hosts",
 ]
+
+@typing.final
+class DeviceIdentity:
+    r"""
+    Everything known about a discovered device that can be used to
+    match it against a known device profile.
+    """
+    @property
+    def firmware(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def banner(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def usb_vid(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def usb_pid(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def tokens(self) -> typing.Any:
+        r"""
+        The identity tokens as a frozenset of strings.
+        """
+    def __eq__(self, other: builtins.object, /) -> builtins.bool: ...
+    def __hash__(self) -> builtins.int: ...
+    def __new__(cls, firmware: typing.Optional[builtins.str] = None, banner: typing.Optional[builtins.str] = None, usb_vid: typing.Optional[builtins.int] = None, usb_pid: typing.Optional[builtins.int] = None, tokens: typing.Optional[typing.AbstractSet[builtins.str]] = None) -> DeviceIdentity: ...
+
+@typing.final
+class DiscoveredDevice:
+    r"""
+    A device found by evaluating scan output against a driver's
+    discovery declaration.
+    """
+    @property
+    def probe_profile(self) -> typing.Optional[typing.Any]:
+        r"""
+        Profile data collected by probing the device after discovery;
+        attached by the embedding application's UI. Opaque here.
+        """
+    @probe_profile.setter
+    def probe_profile(self, value: typing.Optional[typing.Any]) -> None:
+        r"""
+        Profile data collected by probing the device after discovery;
+        attached by the embedding application's UI. Opaque here.
+        """
+    @property
+    def driver_name(self) -> builtins.str: ...
+    @property
+    def params(self) -> dict: ...
+    @property
+    def label(self) -> builtins.str: ...
+    @property
+    def detail(self) -> builtins.str: ...
+    @property
+    def identity(self) -> DeviceIdentity: ...
+    @property
+    def key(self) -> builtins.str:
+        r"""
+        Stable identity for deduplication in the UI.
+        """
+    @property
+    def probe_name(self) -> typing.Optional[builtins.str]:
+        r"""
+        The machine name the device itself reported, if any.
+        """
+    def __new__(cls, driver_name: builtins.str, params: dict, label: builtins.str, detail: builtins.str, identity: typing.Optional[DeviceIdentity] = None, probe_profile: typing.Optional[typing.Any] = None) -> DiscoveredDevice: ...
+    def __eq__(self, other: typing.Any) -> typing.Any: ...
+    def __repr__(self) -> builtins.str: ...
+
+def device_key(driver_name: builtins.str, params: dict) -> builtins.str:
+    r"""
+    Stable identity for a device from its driver and connection
+    parameters: serial ports by path, network devices by host and
+    TCP port, remote devices by daemon endpoint plus device resource.
+    """
 
 def find_subnet_devices(specs: typing.Sequence[dict], subnets: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.int]]] = None) -> typing.Any:
     r"""
@@ -20,10 +95,11 @@ def find_subnet_devices(specs: typing.Sequence[dict], subnets: typing.Optional[t
     *specs* is a list of dicts with the keys ``id`` (opaque caller
     identifier), ``port``, and optionally ``probe_command`` (sent to
     confirm the firmware) and ``match_prefix`` (response-line prefix
-    identifying it). Without a probe command any listener on the
-    port is claimed. Returns one dict per claimed host with the keys
-    ``id``, ``host``, ``port`` and ``banner`` (the matched response
-    line, or None). The first matching spec claims a host.
+    identifying it), plus the declaring driver's display fields
+    (``driver_name``, ``label``, ``firmware``). Without a probe command
+    any listener on the port is claimed. Returns one
+    :class:`DiscoveredDevice` per claimed host; the first matching
+    spec claims a host.
     
     *subnets* overrides the interface enumeration as (address,
     prefixlen) pairs; None scans the local interfaces.
