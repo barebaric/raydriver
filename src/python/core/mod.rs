@@ -1,5 +1,6 @@
 //! The `raydriver.core` Python submodule: shared device primitives.
 
+pub(crate) mod discovery;
 pub(crate) mod mock;
 pub(crate) mod serial;
 pub(crate) mod types;
@@ -21,7 +22,13 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     core_mod.setattr("__doc__", MODULE_DOC)?;
     core_mod.add(
         "__all__",
-        vec!["SessionEvent", "list_serial_ports", "types", "transport"],
+        vec![
+            "SessionEvent",
+            "discovery",
+            "list_serial_ports",
+            "types",
+            "transport",
+        ],
     )?;
     core_mod.add_class::<crate::python::events::SessionEvent>()?;
     core_mod.add_function(wrap_pyfunction!(
@@ -41,6 +48,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let types_mod = PyModule::new(py, "types")?;
     types::register(&types_mod)?;
     core_mod.add_submodule(&types_mod)?;
+
+    discovery::register(&core_mod)?;
 
     m.add_submodule(&core_mod)?;
     // Note: raydriver.core is intentionally NOT registered in

@@ -4,8 +4,9 @@
 //! modules built on top of it:
 //!
 //! - [`core`]: shared primitives — byte transports, device value
-//!   types, dialect command-template formatting, and the session
-//!   event/error primitives.
+//!   types, dialect command-template formatting, the session
+//!   event/error primitives, and the transport-level discovery
+//!   scanners (serial capture, mDNS browse, subnet TCP scan).
 //! - [`grbl`]: the GRBL protocol stack (parsing, flow control, the
 //!   full session and the minimal ping-pong session).
 //! - [`smoothie`]: the Smoothieware session.
