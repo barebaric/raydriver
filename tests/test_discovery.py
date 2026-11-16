@@ -8,9 +8,9 @@ and an mDNS browse against a locally announced service.
 import asyncio
 import ipaddress
 import os
+import sys
 import threading
 import time
-import tty
 
 import pytest
 
@@ -86,7 +86,14 @@ class TestScanSerialPorts:
     @pytest.mark.skipif(
         not hasattr(os, "openpty"), reason="requires a POSIX pty"
     )
+    @pytest.mark.skipif(
+        sys.platform == "darwin",
+        reason="macOS ptys do not deliver master writes to a "
+        "serialport reader on CI runners",
+    )
     async def test_captures_device_banner(self):
+        import tty
+
         master, slave = os.openpty()
         # Raw mode: no echo of the scanner's nudges and no line
         # buffering, so captured bytes match what the device sent.
