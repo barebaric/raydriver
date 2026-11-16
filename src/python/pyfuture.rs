@@ -39,21 +39,28 @@ where
             if loop_bound.call_method0("is_closed")?.is_truthy()? {
                 return Ok(());
             }
+            // The awaiting task may have been cancelled while the
+            // Rust side was still running (e.g. app shutdown);
+            // completing a done future raises InvalidStateError in
+            // the loop callback, so guard on done() at call time.
+            let complete = py.eval(
+                c"lambda f, v, e: None if f.done() else \
+                  (f.set_exception(e) if e is not None else f.set_result(v))",
+                None,
+                None,
+            )?;
             match outcome {
                 Ok(value) => {
-                    let set_result = future_py.getattr(py, "set_result")?;
                     loop_bound.call_method1(
                         "call_soon_threadsafe",
-                        (set_result, value),
+                        (complete, future_py, value, py.None()),
                     )?;
                 }
                 Err(err) => {
-                    let set_exception =
-                        future_py.getattr(py, "set_exception")?;
                     let exc = err.value(py).to_owned();
                     loop_bound.call_method1(
                         "call_soon_threadsafe",
-                        (set_exception, exc),
+                        (complete, future_py, py.None(), exc),
                     )?;
                 }
             }

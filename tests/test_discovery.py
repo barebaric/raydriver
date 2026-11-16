@@ -99,6 +99,31 @@ class TestScanSerialPorts:
             os.close(slave)
 
 
+class TestCancelledScan:
+    async def test_cancelling_scan_does_not_error_on_completion(self):
+        """Cancelling the awaiting task (e.g. app shutdown) must not
+        make the Rust side's later completion raise InvalidStateError
+        in the event loop."""
+        errors = []
+        loop = asyncio.get_running_loop()
+        loop.set_exception_handler(lambda l, ctx: errors.append(ctx))
+        # The binding returns a bare asyncio Future, not a coroutine.
+        task = asyncio.ensure_future(
+            discovery.scan_mdns_services(["_rdisccancel._tcp"], 0.5)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # Let the browse finish and attempt to complete the future.
+        await asyncio.sleep(2.0)
+        assert not [
+            e
+            for e in errors
+            if isinstance(e.get("exception"), asyncio.InvalidStateError)
+        ]
+
+
 class TestScanMdnsServices:
     async def test_resolves_announced_service(self):
         zeroconf = pytest.importorskip("zeroconf")
