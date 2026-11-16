@@ -10,6 +10,7 @@ import ipaddress
 import os
 import threading
 import time
+import tty
 
 import pytest
 
@@ -87,6 +88,9 @@ class TestScanSerialPorts:
     )
     async def test_captures_device_banner(self):
         master, slave = os.openpty()
+        # Raw mode: no echo of the scanner's nudges and no line
+        # buffering, so captured bytes match what the device sent.
+        tty.setraw(slave)
         stop = threading.Event()
 
         def chatter():
