@@ -132,6 +132,91 @@ fn scan_subnet(
     })
 }
 
+/// Scan the local subnets for declared TCP ports and confirm each
+/// reachable host with its spec's probe.
+///
+/// *specs* is a list of dicts with the keys ``id`` (opaque caller
+/// identifier), ``port``, and optionally ``probe_command`` (sent to
+/// confirm the firmware) and ``match_prefix`` (response-line prefix
+/// identifying it). Without a probe command any listener on the
+/// port is claimed. Returns one dict per claimed host with the keys
+/// ``id``, ``host``, ``port`` and ``banner`` (the matched response
+/// line, or None). The first matching spec claims a host.
+///
+/// *subnets* overrides the interface enumeration as (address,
+/// prefixlen) pairs; None scans the local interfaces.
+#[gen_stub_pyfunction(module = "raydriver.core.discovery")]
+#[pyfunction]
+#[pyo3(signature = (specs, subnets=None))]
+fn find_subnet_devices<'py>(
+    py: Python<'py>,
+    specs: Vec<Bound<'py, PyDict>>,
+    subnets: Option<Vec<(String, u8)>>,
+) -> PyResult<Bound<'py, PyAny>> {
+    let mut parsed = Vec::with_capacity(specs.len());
+    for spec in &specs {
+        parsed.push(subnet::SubnetSpec {
+            id: required_str(spec, "id")?,
+            port: required_u16(spec, "port")?,
+            probe_command: optional_str(spec, "probe_command")?,
+            match_prefix: optional_str(spec, "match_prefix")?,
+        });
+    }
+    let subnets = subnets
+        .map(|pairs| {
+            pairs
+                .into_iter()
+                .map(|(addr, prefix)| {
+                    addr.parse::<std::net::Ipv4Addr>()
+                        .map(|addr| (addr, prefix))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "invalid subnet address: {e}"
+            ))
+        })?;
+    spawn_future(py, async move {
+        let hits = subnet::find_subnet_devices(parsed, subnets).await;
+        Python::attach(|py| {
+            let mut out = Vec::with_capacity(hits.len());
+            for hit in hits {
+                let dict = PyDict::new(py);
+                dict.set_item("id", hit.id)?;
+                dict.set_item("host", hit.host)?;
+                dict.set_item("port", hit.port)?;
+                dict.set_item("banner", hit.banner)?;
+                out.push(dict);
+            }
+            out.into_pyobject(py).map(|o| o.unbind().into_any())
+        })
+    })
+}
+
+fn required_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
+    dict.get_item(key)?
+        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(key.to_string()))?
+        .extract()
+}
+
+fn required_u16(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<u16> {
+    dict.get_item(key)?
+        .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(key.to_string()))?
+        .extract()
+}
+
+fn optional_str(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<String>> {
+    match dict.get_item(key)? {
+        Some(value) => Ok(Some(value.extract()?)),
+        None => Ok(None),
+    }
+}
+
 pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = core_mod.py();
     let discovery_mod = PyModule::new(py, "discovery")?;
@@ -148,6 +233,7 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
             "local_subnets",
             "subnet_hosts",
             "scan_subnet",
+            "find_subnet_devices",
         ],
     )?;
     discovery_mod
@@ -160,6 +246,8 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
         .add_function(wrap_pyfunction!(subnet_hosts, &discovery_mod)?)?;
     discovery_mod
         .add_function(wrap_pyfunction!(scan_subnet, &discovery_mod)?)?;
+    discovery_mod
+        .add_function(wrap_pyfunction!(find_subnet_devices, &discovery_mod)?)?;
     core_mod.add_submodule(&discovery_mod)?;
     Ok(())
 }

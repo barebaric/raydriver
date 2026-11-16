@@ -2,20 +2,62 @@
 //!
 //! Some controllers (e.g. grblHAL boards with the raw telnet
 //! service) announce nothing via mDNS. To find them, this scanner
-//! TCP-connects to a fixed port on every host of the local subnets
-//! and reports the hosts that accept the connection. Whether a
-//! reachable host actually speaks a driver's protocol is decided
-//! afterwards by the embedding application's fingerprint probes.
+//! TCP-connects to a fixed port on every host of the local subnets,
+//! then confirms each reachable host with a caller-supplied probe
+//! (a command to send and a response-line prefix to match) before
+//! claiming it for that caller. The probe is plain data, so this
+//! module stays protocol-neutral.
 //!
-//! Scans are bounded in concurrency and per-host connect time, and
-//! only ever run on explicit request — never as a background poll.
+//! Scans stay narrow because probing a whole subnet can trip
+//! endpoint-protection tools: only the declared ports are probed,
+//! connects and probes are bounded in concurrency and per-host
+//! time, and subnets wider than /24 are narrowed to a /24.
 
+use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
+
+/// Per-host TCP connect timeout.
+const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+/// Maximum connects in flight during the reachability pass.
+const SCAN_CONCURRENCY: usize = 32;
+/// Maximum probes in flight during the confirmation pass.
+const PROBE_CONCURRENCY: usize = 8;
+/// Per-host probe timeout (connect + command + response).
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long to read a probe response before giving up.
+const PROBE_READ_WINDOW: Duration = Duration::from_secs(1);
+/// Longest banner line reported back to the caller.
+const MAX_BANNER_LEN: usize = 80;
+
+/// One caller's declaration of how its devices appear on the
+/// network: a TCP port plus an optional confirmation probe.
+#[derive(Clone)]
+pub struct SubnetSpec {
+    /// Opaque caller identifier, echoed back in each hit.
+    pub id: String,
+    /// TCP port the device listens on.
+    pub port: u16,
+    /// Command sent to confirm the firmware; ``None`` claims any
+    /// listener on the port.
+    pub probe_command: Option<String>,
+    /// Response-line prefix identifying the firmware.
+    pub match_prefix: Option<String>,
+}
+
+/// A confirmed device: the claiming caller's id plus where to
+/// connect and what the device reported.
+pub struct SubnetHit {
+    pub id: String,
+    pub host: String,
+    pub port: u16,
+    pub banner: Option<String>,
+}
 
 /// Largest subnet scanned per interface, as a CIDR prefix. Wider
 /// interfaces (e.g. /16) are narrowed to the /24 containing the
@@ -87,4 +129,151 @@ pub async fn scan_subnet(
         }
     }
     out
+}
+
+/// Scans the local subnets for the ports declared by *specs* and
+/// confirms each reachable host with its spec's probe, returning
+/// one hit per claimed host. The first spec (in input order) whose
+/// probe matches claims a host. *subnets* overrides the interface
+/// enumeration (test seam); ``None`` uses the local interfaces.
+///
+/// Never raises: a failing or slow scan yields no hits.
+pub async fn find_subnet_devices(
+    specs: Vec<SubnetSpec>,
+    subnets: Option<Vec<(Ipv4Addr, u8)>>,
+) -> Vec<SubnetHit> {
+    if specs.is_empty() {
+        return Vec::new();
+    }
+    let mut ports: Vec<u16> = specs.iter().map(|s| s.port).collect();
+    ports.sort_unstable();
+    ports.dedup();
+
+    let mut hosts_by_port: HashMap<u16, Vec<String>> = HashMap::new();
+    for (addr, prefixlen) in subnets.unwrap_or_else(local_subnets) {
+        let hosts = subnet_hosts(addr, prefixlen);
+        for port in &ports {
+            let bucket = hosts_by_port.entry(*port).or_default();
+            for host in &hosts {
+                if !bucket.contains(host) {
+                    bucket.push(host.clone());
+                }
+            }
+        }
+    }
+
+    let mut hits = Vec::new();
+    for port in ports {
+        let Some(hosts) = hosts_by_port.remove(&port) else {
+            continue;
+        };
+        let reachable =
+            scan_subnet(hosts, port, CONNECT_TIMEOUT, SCAN_CONCURRENCY).await;
+        hits.extend(confirm_hosts(reachable, port, &specs).await);
+    }
+    hits
+}
+
+/// Probes every reachable host with the specs that declared its
+/// port; the first matching spec claims the host.
+async fn confirm_hosts(
+    hosts: Vec<String>,
+    port: u16,
+    specs: &[SubnetSpec],
+) -> Vec<SubnetHit> {
+    let mut probes: Vec<(SubnetSpec, String)> = Vec::new();
+    for spec in specs.iter().filter(|spec| spec.port == port) {
+        for host in &hosts {
+            probes.push((spec.clone(), host.clone()));
+        }
+    }
+    if probes.is_empty() {
+        return Vec::new();
+    }
+
+    let semaphore = Arc::new(Semaphore::new(PROBE_CONCURRENCY));
+    let mut handles = Vec::new();
+    for (spec, host) in probes {
+        let semaphore = semaphore.clone();
+        handles.push(tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.ok()?;
+            let banner = match &spec.probe_command {
+                None => Some(None),
+                Some(_) => tokio::time::timeout(
+                    PROBE_TIMEOUT,
+                    probe_host(&host, port, &spec),
+                )
+                .await
+                .ok()
+                .flatten(),
+            };
+            banner.map(|banner| SubnetHit {
+                id: spec.id.clone(),
+                host,
+                port,
+                banner,
+            })
+        }));
+    }
+
+    let mut hits = Vec::new();
+    let mut claimed: Vec<String> = Vec::new();
+    for handle in handles {
+        if let Ok(Some(hit)) = handle.await {
+            if !claimed.contains(&hit.host) {
+                claimed.push(hit.host.clone());
+                hits.push(hit);
+            }
+        }
+    }
+    hits
+}
+
+/// Sends the spec's probe command and returns the first response
+/// line starting with its match prefix, or ``None`` when the host
+/// does not answer like the spec's firmware.
+async fn probe_host(
+    host: &str,
+    port: u16,
+    spec: &SubnetSpec,
+) -> Option<Option<String>> {
+    let command = spec.probe_command.as_ref()?;
+    let mut stream = TcpStream::connect((host, port)).await.ok()?;
+    stream.write_all(command.as_bytes()).await.ok()?;
+    let text = read_response(&mut stream).await;
+    let prefix = spec.match_prefix.as_deref().unwrap_or("");
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with(prefix) {
+            let end = line
+                .char_indices()
+                .map(|(i, _)| i)
+                .nth(MAX_BANNER_LEN)
+                .unwrap_or(line.len());
+            return Some(Some(line[..end].to_string()));
+        }
+    }
+    None
+}
+
+/// Reads until the peer closes, the read window expires, or enough
+/// data arrived; the device keeps the connection open, so a plain
+/// read-to-EOF would block until the timeout.
+async fn read_response(stream: &mut TcpStream) -> String {
+    let deadline = tokio::time::Instant::now() + PROBE_READ_WINDOW;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = [0u8; 256];
+    while tokio::time::Instant::now() < deadline && buf.len() < 4096 {
+        match tokio::time::timeout(
+            Duration::from_millis(200),
+            stream.read(&mut chunk),
+        )
+        .await
+        {
+            Ok(Ok(0)) => break,
+            Ok(Ok(n)) => buf.extend_from_slice(&chunk[..n]),
+            _ => continue,
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
 }
