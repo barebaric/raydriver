@@ -9,6 +9,7 @@
 //! - [`grbl`]: the GRBL protocol stack (parsing, flow control, the
 //!   full session and the minimal ping-pong session).
 //! - [`smoothie`]: the Smoothieware session.
+//! - [`xtool`]: the xTool proprietary WiFi-API session.
 //! - [`marlin`]: the Marlin session.
 //!
 //! The crate is layered: `core` and the protocol modules are pure
@@ -19,6 +20,7 @@ pub mod core;
 pub mod grbl;
 pub mod marlin;
 pub mod smoothie;
+pub mod xtool;
 
 #[cfg(feature = "python")]
 pub(crate) mod python;

@@ -11,6 +11,7 @@ Submodules
 - raydriver.grbl — GRBL device sessions and response parsers
 - raydriver.smoothie — Smoothieware device session
 - raydriver.marlin — Marlin device session and response parsers
+- raydriver.xtool — xTool proprietary WiFi-API session
 """
 
 import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]
