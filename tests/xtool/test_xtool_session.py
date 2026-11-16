@@ -249,6 +249,7 @@ class TestEvents:
 class TestDisconnect:
     async def test_dropped_websocket_wakes_waiters(self, rig):
         session, emulator, events = rig
+        emulator.job_duration = 30.0
         task = asyncio.ensure_future(session.run("M5\n"))
         await events.wait_for(
             SessionEvent.StateChanged,
