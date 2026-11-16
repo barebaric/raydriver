@@ -3,15 +3,33 @@
 
 import builtins
 import typing
+from . import engine
+from . import mdns_channel
+from . import mdns_scan
+from . import ports
+from . import raydriver_channel
+from . import serial_channel
+from . import serial_scan
+from . import session
+from . import spec
 __all__ = [
     "DeviceIdentity",
     "DiscoveredDevice",
     "device_key",
+    "engine",
     "find_subnet_devices",
     "local_subnets",
+    "mdns_channel",
+    "mdns_scan",
+    "ports",
+    "raydriver_channel",
     "scan_mdns_services",
     "scan_serial_ports",
     "scan_subnet",
+    "serial_channel",
+    "serial_scan",
+    "session",
+    "spec",
     "subnet_hosts",
 ]
 

@@ -1,7 +1,18 @@
 //! The `raydriver.core.discovery` Python submodule: transport-level
 //! device discovery scanners (serial capture, mDNS browse, subnet
-//! TCP scan) and the discovery result types.
+//! TCP scan), the discovery result types, and the driver-facing
+//! discovery subsystem (declarations, channels, engine, session).
 
+mod engine;
+mod helpers;
+mod mdns_channel;
+mod mdns_scan;
+mod ports;
+mod raydriver_channel;
+mod serial_channel;
+mod serial_scan;
+mod session;
+mod spec;
 mod types;
 
 use std::time::Duration;
@@ -267,8 +278,10 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let discovery_mod = PyModule::new(py, "discovery")?;
     discovery_mod.setattr(
         "__doc__",
-        "Transport-level discovery scanners: serial capture, mDNS \
-         browse and subnet TCP scan.",
+        "Device discovery: transport-level scanners (serial capture, \
+         mDNS browse, subnet TCP scan), result types, and the \
+         driver-facing subsystem (declarations, channels, engine, \
+         session).",
     )?;
     discovery_mod.add(
         "__all__",
@@ -282,6 +295,15 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
             "DeviceIdentity",
             "DiscoveredDevice",
             "device_key",
+            "ports",
+            "spec",
+            "serial_scan",
+            "mdns_scan",
+            "serial_channel",
+            "mdns_channel",
+            "raydriver_channel",
+            "engine",
+            "session",
         ],
     )?;
     discovery_mod
@@ -300,6 +322,21 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
         .add_function(wrap_pyfunction!(device_key, &discovery_mod)?)?;
     discovery_mod.add_class::<DeviceIdentity>()?;
     discovery_mod.add_class::<DiscoveredDevice>()?;
-    core_mod.add_submodule(&discovery_mod)?;
+    // Register under the public name before the submodules, whose
+    // registration resolves collaborators through it.
+    helpers::attach_submodule(
+        core_mod,
+        &discovery_mod,
+        "raydriver.core.discovery",
+    )?;
+    ports::register(&discovery_mod, core_mod)?;
+    spec::register(&discovery_mod)?;
+    serial_scan::register(&discovery_mod)?;
+    mdns_scan::register(&discovery_mod)?;
+    serial_channel::register(&discovery_mod)?;
+    mdns_channel::register(&discovery_mod)?;
+    raydriver_channel::register(&discovery_mod)?;
+    engine::register(&discovery_mod)?;
+    session::register(&discovery_mod)?;
     Ok(())
 }
