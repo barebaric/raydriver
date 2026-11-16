@@ -34,26 +34,33 @@ where
         let outcome = fut.await;
         let schedule: PyResult<()> = Python::attach(|py| {
             let loop_bound = loop_py.bind(py);
-            // The awaiting loop may be gone (e.g. the test ended);
-            // scheduling onto a closed loop crashes on Windows.
-            if loop_bound.call_method0("is_closed")?.is_truthy()? {
+            // The awaiting loop may be gone or tearing down (e.g. the
+            // test ended); scheduling onto it crashes on Windows.
+            if !loop_accepts_callbacks(loop_bound)? {
                 return Ok(());
             }
+            // The awaiting task may have been cancelled while the
+            // Rust side was still running (e.g. app shutdown);
+            // completing a done future raises InvalidStateError in
+            // the loop callback, so guard on done() at call time.
+            let complete = py.eval(
+                c"lambda f, v, e: None if f.done() else \
+                  (f.set_exception(e) if e is not None else f.set_result(v))",
+                None,
+                None,
+            )?;
             match outcome {
                 Ok(value) => {
-                    let set_result = future_py.getattr(py, "set_result")?;
                     loop_bound.call_method1(
                         "call_soon_threadsafe",
-                        (set_result, value),
+                        (complete, future_py, value, py.None()),
                     )?;
                 }
                 Err(err) => {
-                    let set_exception =
-                        future_py.getattr(py, "set_exception")?;
                     let exc = err.value(py).to_owned();
                     loop_bound.call_method1(
                         "call_soon_threadsafe",
-                        (set_exception, exc),
+                        (complete, future_py, py.None(), exc),
                     )?;
                 }
             }
@@ -64,6 +71,20 @@ where
         }
     });
     Ok(future)
+}
+
+/// Whether *loop* can still receive threadsafe wake-ups: not closed
+/// and running. ``close()`` only runs on a non-running loop and frees
+/// the self-pipe while a worker's wake-up write may be in flight (the
+/// socket send releases the GIL), which crashes on Windows — so only
+/// schedule onto a live, running loop.
+pub(crate) fn loop_accepts_callbacks(
+    loop_bound: &Bound<'_, PyAny>,
+) -> PyResult<bool> {
+    if loop_bound.call_method0("is_closed")?.is_truthy()? {
+        return Ok(false);
+    }
+    loop_bound.call_method0("is_running")?.is_truthy()
 }
 
 /// A Python `None` as an owned `Py<PyAny>` (created under the GIL).

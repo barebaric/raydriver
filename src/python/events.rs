@@ -161,9 +161,12 @@ impl PyEvents {
                 };
                 let loop_py = loop_.clone_ref(py);
                 drop(loop_guard);
-                // Never marshal onto a closed loop: writing to its
-                // self-pipe from a worker thread crashes on Windows.
-                if loop_py.bind(py).call_method0("is_closed")?.is_truthy()? {
+                // Never marshal onto a closed or tearing-down loop:
+                // writing to its self-pipe from a worker thread
+                // crashes on Windows.
+                if !crate::python::pyfuture::loop_accepts_callbacks(
+                    loop_py.bind(py),
+                )? {
                     self.queue.unschedule();
                     return Ok(());
                 }
@@ -215,8 +218,11 @@ impl PyEvents {
             };
             let loop_py = loop_.clone_ref(py);
             drop(loop_guard);
-            // Never marshal onto a closed loop (see schedule()).
-            if loop_py.bind(py).call_method0("is_closed")?.is_truthy()? {
+            // Never marshal onto a closed or tearing-down loop (see
+            // schedule()).
+            if !crate::python::pyfuture::loop_accepts_callbacks(
+                loop_py.bind(py),
+            )? {
                 return Ok(());
             }
             if self.queue.push(QueuedEvent::Progress(op_index)) {
