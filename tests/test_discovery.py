@@ -208,6 +208,9 @@ class TestFindSubnetDevices:
                 [
                     {
                         "id": "grbl",
+                        "driver_name": "grblDriver",
+                        "label": "grbl",
+                        "firmware": "grbl",
                         "port": port,
                         "probe_command": "$I\n",
                         "match_prefix": "[VER:",
@@ -216,10 +219,10 @@ class TestFindSubnetDevices:
                 [("127.0.0.1", 32)],
             )
             assert len(hits) == 1
-            assert hits[0]["id"] == "grbl"
-            assert hits[0]["host"] == "127.0.0.1"
-            assert hits[0]["port"] == port
-            assert hits[0]["banner"] == "[VER:1.1f.20230812:]"
+            assert hits[0].driver_name == "grblDriver"
+            assert hits[0].params["host"] == "127.0.0.1"
+            assert hits[0].params["port"] == port
+            assert hits[0].identity.banner == "[VER:1.1f.20230812:]"
         finally:
             server.close()
             await server.wait_closed()
@@ -238,6 +241,9 @@ class TestFindSubnetDevices:
                 [
                     {
                         "id": "grbl",
+                        "driver_name": "grblDriver",
+                        "label": "grbl",
+                        "firmware": "grbl",
                         "port": port,
                         "probe_command": "$I\n",
                         "match_prefix": "[VER:",
@@ -258,11 +264,20 @@ class TestFindSubnetDevices:
         port = server.sockets[0].getsockname()[1]
         try:
             hits = await discovery.find_subnet_devices(
-                [{"id": "any", "port": port}], [("127.0.0.1", 32)]
+                [
+                    {
+                        "id": "any",
+                        "driver_name": "anyDriver",
+                        "label": "any",
+                        "firmware": "any",
+                        "port": port,
+                    }
+                ],
+                [("127.0.0.1", 32)],
             )
             assert len(hits) == 1
-            assert hits[0]["id"] == "any"
-            assert hits[0]["banner"] is None
+            assert hits[0].driver_name == "anyDriver"
+            assert hits[0].identity.banner is None
         finally:
             server.close()
             await server.wait_closed()
@@ -282,12 +297,18 @@ class TestFindSubnetDevices:
                 [
                     {
                         "id": "first",
+                        "driver_name": "firstDriver",
+                        "label": "first",
+                        "firmware": "first",
                         "port": port,
                         "probe_command": "$I\n",
                         "match_prefix": "[VER:",
                     },
                     {
                         "id": "second",
+                        "driver_name": "secondDriver",
+                        "label": "second",
+                        "firmware": "second",
                         "port": port,
                         "probe_command": "$I\n",
                         "match_prefix": "[VER:",
@@ -296,7 +317,7 @@ class TestFindSubnetDevices:
                 [("127.0.0.1", 32)],
             )
             assert len(hits) == 1
-            assert hits[0]["id"] == "first"
+            assert hits[0].driver_name == "firstDriver"
         finally:
             server.close()
             await server.wait_closed()

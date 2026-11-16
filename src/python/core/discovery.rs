@@ -1,6 +1,8 @@
 //! The `raydriver.core.discovery` Python submodule: transport-level
 //! device discovery scanners (serial capture, mDNS browse, subnet
-//! TCP scan). Results cross the boundary as plain dicts and lists.
+//! TCP scan) and the discovery result types.
+
+mod types;
 
 use std::time::Duration;
 
@@ -8,8 +10,12 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict};
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
+use crate::core::discovery::types::{
+    DeviceIdentity as CoreIdentity, DiscoveredDevice as CoreDevice,
+};
 use crate::core::discovery::{mdns, serial, subnet};
 use crate::python::pyfuture::spawn_future;
+use types::{DeviceIdentity, DiscoveredDevice};
 
 /// Probe serial ports for device output.
 ///
@@ -138,10 +144,11 @@ fn scan_subnet(
 /// *specs* is a list of dicts with the keys ``id`` (opaque caller
 /// identifier), ``port``, and optionally ``probe_command`` (sent to
 /// confirm the firmware) and ``match_prefix`` (response-line prefix
-/// identifying it). Without a probe command any listener on the
-/// port is claimed. Returns one dict per claimed host with the keys
-/// ``id``, ``host``, ``port`` and ``banner`` (the matched response
-/// line, or None). The first matching spec claims a host.
+/// identifying it), plus the declaring driver's display fields
+/// (``driver_name``, ``label``, ``firmware``). Without a probe command
+/// any listener on the port is claimed. Returns one
+/// :class:`DiscoveredDevice` per claimed host; the first matching
+/// spec claims a host.
 ///
 /// *subnets* overrides the interface enumeration as (address,
 /// prefixlen) pairs; None scans the local interfaces.
@@ -154,6 +161,7 @@ fn find_subnet_devices<'py>(
     subnets: Option<Vec<(String, u8)>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let mut parsed = Vec::with_capacity(specs.len());
+    let mut display = Vec::with_capacity(specs.len());
     for spec in &specs {
         parsed.push(subnet::SubnetSpec {
             id: required_str(spec, "id")?,
@@ -161,6 +169,12 @@ fn find_subnet_devices<'py>(
             probe_command: optional_str(spec, "probe_command")?,
             match_prefix: optional_str(spec, "match_prefix")?,
         });
+        display.push((
+            required_str(spec, "id")?,
+            required_str(spec, "driver_name")?,
+            required_str(spec, "label")?,
+            optional_str(spec, "firmware")?,
+        ));
     }
     let subnets = subnets
         .map(|pairs| {
@@ -183,16 +197,47 @@ fn find_subnet_devices<'py>(
         Python::attach(|py| {
             let mut out = Vec::with_capacity(hits.len());
             for hit in hits {
-                let dict = PyDict::new(py);
-                dict.set_item("id", hit.id)?;
-                dict.set_item("host", hit.host)?;
-                dict.set_item("port", hit.port)?;
-                dict.set_item("banner", hit.banner)?;
-                out.push(dict);
+                let Some((_, driver_name, label, firmware)) =
+                    display.iter().find(|(id, ..)| *id == hit.id)
+                else {
+                    continue;
+                };
+                let params = PyDict::new(py);
+                params.set_item("host", &hit.host)?;
+                params.set_item("port", hit.port)?;
+                out.push(DiscoveredDevice {
+                    inner: CoreDevice {
+                        driver_name: driver_name.clone(),
+                        params: types::params_from_py(&params)?,
+                        label: label.clone(),
+                        detail: format!("{}:{}", hit.host, hit.port),
+                        identity: CoreIdentity {
+                            firmware: firmware.clone(),
+                            banner: hit.banner.clone(),
+                            ..Default::default()
+                        },
+                    },
+                    probe_profile: None,
+                });
             }
             out.into_pyobject(py).map(|o| o.unbind().into_any())
         })
     })
+}
+
+/// Stable identity for a device from its driver and connection
+/// parameters: serial ports by path, network devices by host and
+/// TCP port, remote devices by daemon endpoint plus device resource.
+#[gen_stub_pyfunction(module = "raydriver.core.discovery")]
+#[pyfunction]
+fn device_key(
+    driver_name: &str,
+    params: &Bound<'_, PyDict>,
+) -> PyResult<String> {
+    Ok(crate::core::discovery::types::device_key(
+        driver_name,
+        &types::params_from_py(params)?,
+    ))
 }
 
 fn required_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<String> {
@@ -234,6 +279,9 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
             "subnet_hosts",
             "scan_subnet",
             "find_subnet_devices",
+            "DeviceIdentity",
+            "DiscoveredDevice",
+            "device_key",
         ],
     )?;
     discovery_mod
@@ -248,6 +296,10 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
         .add_function(wrap_pyfunction!(scan_subnet, &discovery_mod)?)?;
     discovery_mod
         .add_function(wrap_pyfunction!(find_subnet_devices, &discovery_mod)?)?;
+    discovery_mod
+        .add_function(wrap_pyfunction!(device_key, &discovery_mod)?)?;
+    discovery_mod.add_class::<DeviceIdentity>()?;
+    discovery_mod.add_class::<DiscoveredDevice>()?;
     core_mod.add_submodule(&discovery_mod)?;
     Ok(())
 }

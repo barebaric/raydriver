@@ -9,3 +9,4 @@
 pub mod mdns;
 pub mod serial;
 pub mod subnet;
+pub mod types;
