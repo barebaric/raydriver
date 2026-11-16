@@ -8,6 +8,8 @@ and an mDNS browse against a locally announced service.
 import asyncio
 import ipaddress
 import os
+import threading
+import time
 
 import pytest
 
@@ -85,8 +87,22 @@ class TestScanSerialPorts:
     )
     async def test_captures_device_banner(self):
         master, slave = os.openpty()
+        stop = threading.Event()
+
+        def chatter():
+            # macOS drops master writes made before the slave is
+            # opened, so keep sending the banner until the scanner
+            # has it rather than writing once up front.
+            while not stop.is_set():
+                try:
+                    os.write(master, b"Grbl 1.1h ['$' for help]\n")
+                except OSError:
+                    return
+                time.sleep(0.1)
+
+        thread = threading.Thread(target=chatter, daemon=True)
+        thread.start()
         try:
-            os.write(master, b"Grbl 1.1h ['$' for help]\n")
             observations = await discovery.scan_serial_ports(
                 [os.ttyname(slave)], [115200], 10.0
             )
@@ -95,6 +111,8 @@ class TestScanSerialPorts:
             assert observation["baud_rate"] == 115200
             assert b"Grbl 1.1h" in observation["data"]
         finally:
+            stop.set()
+            thread.join(timeout=1.0)
             os.close(master)
             os.close(slave)
 
@@ -106,7 +124,7 @@ class TestCancelledScan:
         in the event loop."""
         errors = []
         loop = asyncio.get_running_loop()
-        loop.set_exception_handler(lambda l, ctx: errors.append(ctx))
+        loop.set_exception_handler(lambda _loop, ctx: errors.append(ctx))
         # The binding returns a bare asyncio Future, not a coroutine.
         task = asyncio.ensure_future(
             discovery.scan_mdns_services(["_rdisccancel._tcp"], 0.5)
