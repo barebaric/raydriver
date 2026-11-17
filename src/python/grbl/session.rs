@@ -59,14 +59,20 @@ pub(crate) fn get_f64(
     }
 }
 
-fn get_i64(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<i64>> {
+pub(crate) fn get_i64(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<i64>> {
     match dict.get_item(key)? {
         Some(v) => Ok(Some(v.extract::<i64>()?)),
         None => Ok(None),
     }
 }
 
-fn get_str(dict: &Bound<'_, PyDict>, key: &str) -> PyResult<Option<String>> {
+pub(crate) fn get_str(
+    dict: &Bound<'_, PyDict>,
+    key: &str,
+) -> PyResult<Option<String>> {
     match dict.get_item(key)? {
         Some(v) => Ok(Some(v.extract::<String>()?)),
         None => Ok(None),

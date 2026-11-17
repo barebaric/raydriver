@@ -7,12 +7,14 @@ from . import core
 from . import grbl
 from . import marlin
 from . import smoothie
+from . import xtool
 __all__ = [
     "core",
     "grbl",
     "init_logging",
     "marlin",
     "smoothie",
+    "xtool",
 ]
 
 def init_logging(filter: typing.Optional[builtins.str] = None, path: typing.Optional[builtins.str] = None) -> None:
