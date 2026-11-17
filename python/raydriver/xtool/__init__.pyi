@@ -2,8 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 r"""
 xTool device drivers implemented in Rust.
-
-The central type is XtoolSession: it owns the connection lifecycle of xTool's proprietary WiFi API (HTTP command exchange, WebSocket job-state events, job upload and execution). Dialects remain data owned by Rayforge: resolved power-command templates are passed into the session.
+XtoolSession supports D-series G-code jobs over the HTTP API. XtoolM2Session supports M2 WS-V2 monitoring, motion and job control; it does not upload G-code jobs. The M2 session requires explicit configuration to accept an untrusted local device certificate.
 """
 
 import builtins
@@ -12,8 +11,70 @@ from raydriver import core
 from raydriver.core import types
 import typing
 __all__ = [
+    "XtoolM2Session",
     "XtoolSession",
 ]
+
+@typing.final
+class XtoolM2Session:
+    r"""
+    Monitor and control an xTool M2 over its WS-V2 TLS service.
+    This session does not upload G-code jobs. `start` controls a job
+    that is already staged on the device, such as a job sent by xTool
+    Studio.
+    """
+    @property
+    def state(self) -> types.DeviceState:
+        r"""
+        Current snapshot of the machine state.
+        """
+    @property
+    def is_job_running(self) -> builtins.bool:
+        r"""
+        Whether the state currently indicates an active or held job.
+        """
+    @property
+    def resource_uri(self) -> typing.Optional[builtins.str]:
+        r"""
+        WebSocket URI of the configured device.
+        """
+    def __new__(cls, config: typing.Optional[dict], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> XtoolM2Session:
+        r"""
+        Create an M2 session for the configured host.
+        """
+    def connect(self) -> typing.Any:
+        r"""
+        Connect and start monitoring the M2.
+        """
+    def disconnect(self) -> typing.Any:
+        r"""
+        Stop monitoring and close the connection.
+        """
+    def start(self) -> typing.Any:
+        r"""
+        Start a job already staged on the device.
+        """
+    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+        r"""
+        Pause the current job, or resume it when `hold` is false.
+        """
+    def cancel(self) -> typing.Any:
+        r"""
+        Cancel the current job.
+        """
+    def home(self) -> typing.Any:
+        r"""
+        Home the laser head.
+        """
+    def move_to(self, x: builtins.float, y: builtins.float, speed: builtins.float = 18000.0) -> typing.Any:
+        r"""
+        Move to an absolute XY coordinate in millimeters.
+        """
+    def jog(self, dx: builtins.float = 0.0, dy: builtins.float = 0.0, dz: builtins.float = 0.0, speed: builtins.float = 18000.0) -> typing.Any:
+        r"""
+        Move by relative XYZ deltas in millimeters.
+        """
+    def __repr__(self) -> builtins.str: ...
 
 @typing.final
 class XtoolSession:

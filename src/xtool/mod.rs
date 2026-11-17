@@ -1,7 +1,6 @@
-//! The xTool protocol stack for xTool's proprietary WiFi module
-//! (D1, D1 Pro, F1, S1, …).
+//! Protocol sessions for xTool machines.
 //!
-//! xTool machines are GRBL-derived but their network API is *not*
+//! D-series machines are GRBL-derived but their network API is *not*
 //! ESP3D or GRBL-over-TCP: single commands are triggered with
 //! `GET /cmd?cmd=…`, multi-line blocks with `POST /cmd`, jobs are
 //! uploaded to `/tmp.gcode` via multipart `/upload` and started with
@@ -10,13 +9,15 @@
 //! member is `"ok"` or `"fail"` — it never returns the GRBL response
 //! text of the executed command.
 //!
-//! The WebSocket (default port 8081) is a one-way notification
+//! The D-series WebSocket (default port 8081) is a one-way notification
 //! channel: it carries job-state events (`ok:IDLE`, `ok:WORKING_*`,
-//! `ok:PAUSING`, `WORK_STOPPED`) and safety alarms (`err:*`), but
-//! never per-line `ok` acknowledgements and never `<Idle|…>` status
-//! reports.  The machine therefore reports no position at all; the
-//! session state is derived entirely from the job-state events.
+//! `ok:PAUSING`, `WORK_STOPPED`) and safety alarms (`err:*`).
+//!
+//! The M2 uses a separate WS-V2 TLS protocol on port 28900. Its
+//! session supports state monitoring, motion and job control for jobs
+//! already staged on the machine; G-code job upload is not implemented.
 
 pub mod http;
+pub mod m2;
 pub mod session;
 pub mod ws;

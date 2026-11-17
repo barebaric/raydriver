@@ -196,3 +196,50 @@ async def main():
 
 asyncio.run(main())
 ```
+
+### xTool M2
+
+`XtoolM2Session` connects to the M2's WS-V2 service for state
+monitoring, homing, motion and control of a job already staged on the
+machine. It does not upload or stream G-code jobs; use xTool Studio to
+stage those. M2 support uses a reverse-engineered local protocol and
+has not yet been validated against physical hardware.
+
+The device commonly presents a self-signed TLS certificate. Certificate
+validation remains enabled by default. Set `tls_allow_invalid_certs` only
+on a trusted private network if the device certificate is not trusted by
+the host:
+
+```python
+import asyncio
+from raydriver.core import SessionEvent
+from raydriver.xtool import XtoolM2Session
+
+async def main():
+    connected = asyncio.Event()
+
+    def on_event(event):
+        if (
+            isinstance(event, SessionEvent.ConnectionStatusChanged)
+            and event.status == "CONNECTED"
+        ):
+            connected.set()
+
+    session = XtoolM2Session(
+        config={
+            "host": "192.168.1.50",
+            "tls_allow_invalid_certs": True,
+        },
+        event_callback=on_event,
+    )
+    await session.connect()
+    await asyncio.wait_for(connected.wait(), timeout=15)
+    await session.disconnect()
+
+asyncio.run(main())
+```
+
+The session also exposes `home`, `move_to`, `jog`, `start`, `set_hold`
+and `cancel` for supported machine-control operations. `connect` starts
+the connection loop; wait for the `CONNECTED` connection-status event
+before issuing machine commands.
