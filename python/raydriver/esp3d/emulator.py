@@ -84,14 +84,24 @@ class Esp3dEmulator:
         return self.http_port, self.ws_port
 
     async def stop(self):
-        for server in self._servers:
-            server.close()
-            await server.wait_closed()
-        self._servers.clear()
         if self._job_task is not None:
             self._job_task.cancel()
+            self._job_task = None
+        # Close active WebSocket connections before waiting for the
+        # servers: on Windows, wait_closed() waits for active client
+        # connections to finish.
         for writer in list(self._clients):
             writer.close()
+            try:
+                await writer.wait_closed()
+            except (ConnectionError, OSError):
+                pass
+        self._clients.clear()
+        for server in self._servers:
+            server.close()
+        for server in self._servers:
+            await server.wait_closed()
+        self._servers.clear()
 
     def broadcast(self, line):
         self._broadcast(line)
