@@ -18,9 +18,10 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::Semaphore;
+
+use super::probe::{probe_tcp, TcpProbe};
 
 /// Per-host TCP connect timeout.
 const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -32,8 +33,6 @@ const PROBE_CONCURRENCY: usize = 8;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long to read a probe response before giving up.
 const PROBE_READ_WINDOW: Duration = Duration::from_secs(1);
-/// Longest banner line reported back to the caller.
-const MAX_BANNER_LEN: usize = 80;
 
 /// One caller's declaration of how its devices appear on the
 /// network: a TCP port plus an optional confirmation probe.
@@ -238,42 +237,18 @@ async fn probe_host(
     spec: &SubnetSpec,
 ) -> Option<Option<String>> {
     let command = spec.probe_command.as_ref()?;
-    let mut stream = TcpStream::connect((host, port)).await.ok()?;
-    stream.write_all(command.as_bytes()).await.ok()?;
-    let text = read_response(&mut stream).await;
     let prefix = spec.match_prefix.as_deref().unwrap_or("");
-    for line in text.lines() {
-        let line = line.trim();
-        if line.starts_with(prefix) {
-            let end = line
-                .char_indices()
-                .map(|(i, _)| i)
-                .nth(MAX_BANNER_LEN)
-                .unwrap_or(line.len());
-            return Some(Some(line[..end].to_string()));
-        }
-    }
-    None
-}
-
-/// Reads until the peer closes, the read window expires, or enough
-/// data arrived; the device keeps the connection open, so a plain
-/// read-to-EOF would block until the timeout.
-async fn read_response(stream: &mut TcpStream) -> String {
-    let deadline = tokio::time::Instant::now() + PROBE_READ_WINDOW;
-    let mut buf: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 256];
-    while tokio::time::Instant::now() < deadline && buf.len() < 4096 {
-        match tokio::time::timeout(
-            Duration::from_millis(200),
-            stream.read(&mut chunk),
-        )
-        .await
-        {
-            Ok(Ok(0)) => break,
-            Ok(Ok(n)) => buf.extend_from_slice(&chunk[..n]),
-            _ => continue,
-        }
-    }
-    String::from_utf8_lossy(&buf).into_owned()
+    let line = probe_tcp(
+        host,
+        port,
+        &TcpProbe {
+            connect_timeout: PROBE_TIMEOUT,
+            banner_wait: Duration::ZERO,
+            response_wait: PROBE_READ_WINDOW,
+            command: Some(command),
+            match_prefix: prefix,
+        },
+    )
+    .await;
+    Some(line)
 }

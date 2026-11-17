@@ -4,6 +4,7 @@
 import builtins
 import typing
 from . import engine
+from . import fingerprints
 from . import mdns_channel
 from . import mdns_scan
 from . import ports
@@ -18,6 +19,7 @@ __all__ = [
     "device_key",
     "engine",
     "find_subnet_devices",
+    "fingerprints",
     "local_subnets",
     "mdns_channel",
     "mdns_scan",

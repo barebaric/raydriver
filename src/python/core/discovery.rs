@@ -4,6 +4,7 @@
 //! discovery subsystem (declarations, channels, engine, session).
 
 mod engine;
+mod fingerprints;
 mod helpers;
 mod mdns_channel;
 mod mdns_scan;
@@ -297,6 +298,7 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
             "device_key",
             "ports",
             "spec",
+            "fingerprints",
             "serial_scan",
             "mdns_scan",
             "serial_channel",
@@ -331,6 +333,7 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     ports::register(&discovery_mod, core_mod)?;
     spec::register(&discovery_mod)?;
+    fingerprints::register(&discovery_mod)?;
     serial_scan::register(&discovery_mod)?;
     mdns_scan::register(&discovery_mod)?;
     serial_channel::register(&discovery_mod)?;
