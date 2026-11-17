@@ -250,5 +250,5 @@ async fn probe_host(
         },
     )
     .await;
-    Some(line)
+    line.map(Some)
 }
