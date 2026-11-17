@@ -2,8 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 r"""
 xTool device drivers implemented in Rust.
-
-The central type is XtoolSession: it owns the connection lifecycle of xTool's proprietary WiFi API (HTTP command exchange, WebSocket job-state events, job upload and execution). Dialects remain data owned by Rayforge: resolved power-command templates are passed into the session.
+XtoolSession supports D-series G-code jobs over the HTTP API. M2Session is available at raydriver.xtool.m2 for WS-V2 monitoring and control; it does not upload G-code jobs. Its untrusted-certificate option is explicit and disabled by default.
 """
 
 import builtins
@@ -11,8 +10,10 @@ import collections.abc
 from raydriver import core
 from raydriver.core import types
 import typing
+from . import m2
 __all__ = [
     "XtoolSession",
+    "m2",
 ]
 
 @typing.final

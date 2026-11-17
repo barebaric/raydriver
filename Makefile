@@ -14,7 +14,7 @@ venv:
 	@echo "Run 'source .venv/bin/activate' to activate the virtual environment."
 
 stubs:
-	cargo clean -p raydriver && cargo run --bin stub_gen
+	cargo clean -p raydriver && cargo run --features python --bin stub_gen
 
 format: format-rust format-python
 
