@@ -749,3 +749,138 @@ async def test_no_candidates_skips_fingerprint_pass(monkeypatch):
     driver = _fingerprint_driver(spy_fingerprint)
     monkeypatch.setattr(mdns_channel, "scan_mdns_services", fake_scan)
     assert await find_network_devices([driver]) == []
+
+
+def _telnet_fingerprint_driver(fingerprint, name="TelnetFingerprintDriver"):
+    """A driver that declares no service types and offers only
+    _telnet._tcp candidates to its fingerprint probe."""
+
+    class TelnetFingerprintDriver:
+        DISCOVERY = DiscoverySpec(
+            mdns=MdnsRecognizer(
+                fingerprint=fingerprint,
+                fingerprint_services=("_telnet._tcp.local.",),
+            )
+        )
+        label = "grblHAL (Telnet)"
+
+    TelnetFingerprintDriver.__name__ = name
+    return TelnetFingerprintDriver
+
+
+def _telnet_service(host="192.168.1.80", port=23):
+    return MDNSService(
+        service_type="_telnet._tcp",
+        name="grblHAL",
+        host=host,
+        port=port,
+        server="grblhal.local",
+        txt={},
+    )
+
+
+def test_fingerprint_services_default_to_http():
+    async def fingerprint(host, port):
+        return None
+
+    recognizer = MdnsRecognizer(
+        services=("_esp3d._tcp.local.",),
+        fingerprint=fingerprint,
+    )
+    assert recognizer.fingerprint_services == ("_http._tcp",)
+
+
+@pytest.mark.asyncio
+async def test_declared_fingerprint_service_is_browsed(monkeypatch):
+    """A recognizer that names _telnet._tcp in fingerprint_services
+    extends the browse set with that type instead of _http._tcp."""
+
+    async def fingerprint(host, port):
+        return None
+
+    seen = []
+
+    async def fake_scan(service_types):
+        seen.append(set(service_types))
+        return []
+
+    driver = _telnet_fingerprint_driver(fingerprint)
+    monkeypatch.setattr(mdns_channel, "scan_mdns_services", fake_scan)
+    assert await find_network_devices([driver]) == []
+    assert seen == [{"_telnet._tcp"}]
+
+
+@pytest.mark.asyncio
+async def test_telnet_candidate_reaches_only_declaring_recognizer(
+    monkeypatch,
+):
+    """A _telnet._tcp candidate is probed only by the declaration that
+    named that type, and its SRV host/port become the device params."""
+
+    calls = []
+
+    async def telnet_fingerprint(host, port):
+        calls.append(("telnet", host, port))
+        return _telnet_service(host=host, port=port)
+
+    async def http_fingerprint(host, port):
+        calls.append(("http", host, port))
+        return _http_service(host=host, port=port)
+
+    async def fake_scan(service_types):
+        return [_telnet_service()]
+
+    telnet_driver = _telnet_fingerprint_driver(telnet_fingerprint)
+    http_driver = _fingerprint_driver(http_fingerprint)
+    monkeypatch.setattr(mdns_channel, "scan_mdns_services", fake_scan)
+    devices = await find_network_devices([telnet_driver, http_driver])
+    assert len(devices) == 1
+    device = devices[0]
+    assert device.driver_name == "TelnetFingerprintDriver"
+    assert device.params == {"host": "192.168.1.80", "port": 23}
+    assert calls == [("telnet", "192.168.1.80", 23)]
+
+
+@pytest.mark.asyncio
+async def test_no_cross_type_fingerprinting(monkeypatch):
+    """Each candidate is probed by its own type's declarations only;
+    an _http._tcp candidate never reaches a _telnet._tcp declaration
+    and vice versa."""
+
+    calls = []
+
+    async def telnet_fingerprint(host, port):
+        calls.append(("telnet", host))
+        return None
+
+    async def http_fingerprint(host, port):
+        calls.append(("http", host))
+        return None
+
+    async def fake_scan(service_types):
+        return [_telnet_service(), _http_service()]
+
+    telnet_driver = _telnet_fingerprint_driver(telnet_fingerprint)
+    http_driver = _fingerprint_driver(http_fingerprint)
+    monkeypatch.setattr(mdns_channel, "scan_mdns_services", fake_scan)
+    assert await find_network_devices([telnet_driver, http_driver]) == []
+    assert set(calls) == {
+        ("telnet", "192.168.1.80"),
+        ("http", "192.168.1.70"),
+    }
+
+
+@pytest.mark.asyncio
+async def test_non_matching_telnet_fingerprint_ignored(monkeypatch):
+    """An unrelated telnet listener is not mislabeled: the candidate
+    is only claimed when the fingerprint probe confirms it."""
+
+    async def no_match(host, port):
+        return None
+
+    async def fake_scan(service_types):
+        return [_telnet_service()]
+
+    driver = _telnet_fingerprint_driver(no_match)
+    monkeypatch.setattr(mdns_channel, "scan_mdns_services", fake_scan)
+    assert await find_network_devices([driver]) == []

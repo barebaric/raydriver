@@ -15,8 +15,8 @@ scan_mdns_services: typing.Any
 def collect_mdns_recognizers(driver_classes: typing.Sequence[typing.Any]) -> list:
     r"""
     Pairs every driver whose ``DISCOVERY`` spec declares a valid mDNS
-    recognizer with it. The declared service types are normalized to
-    their canonical ``_name._transport`` form.
+    recognizer with it. Declared service types and fingerprint service
+    types are normalized to their canonical ``_name._transport`` form.
     """
 
 def find_network_devices(driver_classes: typing.Sequence[typing.Any]) -> typing.Any:
