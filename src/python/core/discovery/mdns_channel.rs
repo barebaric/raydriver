@@ -2,12 +2,14 @@
 //! (mDNS) discovery channel.
 //!
 //! Browses the network for every service type declared by a driver's
-//! `MdnsRecognizer`, then maps each resolved service to a
-//! `DiscoveredDevice`. Generic service types (e.g. `_http._tcp`) that
-//! no driver declared are additionally offered to drivers that
-//! declare a *fingerprint* probe: each candidate is fingerprinted to
-//! confirm its firmware before it is claimed. Declared-service
-//! results always win over fingerprint claims on the same host.
+//! `MdnsRecognizer` plus the generic types its `fingerprint_services`
+//! name, then maps each resolved service to a `DiscoveredDevice`.
+//! Generic service types (e.g. `_http._tcp`, `_telnet._tcp`) that no
+//! driver declared are offered to drivers that fingerprint them: each
+//! candidate is fingerprinted to confirm its firmware before it is
+//! claimed, and a declaration only probes the types it named.
+//! Declared-service results always win over fingerprint claims on the
+//! same host.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -34,9 +36,6 @@ const LOGGER: &str = "raydriver.core.discovery.mdns_channel";
 /// window itself is much shorter (see mdns_scan).
 const NETWORK_SCAN_TIMEOUT: f64 = 10.0;
 
-/// Generic service type browsed solely for fingerprinting.
-const HTTP_SERVICE_TYPE: &str = "_http._tcp";
-
 /// Fingerprint pass bounds: at most this many concurrent probes, and
 /// at most this long per candidate (the probe itself is bounded too).
 const FINGERPRINT_CONCURRENCY: usize = 8;
@@ -50,11 +49,12 @@ struct Declaration {
     services: Vec<String>,
     txt_map: HashMap<String, String>,
     fingerprint: Option<Py<PyAny>>,
+    fingerprint_services: Vec<String>,
 }
 
 /// Pairs every driver whose ``DISCOVERY`` spec declares a valid mDNS
-/// recognizer with it. The declared service types are normalized to
-/// their canonical ``_name._transport`` form.
+/// recognizer with it. Declared service types and fingerprint service
+/// types are normalized to their canonical ``_name._transport`` form.
 #[gen_stub_pyfunction(module = "raydriver.core.discovery.mdns_channel")]
 #[pyfunction]
 fn collect_mdns_recognizers<'py>(
@@ -80,10 +80,20 @@ fn collect_mdns_recognizers<'py>(
             recognizer.getattr("services")?.extract()?;
         let normalized: Vec<String> =
             services.iter().map(|s| normalize_service_type(s)).collect();
+        let fingerprint_services: Vec<String> = recognizer
+            .getattr("fingerprint_services")?
+            .extract::<Vec<String>>()?
+            .iter()
+            .map(|s| normalize_service_type(s))
+            .collect();
         let kwargs = PyDict::new(py);
         kwargs.set_item("services", PyTuple::new(py, &normalized)?)?;
         kwargs.set_item("txt_map", recognizer.getattr("txt_map")?)?;
         kwargs.set_item("fingerprint", recognizer.getattr("fingerprint")?)?;
+        kwargs.set_item(
+            "fingerprint_services",
+            PyTuple::new(py, &fingerprint_services)?,
+        )?;
         let normalized_recognizer =
             recognizer_cls.call(PyTuple::empty(py), Some(&kwargs))?;
         out.append(PyTuple::new(py, [cls, normalized_recognizer])?)?;
@@ -107,9 +117,24 @@ fn read_declarations(
             fingerprint: recognizer
                 .getattr("fingerprint")?
                 .extract::<Option<Py<PyAny>>>()?,
+            fingerprint_services: recognizer
+                .getattr("fingerprint_services")?
+                .extract()?,
         });
     }
     Ok(declarations)
+}
+
+/// Every service type named by a fingerprinting declaration. Only
+/// declarations that actually declare a fingerprint probe can offer
+/// generic candidates, so their service types alone extend the browse
+/// set.
+fn fingerprint_service_types(declarations: &[Declaration]) -> BTreeSet<String> {
+    declarations
+        .iter()
+        .filter(|d| d.fingerprint.is_some())
+        .flat_map(|d| d.fingerprint_services.iter().cloned())
+        .collect()
 }
 
 /// Browses the network for every declared service type plus the
@@ -139,9 +164,7 @@ fn find_network_devices<'py>(
         .iter()
         .flat_map(|d| d.services.iter().cloned())
         .collect();
-    if declarations.iter().any(|d| d.fingerprint.is_some()) {
-        service_types.insert(HTTP_SERVICE_TYPE.to_string());
-    }
+    service_types.extend(fingerprint_service_types(&declarations));
 
     let timeout =
         helpers::timeout_attr(py, "mdns_channel", "NETWORK_SCAN_TIMEOUT")?;
@@ -197,12 +220,14 @@ fn find_network_devices<'py>(
 }
 
 /// Sorts resolved services into devices claimed by a declared
-/// service type and unclaimed generic-type candidates.
+/// service type and unclaimed candidates of a fingerprinted service
+/// type.
 fn split_services(
     py: Python<'_>,
     services: &[MDNSService],
     declarations: &[Declaration],
 ) -> PyResult<(Vec<DiscoveredDevice>, HashSet<String>, Vec<MDNSService>)> {
+    let fingerprint_types = fingerprint_service_types(declarations);
     let mut devices = Vec::new();
     let mut claimed_hosts = HashSet::new();
     let mut candidates = Vec::new();
@@ -216,7 +241,7 @@ fn split_services(
                 break;
             }
         }
-        if !claimed && service.service_type == HTTP_SERVICE_TYPE {
+        if !claimed && fingerprint_types.contains(&service.service_type) {
             candidates.push(service.clone());
         }
     }
@@ -224,9 +249,10 @@ fn split_services(
 }
 
 /// Fingerprints unclaimed generic-service candidates, bounded in
-/// concurrency. All fingerprinting drivers probe every candidate;
-/// the first match in declaration order claims a host, so a host
-/// that several drivers recognize yields exactly one device.
+/// concurrency. A declaration probes only the candidates whose service
+/// type it named in ``fingerprint_services``, so no cross-type probing
+/// happens; the first match in declaration order claims a host, so a
+/// host that several drivers recognize yields exactly one device.
 async fn run_fingerprints(
     declarations: &[Declaration],
     candidates: Vec<MDNSService>,
@@ -241,6 +267,12 @@ async fn run_fingerprints(
             };
             for service in &candidates {
                 if claimed_hosts.contains(&service.host) {
+                    continue;
+                }
+                if !declaration
+                    .fingerprint_services
+                    .contains(&service.service_type)
+                {
                     continue;
                 }
                 probes.push((

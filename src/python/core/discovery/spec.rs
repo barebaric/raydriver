@@ -101,6 +101,11 @@ pub struct MdnsRecognizer {
     /// Maps mDNS TXT record keys to the driver-arg keys they are
     /// forwarded as into the discovered device's params.
     txt_map: HashMap<String, String>,
+    /// Service types whose unclaimed announcements are offered to
+    /// this driver's ``fingerprint`` probe. Defaults to
+    /// ``("_http._tcp",)`` so existing declarations keep their
+    /// behavior.
+    fingerprint_services: Vec<String>,
     /// Optional async probe for generic service types (e.g.
     /// ``_http._tcp``): candidates are fingerprinted to confirm
     /// their firmware before they are claimed. Must be bounded and
@@ -112,18 +117,27 @@ pub struct MdnsRecognizer {
 #[pymethods]
 impl MdnsRecognizer {
     #[new]
-    #[pyo3(signature = (services=None, txt_map=None, fingerprint=None))]
+    #[pyo3(signature = (
+        services=None,
+        txt_map=None,
+        fingerprint=None,
+        fingerprint_services=None
+    ))]
     fn new(
         #[gen_stub(override_type(type_repr = "typing.Optional[typing.Tuple[builtins.str, ...]]", imports = ("typing", "builtins")))]
         services: Option<Vec<String>>,
         txt_map: Option<HashMap<String, String>>,
         #[gen_stub(override_type(type_repr = "typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]]", imports = ("typing",)))]
         fingerprint: Option<Py<PyAny>>,
+        #[gen_stub(override_type(type_repr = "typing.Optional[typing.Tuple[builtins.str, ...]]", imports = ("typing", "builtins")))]
+        fingerprint_services: Option<Vec<String>>,
     ) -> Self {
         Self {
             services: services.unwrap_or_default(),
             txt_map: txt_map.unwrap_or_default(),
             fingerprint,
+            fingerprint_services: fingerprint_services
+                .unwrap_or_else(|| vec!["_http._tcp".to_string()]),
         }
     }
 
@@ -146,12 +160,21 @@ impl MdnsRecognizer {
     fn fingerprint(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.fingerprint.as_ref().map(|f| f.clone_ref(py))
     }
+
+    #[getter]
+    fn fingerprint_services<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyTuple>> {
+        PyTuple::new(py, &self.fingerprint_services)
+    }
 }
 
 /// Declarative description of how a driver's devices appear as plain
 /// TCP listeners on the local network — e.g. grblHAL's raw telnet
-/// service, which announces nothing via mDNS. The subnet scan probes
-/// reachable hosts on the declared port with this data.
+/// service on boards whose firmware does not announce it via mDNS.
+/// The subnet scan probes reachable hosts on the declared port with
+/// this data.
 #[gen_stub_pyclass(module = "raydriver.core.discovery.spec")]
 #[pyclass(
     module = "raydriver.core.discovery.spec",

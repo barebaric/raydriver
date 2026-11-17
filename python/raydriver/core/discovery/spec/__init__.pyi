@@ -38,7 +38,9 @@ class MdnsRecognizer:
     def txt_map(self) -> dict: ...
     @property
     def fingerprint(self) -> typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]]: ...
-    def __new__(cls, services: typing.Optional[typing.Tuple[builtins.str, ...]] = None, txt_map: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None, fingerprint: typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]] = None) -> MdnsRecognizer: ...
+    @property
+    def fingerprint_services(self) -> tuple: ...
+    def __new__(cls, services: typing.Optional[typing.Tuple[builtins.str, ...]] = None, txt_map: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None, fingerprint: typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]] = None, fingerprint_services: typing.Optional[typing.Tuple[builtins.str, ...]] = None) -> MdnsRecognizer: ...
 
 @typing.final
 class SerialRecognizer:
@@ -62,8 +64,9 @@ class TcpRecognizer:
     r"""
     Declarative description of how a driver's devices appear as plain
     TCP listeners on the local network — e.g. grblHAL's raw telnet
-    service, which announces nothing via mDNS. The subnet scan probes
-    reachable hosts on the declared port with this data.
+    service on boards whose firmware does not announce it via mDNS.
+    The subnet scan probes reachable hosts on the declared port with
+    this data.
     """
     @property
     def port(self) -> builtins.int: ...
