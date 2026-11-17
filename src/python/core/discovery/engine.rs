@@ -36,8 +36,10 @@ const SUBNET_SCAN_TIMEOUT: f64 = 30.0;
 fn find_all_devices<'py>(
     py: Python<'py>,
     driver_classes: Vec<Bound<'_, PyAny>>,
-    ports: Option<Vec<String>>,
-    baud_rates: Option<Vec<u32>>,
+    #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
+    ports: Option<Bound<'_, PyAny>>,
+    #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.int]]", imports = ("typing", "builtins")))]
+    baud_rates: Option<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     exclude_ports: Option<Bound<'_, PyAny>>,
 ) -> PyResult<Bound<'py, PyAny>> {

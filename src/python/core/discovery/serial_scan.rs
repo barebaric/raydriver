@@ -104,13 +104,15 @@ fn looks_like_device_output(data: Vec<u8>) -> bool {
 #[pyo3(signature = (ports=None, baud_rates=None, exclude_ports=None, timeout=None))]
 fn scan_serial_ports<'py>(
     py: Python<'py>,
-    ports: Option<Vec<String>>,
-    baud_rates: Option<Vec<u32>>,
+    #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
+    ports: Option<Bound<'_, PyAny>>,
+    #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.int]]", imports = ("typing", "builtins")))]
+    baud_rates: Option<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     exclude_ports: Option<Bound<'_, PyAny>>,
     timeout: Option<f64>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let mut port_list = match ports {
+    let mut port_list = match helpers::opt_strings(ports)? {
         Some(ports) => ports,
         None => {
             let usb: Vec<String> =
@@ -129,7 +131,8 @@ fn scan_serial_ports<'py>(
             .collect::<PyResult<_>>()?;
         port_list.retain(|p| !excluded.contains(p));
     }
-    let rates = baud_rates.unwrap_or_else(|| serial::BAUD_CANDIDATES.to_vec());
+    let rates = helpers::opt_u32(baud_rates)?
+        .unwrap_or_else(|| serial::BAUD_CANDIDATES.to_vec());
     if port_list.is_empty() {
         return spawn_future(py, async move {
             Python::attach(|py| {

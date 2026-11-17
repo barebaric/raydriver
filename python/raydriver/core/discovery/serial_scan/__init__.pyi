@@ -43,7 +43,7 @@ def looks_like_device_output(data: typing.Sequence[builtins.int]) -> builtins.bo
     garbage and fails this test.
     """
 
-def scan_serial_ports(ports: typing.Optional[typing.Sequence[builtins.str]] = None, baud_rates: typing.Optional[typing.Sequence[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None, timeout: typing.Optional[builtins.float] = None) -> typing.Any:
+def scan_serial_ports(ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None, timeout: typing.Optional[builtins.float] = None) -> typing.Any:
     r"""
     Probes every *port* at *baud_rates*, all ports in parallel, and
     returns one observation per port that produced device-like

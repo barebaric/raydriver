@@ -17,7 +17,7 @@ _rust_find_subnet_devices: typing.Any
 find_network_devices: typing.Any
 find_raydriver_devices: typing.Any
 find_serial_devices: typing.Any
-def find_all_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Sequence[builtins.str]] = None, baud_rates: typing.Optional[typing.Sequence[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
+def find_all_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
     r"""
     Runs every discovery channel concurrently and returns the merged,
     deduplicated results.
