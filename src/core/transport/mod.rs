@@ -48,6 +48,25 @@ pub trait Transport: Send + Sync {
     fn status_on_error(&self) -> TransportStatus {
         TransportStatus::Error
     }
+
+    /// True when the device accepts whole jobs instead of a streamed
+    /// G-code body (e.g. ESP3D uploads a file and starts execution
+    /// over HTTP).
+    fn supports_network_job(&self) -> bool {
+        false
+    }
+
+    /// Upload and start a complete G-code job.  Only implemented by
+    /// transports whose [`supports_network_job`](Self::supports_network_job)
+    /// returns true.
+    async fn run_network_job(
+        &self,
+        _gcode: &str,
+    ) -> Result<(), TransportError> {
+        Err(TransportError::Connection(
+            "the transport does not support network jobs".to_string(),
+        ))
+    }
 }
 
 /// Which physical transport to use.
@@ -57,9 +76,17 @@ pub trait Transport: Send + Sync {
 /// Python config parsing stay untouched.
 #[derive(Clone)]
 pub enum TransportKind {
-    Serial { port: String, baudrate: u32 },
-    Telnet { host: String, port: u16 },
+    Serial {
+        port: String,
+        baudrate: u32,
+    },
+    Telnet {
+        host: String,
+        port: u16,
+    },
     Mock(Arc<MockInner>),
+    /// A transport constructed by a protocol module (e.g. ESP3D).
+    Custom(Arc<dyn Transport>),
 }
 
 impl TransportKind {
@@ -73,6 +100,7 @@ impl TransportKind {
                 TelnetTransport::new(host, *port)
             }
             TransportKind::Mock(inner) => inner.clone(),
+            TransportKind::Custom(transport) => transport.clone(),
         }
     }
 }

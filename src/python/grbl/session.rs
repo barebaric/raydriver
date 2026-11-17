@@ -13,6 +13,7 @@ use crate::core::dialect::Dialect;
 use crate::core::session::SessionError;
 use crate::core::transport::TransportKind;
 use crate::core::types::UnitSystem;
+use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport, ProtocolVariant};
 use crate::grbl::session::{SessionConfig, SessionCore};
 
 use crate::python::core::mock::MockTransport;
@@ -150,6 +151,25 @@ pub(crate) fn transport_kind_from_config(
         ));
     };
     if let Some(host) = get_str(dict, "host")? {
+        if dict.get_item("http_port")?.is_some()
+            || dict.get_item("ws_port")?.is_some()
+        {
+            let mut esp3d = Esp3dConfig::new(&host);
+            esp3d.http_port = get_i64(dict, "http_port")?
+                .or(get_i64(dict, "port")?)
+                .unwrap_or(80) as u16;
+            esp3d.ws_port = get_i64(dict, "ws_port")?.unwrap_or(81) as u16;
+            esp3d.protocol = ProtocolVariant::from_name(
+                get_str(dict, "protocol")?.as_deref().unwrap_or_default(),
+            );
+            if let Some(timeout) = get_f64(dict, "request_timeout")? {
+                esp3d.request_timeout = timeout;
+            }
+            if let Some(timeout) = get_f64(dict, "connect_timeout")? {
+                esp3d.connect_timeout = timeout;
+            }
+            return Ok(TransportKind::Custom(Esp3dTransport::new(esp3d)));
+        }
         let port = get_i64(dict, "tcp_port")?.unwrap_or(23) as u16;
         return Ok(TransportKind::Telnet { host, port });
     }

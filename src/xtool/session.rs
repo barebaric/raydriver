@@ -12,13 +12,12 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::Dialect;
+use crate::core::http;
 use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
-
-use super::http;
-use super::ws::WsClient;
+use crate::core::ws::WsClient;
 
 /// Default HTTP (API) port of xTool machines.
 pub const DEFAULT_HTTP_PORT: u16 = 8080;

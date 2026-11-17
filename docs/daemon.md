@@ -66,9 +66,12 @@ raydriver list                       # configured devices + live state
 
 `add` upserts by serial port and creates the config with a
 generated token when none exists; `--protocol` is one of `grbl`,
-`grbl_simple`, `smoothie`, `marlin`. Configured sessions open at
-daemon start, so restart the daemon to apply changes. The config
-can also be edited by hand — see the reference below.
+`grbl_simple`, `smoothie`, `marlin`. ESP3D and FluidNC sessions are
+network-attached, so they are configured in `daemon.json` with a
+`host`, `http_port`, `ws_port` and optional `protocol` variant.
+Configured sessions open at daemon start, so restart the daemon to
+apply changes. The config can also be edited by hand — see the
+reference below.
 
 Manual systemd example (what `install` writes):
 

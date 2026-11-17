@@ -1,8 +1,8 @@
-//! Minimal HTTP/1.1 client for the xTool WiFi API.
+//! Minimal HTTP/1.1 client for device APIs.
 //!
 //! Hand-rolled over a tokio `TcpStream` so the crate stays free of
-//! an HTTP client dependency: the API this module serves is small
-//! and fixed (short JSON GET/POST replies, one multipart upload
+//! an HTTP client dependency: the APIs this module serves are small
+//! and fixed (short GET/POST replies and a multipart upload
 //! endpoint).  Requests are always sent with `Connection: close` and
 //! the response is read to EOF, which keeps the parser simple; both
 //! `Content-Length` and `Transfer-Encoding: chunked` bodies are
