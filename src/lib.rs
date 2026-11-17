@@ -7,6 +7,8 @@
 //!   types, dialect command-template formatting, the session
 //!   event/error primitives, and the transport-level discovery
 //!   scanners (serial capture, mDNS browse, subnet TCP scan).
+//! - [`esp3d`]: the ESP3D / FluidNC transport for GRBL over HTTP and
+//!   WebSocket.
 //! - [`grbl`]: the GRBL protocol stack (parsing, flow control, the
 //!   full session and the minimal ping-pong session).
 //! - [`smoothie`]: the Smoothieware session.
@@ -18,6 +20,7 @@
 //! provides bindings that mirror this structure.
 
 pub mod core;
+pub mod esp3d;
 pub mod grbl;
 pub mod marlin;
 pub mod smoothie;

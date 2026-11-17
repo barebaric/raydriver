@@ -114,6 +114,15 @@ PROTOCOLS: dict[str, ProtocolInfo] = {
         methods=COMMON_METHODS | _GRBL_EXTRA,
         properties=COMMON_PROPERTIES,
     ),
+    "esp3d": ProtocolInfo(
+        name="esp3d",
+        label="FluidNC / ESP3D",
+        dialect_family="grbl",
+        connection="network",
+        config_keys=("host", "http_port", "ws_port", "protocol"),
+        methods=COMMON_METHODS | _GRBL_EXTRA,
+        properties=COMMON_PROPERTIES,
+    ),
     "smoothie": ProtocolInfo(
         name="smoothie",
         label="Smoothieware",

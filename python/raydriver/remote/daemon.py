@@ -32,6 +32,7 @@ from raydriver.analyzer.listener import (
     validate_bind_policy,
 )
 from raydriver.core import SessionEvent, list_serial_ports
+from raydriver.esp3d import Esp3dSession
 from raydriver.grbl import GrblSession
 from raydriver.grbl.simple import GrblSimpleSession
 from raydriver.marlin import MarlinSession
@@ -51,6 +52,7 @@ AUTH_TIMEOUT = 10.0
 SESSION_CLASSES: dict[str, Any] = {
     "grbl": GrblSession,
     "grbl_simple": GrblSimpleSession,
+    "esp3d": Esp3dSession,
     "smoothie": SmoothieSession,
     "marlin": MarlinSession,
 }

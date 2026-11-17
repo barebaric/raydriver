@@ -1111,6 +1111,10 @@ impl SessionCore {
         op_estimates: Vec<f64>,
     ) {
         self.start_job().await;
+        if self.transport.supports_network_job() {
+            self.run_network_job(gcode, Some(&op_map)).await;
+            return;
+        }
         let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
         let core = self.clone();
         if let Err(err) = self
@@ -1134,7 +1138,71 @@ impl SessionCore {
         }
     }
 
+    async fn run_network_job(
+        self: &Arc<Self>,
+        gcode: &str,
+        op_map: Option<&HashMap<usize, i64>>,
+    ) {
+        // ESP3D gives no per-line acknowledgements during a job, so
+        // the old driver reports every op as done up front.
+        if let Some(op_map) = op_map {
+            let mut ops: Vec<i64> = op_map.values().copied().collect();
+            ops.sort_unstable();
+            ops.dedup();
+            for op in ops {
+                self.events.command_done(op);
+            }
+        }
+
+        let core = self.clone();
+        let gcode = gcode.to_string();
+        if let Err(err) = self
+            .run_streaming_job(async move {
+                if let Err(err) = core.transport.run_network_job(&gcode).await {
+                    if core.is_cancelled() {
+                        return;
+                    }
+                    log::warn!("Network job failed: {err}");
+                    let snapshot = {
+                        let mut state = core.state.lock().unwrap();
+                        if state.error.is_none() {
+                            state.error = Some(DeviceError::new(
+                                -1,
+                                "Job Error",
+                                &err.to_string(),
+                            ));
+                            Some(state.clone())
+                        } else {
+                            None
+                        }
+                    };
+                    if let Some(snapshot) = snapshot {
+                        core.events.state_changed(&snapshot);
+                    }
+                }
+            })
+            .await
+        {
+            log::error!("Network job task failed: {err}");
+        }
+
+        *self.raw_grbl_status.lock().unwrap() = DeviceStatus::Unknown;
+        self.job_running.store(false, Ordering::SeqCst);
+        self.is_holding.store(false, Ordering::SeqCst);
+        if !self.is_cancelled() {
+            self.events.job_finished();
+        }
+    }
+
     pub async fn run_raw(self: &Arc<Self>, machine_code: &str) {
+        if machine_code.trim().is_empty() {
+            return;
+        }
+        if self.transport.supports_network_job() {
+            self.start_job().await;
+            self.run_network_job(machine_code, None).await;
+            return;
+        }
         let lines: Vec<String> = machine_code
             .lines()
             .map(|l| l.trim().to_string())

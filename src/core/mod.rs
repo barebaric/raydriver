@@ -8,6 +8,8 @@
 
 pub mod dialect;
 pub mod discovery;
+pub mod http;
 pub mod session;
 pub mod transport;
 pub mod types;
+pub mod ws;

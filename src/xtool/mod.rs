@@ -17,7 +17,5 @@
 //! session supports state monitoring, motion and job control for jobs
 //! already staged on the machine; G-code job upload is not implemented.
 
-pub mod http;
 pub mod m2;
 pub mod session;
-pub mod ws;

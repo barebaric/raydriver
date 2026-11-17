@@ -7,8 +7,10 @@ Currently this provides a full port of Rayforge's advanced GRBL
 serial driver: character-counting flow control, handshake and status
 polling, interactive command queue, job streaming with stall detection
 and deadlock recovery, cancel/safety-shutdown semantics, settings and
-WCS access, and probe cycles. Dialects (command templates) remain data
-owned by Rayforge and are passed in resolved form.
+WCS access, and probe cycles. ESP3D/FluidNC controllers use the same
+GRBL session over an HTTP command endpoint and WebSocket response
+channel, with upload-and-execute jobs. Dialects (command templates)
+remain data owned by Rayforge and are passed in resolved form.
 
 ## CLI
 
@@ -54,8 +56,10 @@ discovers it automatically — no manual network setup.
 
 Defaults are GRBL at 115200 baud; for other firmware use
 `raydriver daemon add PORT --protocol smoothie --baudrate 115200`
-(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`).
-`raydriver daemon remove PORT` unconfigures a device.
+(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`; ESP3D and
+FluidNC sessions are configured in `daemon.json` with their host and
+HTTP/WebSocket ports). `raydriver daemon remove PORT` unconfigures a
+device.
 
 ### 2. Run the daemon
 

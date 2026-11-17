@@ -1,12 +1,12 @@
-//! Minimal RFC 6455 WebSocket client for the xTool notification
-//! channel.
+//! Minimal RFC 6455 WebSocket client for device notification
+//! channels.
 //!
-//! Hand-rolled over a tokio `TcpStream` (no TLS: xTool machines
-//! serve plain-text WebSocket on the LAN).  Only what the protocol
-//! needs is implemented: the opening handshake, unbounded server
-//! text messages, client-to-server frames sent masked, and
-//! ping/pong/close handling.  Outgoing data frames are never sent —
-//! the xTool WebSocket is a one-way notification channel.
+//! Hand-rolled over a tokio `TcpStream` (no TLS: the local device
+//! APIs it serves use plain-text WebSocket on the LAN).  Only what
+//! the protocols need is implemented: the opening handshake,
+//! unbounded server text messages, client-to-server control frames,
+//! and ping/pong/close handling.  Outgoing data frames are never
+//! sent — these WebSockets are one-way notification channels.
 
 use std::time::Duration;
 
