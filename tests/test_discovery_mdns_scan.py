@@ -104,3 +104,10 @@ async def test_scan_does_not_block_caller_loop(announced_service):
         _ticker(),
     )
     assert ticks == 5
+
+
+async def test_scan_accepts_set_of_service_types(announced_service):
+    """The network channel hands the declared types over as a set;
+    the scanner must accept any iterable, not just sequences."""
+    services = await scan_mdns_services({"_octoprint._tcp"}, 2.0)
+    assert any(s.name == "OctoPrint on octopi" for s in services)

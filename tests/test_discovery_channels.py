@@ -562,6 +562,37 @@ async def test_network_scan_failure_returns_empty(monkeypatch):
     assert await find_network_devices([FakeOctoPrintDriver]) == []
 
 
+@pytest.mark.asyncio
+async def test_network_devices_real_browse(monkeypatch):
+    """End to end without a scanner fake: the channel hands the
+    declared types to the real Rust browse as a set."""
+    zeroconf = pytest.importorskip("zeroconf")
+    from zeroconf.asyncio import AsyncZeroconf
+
+    from raydriver.core.discovery import mdns_scan
+
+    monkeypatch.setattr(
+        mdns_channel, "scan_mdns_services", mdns_scan.scan_mdns_services
+    )
+    service_type = "_octoprint._tcp.local."
+    info = zeroconf.ServiceInfo(
+        service_type,
+        f"OctoPrint on octopi.{service_type}",
+        port=80,
+        addresses=[b"\xc0\xa8\x01\x2a"],  # 192.168.1.42
+        server="octopi.local.",
+    )
+    aiozc = AsyncZeroconf()
+    await aiozc.async_register_service(info)
+    try:
+        devices = await find_network_devices([FakeOctoPrintDriver])
+    finally:
+        await aiozc.async_unregister_service(info)
+        await aiozc.async_close()
+    assert len(devices) == 1
+    assert devices[0].params == {"host": "192.168.1.42", "port": 80}
+
+
 # ----- fingerprint pass -------------------------------------------------
 
 

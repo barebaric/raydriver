@@ -38,7 +38,7 @@ def collect_serial_recognizers(driver_classes: typing.Sequence[typing.Any]) -> l
     serial recognizer with it.
     """
 
-def find_serial_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Sequence[builtins.str]] = None, baud_rates: typing.Optional[typing.Sequence[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
+def find_serial_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
     r"""
     Runs one serial scan and evaluates it against every declared
     serial recognizer. Like every channel, this never raises: failures

@@ -46,6 +46,39 @@ pub(crate) fn attach_submodule(
     Ok(())
 }
 
+/// Extracts an iterable of strings (list, set, tuple, ...).
+pub(crate) fn string_iter(value: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+    let mut out = Vec::new();
+    for item in value.try_iter()? {
+        out.push(item?.extract::<String>()?);
+    }
+    Ok(out)
+}
+
+/// Extracts an optional iterable of strings.
+pub(crate) fn opt_strings(
+    value: Option<Bound<'_, PyAny>>,
+) -> PyResult<Option<Vec<String>>> {
+    match value {
+        Some(v) => Ok(Some(string_iter(&v)?)),
+        None => Ok(None),
+    }
+}
+
+/// Extracts an optional iterable of integers.
+pub(crate) fn opt_u32(
+    value: Option<Bound<'_, PyAny>>,
+) -> PyResult<Option<Vec<u32>>> {
+    let Some(v) = value else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    for item in v.try_iter()? {
+        out.push(item?.extract::<u32>()?);
+    }
+    Ok(Some(out))
+}
+
 /// A collaborator attribute of a discovery submodule, resolved at
 /// call time so it can be monkeypatched.
 pub(crate) fn attr<'py>(

@@ -121,11 +121,13 @@ fn normalize_service_type(service_type: &str) -> String {
 #[gen_stub_pyfunction(module = "raydriver.core.discovery.mdns_scan")]
 #[pyfunction]
 #[pyo3(signature = (service_types, browse_window=2.0))]
-fn scan_mdns_services(
-    py: Python<'_>,
-    service_types: Vec<String>,
+fn scan_mdns_services<'py>(
+    py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Iterable[builtins.str]", imports = ("typing", "builtins")))]
+    service_types: &Bound<'_, PyAny>,
     browse_window: f64,
-) -> PyResult<Bound<'_, PyAny>> {
+) -> PyResult<Bound<'py, PyAny>> {
+    let service_types = helpers::string_iter(service_types)?;
     let normalized: Vec<String> = service_types
         .iter()
         .map(|t| mdns::normalize_service_type(t))
