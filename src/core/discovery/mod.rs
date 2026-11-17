@@ -9,6 +9,7 @@
 pub mod daemon;
 pub mod mdns;
 pub mod ports;
+pub mod probe;
 pub mod serial;
 pub mod subnet;
 pub mod tokens;
