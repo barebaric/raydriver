@@ -94,3 +94,50 @@ pub(crate) fn none_obj(py: Python<'_>) -> Py<PyAny> {
         .unbind()
         .into_any()
 }
+
+/// Turns a Python awaitable into a Rust future, so Rust async code
+/// can await driver-supplied coroutines (e.g. fingerprint probes).
+///
+/// The awaitable is wrapped in an asyncio task whose done callback
+/// hands the result (or exception) to a oneshot channel; the Rust
+/// side never blocks the event loop. Must be called from the loop
+/// thread.
+pub(crate) fn await_py(
+    py: Python<'_>,
+    awaitable: Bound<'_, PyAny>,
+) -> PyResult<impl Future<Output = PyResult<Py<PyAny>>> + Send> {
+    let asyncio = py.import("asyncio")?;
+    let task = asyncio.call_method1("ensure_future", (awaitable,))?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let tx = std::sync::Mutex::new(Some(tx));
+    let callback = pyo3::types::PyCFunction::new_closure(
+        py,
+        None,
+        None,
+        move |args: &Bound<'_, pyo3::types::PyTuple>,
+              _kwargs|
+              -> PyResult<Py<PyAny>> {
+            let py = args.py();
+            let task = args.get_item(0)?;
+            let outcome: PyResult<Py<PyAny>> = (|| {
+                let exc = task.call_method0("exception")?;
+                if !exc.is_none() {
+                    return Err(PyErr::from_value(exc));
+                }
+                Ok(task.call_method0("result")?.unbind())
+            })();
+            if let Some(tx) = tx.lock().unwrap().take() {
+                let _ = tx.send(outcome);
+            }
+            Ok(py.None())
+        },
+    )?;
+    task.call_method1("add_done_callback", (callback,))?;
+    Ok(async move {
+        rx.await.map_err(|_| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "discovery task dropped before completion",
+            )
+        })?
+    })
+}

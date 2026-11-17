@@ -6,7 +6,10 @@
 //! deciding which driver could talk to a device — lives with the
 //! embedding application's drivers, never here.
 
+pub mod daemon;
 pub mod mdns;
+pub mod ports;
 pub mod serial;
 pub mod subnet;
+pub mod tokens;
 pub mod types;

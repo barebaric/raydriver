@@ -1,6 +1,7 @@
 """Debug CLI: inspect devices, daemons and connections.
 
     raydriver scan [--network]   # local serial ports (+ daemons)
+    raydriver discover           # run the discovery engine
     raydriver info TARGET        # a serial port or a host:port daemon
     raydriver list               # configured devices + live state
     raydriver connection         # clients connected to the daemon
@@ -22,6 +23,14 @@ from urllib.parse import urlsplit
 
 from raydriver.cli.daemon import load_config
 from raydriver.core import list_serial_ports
+from raydriver.core.discovery import engine
+from raydriver.core.discovery.engine import find_all_devices
+from raydriver.core.discovery.serial_scan import looks_like_device_output
+from raydriver.core.discovery.spec import (
+    DiscoverySpec,
+    SerialRecognizer,
+    TcpRecognizer,
+)
 from raydriver.paths import default_config_path
 from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
@@ -69,6 +78,72 @@ def _port_line(port: dict[str, Any]) -> str:
     product = port.get("product") or ""
     maker = port.get("manufacturer") or ""
     return f"  {port['port']}  {vidpid}  {product}  {maker}".rstrip()
+
+
+def _first_informative_line(data: bytes) -> str | None:
+    for raw in data.decode("ascii", errors="replace").splitlines():
+        line = raw.strip()
+        if line and line != "ok":
+            return line[:80]
+    return None
+
+
+class _SerialProbeDriver:
+    """Generic serial declaration for ``discover``: any device-like
+    output counts; the first informative line becomes the banner."""
+
+    label = "Serial device"
+    DISCOVERY = DiscoverySpec(
+        serial=SerialRecognizer(
+            label=lambda: "Serial device",
+            matches=looks_like_device_output,
+            name=_first_informative_line,
+        )
+    )
+
+
+async def cmd_discover(args: argparse.Namespace) -> int:
+    if args.timeout is not None:
+        engine.SUBNET_SCAN_TIMEOUT = args.timeout
+    drivers: list[type] = [_SerialProbeDriver]
+    if args.tcp is not None:
+        drivers.append(
+            type(
+                "TcpProbeDriver",
+                (),
+                {
+                    "label": "TCP device",
+                    "DISCOVERY": DiscoverySpec(
+                        tcp=TcpRecognizer(
+                            port=args.tcp,
+                            probe_command=args.probe,
+                            match_prefix=args.match,
+                        )
+                    ),
+                },
+            )
+        )
+    devices = await find_all_devices(
+        drivers, ports=args.ports, baud_rates=args.baud
+    )
+    rows = ["Discovered devices:"]
+    if not devices:
+        rows.append("  (none found)")
+    for device in devices:
+        rows.append(f"  {device.label}  {device.detail}  [{device.key}]")
+    data = [
+        {
+            "driver": d.driver_name,
+            "label": d.label,
+            "detail": d.detail,
+            "key": d.key,
+            "params": d.params,
+            "banner": d.identity.banner,
+        }
+        for d in devices
+    ]
+    _emit(args, data, rows)
+    return 0
 
 
 async def cmd_scan(args: argparse.Namespace) -> int:
@@ -262,6 +337,45 @@ def add_debug_parser(subparsers) -> None:
         "--json", action="store_true", help="machine-readable output"
     )
     scan.set_defaults(func=cmd_scan)
+
+    discover = subparsers.add_parser(
+        "discover",
+        help="run device discovery (serial capture, mDNS, subnet)",
+    )
+    discover.add_argument(
+        "--ports",
+        nargs="*",
+        help="serial ports to probe (default: all USB ports)",
+    )
+    discover.add_argument(
+        "--baud",
+        nargs="*",
+        type=int,
+        help="baud rates to try (default: 115200 57600 9600)",
+    )
+    discover.add_argument(
+        "--tcp",
+        type=int,
+        metavar="PORT",
+        help="also probe this TCP port on the local subnets",
+    )
+    discover.add_argument(
+        "--probe",
+        help="command sent to confirm firmware on --tcp listeners",
+    )
+    discover.add_argument(
+        "--match",
+        help="response-line prefix identifying the firmware",
+    )
+    discover.add_argument(
+        "--timeout",
+        type=float,
+        help="subnet scan budget in seconds (default: 30)",
+    )
+    discover.add_argument(
+        "--json", action="store_true", help="machine-readable output"
+    )
+    discover.set_defaults(func=cmd_discover)
 
     info = subparsers.add_parser(
         "info", help="show a serial port or a daemon (host:port)"
