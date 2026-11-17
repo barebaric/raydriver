@@ -244,8 +244,10 @@ impl Transport for Esp3dTransport {
         self.is_open.store(false, Ordering::SeqCst);
         let task = self.ws_task.lock().unwrap().take();
         if let Some(task) = task {
+            // Dropping the aborted task closes the WebSocket halves;
+            // waiting for it can block on Windows if the peer has not
+            // acknowledged the close yet.
             task.abort();
-            let _ = task.await;
         }
     }
 

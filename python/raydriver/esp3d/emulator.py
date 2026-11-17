@@ -92,15 +92,18 @@ class Esp3dEmulator:
         # connections to finish.
         for writer in list(self._clients):
             writer.close()
-            try:
-                await writer.wait_closed()
-            except (ConnectionError, OSError):
-                pass
         self._clients.clear()
         for server in self._servers:
             server.close()
-        for server in self._servers:
-            await server.wait_closed()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *(server.wait_closed() for server in self._servers)
+                ),
+                timeout=2.0,
+            )
+        except asyncio.TimeoutError:
+            pass
         self._servers.clear()
 
     def broadcast(self, line):
