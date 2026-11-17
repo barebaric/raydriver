@@ -173,7 +173,10 @@ class TestCommands:
         session, emulator, _ = rig
         await session.set_hold(True)
         await session.set_hold(False)
-        assert emulator.commands[-2:] == ["!", "~"]
+        # Status polls ("?") may interleave with realtime commands.
+        assert "!" in emulator.commands
+        assert "~" in emulator.commands
+        assert emulator.commands.index("!") < emulator.commands.index("~")
 
     async def test_raw_lines_are_forwarded(self, rig):
         session, emulator, events = rig

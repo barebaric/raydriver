@@ -287,14 +287,15 @@ class Esp3dEmulator:
         writer.write(bytes(header) + payload)
         await writer.drain()
 
+    async def _send_broadcast(self, writer, line):
+        try:
+            await self._send_frame(writer, 0x1, line.encode())
+        except (ConnectionError, OSError):
+            self._clients.discard(writer)
+
     def _broadcast(self, line):
         for writer in list(self._clients):
-            try:
-                asyncio.ensure_future(
-                    self._send_frame(writer, 0x1, line.encode())
-                )
-            except ConnectionError:
-                self._clients.discard(writer)
+            asyncio.ensure_future(self._send_broadcast(writer, line))
 
     @staticmethod
     def _parse_multipart(headers, body):
