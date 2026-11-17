@@ -39,7 +39,7 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 type SocketWriter = futures_util::stream::SplitSink<Socket, Message>;
 
 #[derive(Clone)]
-pub struct XtoolM2Config {
+pub struct M2Config {
     pub host: String,
     pub port: u16,
     pub request_timeout: f64,
@@ -49,7 +49,7 @@ pub struct XtoolM2Config {
     pub tls_allow_invalid_certs: bool,
 }
 
-impl XtoolM2Config {
+impl M2Config {
     pub fn new(host: &str) -> Self {
         Self {
             host: host.to_string(),
@@ -67,8 +67,8 @@ impl XtoolM2Config {
     }
 }
 
-pub struct XtoolM2Core {
-    config: XtoolM2Config,
+pub struct M2Core {
+    config: M2Config,
     events: Arc<dyn SessionEvents>,
     state: Arc<Mutex<DeviceState>>,
     keep_running: AtomicBool,
@@ -76,11 +76,8 @@ pub struct XtoolM2Core {
     connection_task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl XtoolM2Core {
-    pub fn new(
-        config: XtoolM2Config,
-        events: Arc<dyn SessionEvents>,
-    ) -> Arc<Self> {
+impl M2Core {
+    pub fn new(config: M2Config, events: Arc<dyn SessionEvents>) -> Arc<Self> {
         Arc::new(Self {
             config,
             events,
@@ -188,15 +185,13 @@ impl XtoolM2Core {
             }
             *self.connection.lock().await = None;
             self.set_connection_status(TransportStatus::Sleeping, None);
-            tokio::time::sleep(XtoolM2Config::secs(
-                self.config.reconnect_delay,
-            ))
-            .await;
+            tokio::time::sleep(M2Config::secs(self.config.reconnect_delay))
+                .await;
         }
     }
 
     async fn run_connected(self: &Arc<Self>, conn: Arc<M2Connection>) {
-        let mut interval = tokio::time::interval(XtoolM2Config::secs(
+        let mut interval = tokio::time::interval(M2Config::secs(
             self.config.poll_interval.max(0.05),
         ));
         loop {
@@ -243,7 +238,7 @@ impl XtoolM2Core {
                 "/v1/platform/device/state/sync",
                 json!({}),
                 json!({}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await?;
         if let Some(mode) = snapshot_mode(&snapshot) {
@@ -255,7 +250,7 @@ impl XtoolM2Core {
                 "/v1/project/device/coordinate",
                 json!({}),
                 json!({}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await
         {
@@ -295,7 +290,7 @@ impl XtoolM2Core {
                 "/v1/project/device/control",
                 json!({"action": action}),
                 json!({}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await?;
         Ok(())
@@ -321,7 +316,7 @@ impl XtoolM2Core {
                 "/v1/project/control/home",
                 json!({"axis": "ALL"}),
                 json!({}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await?;
         Ok(())
@@ -340,7 +335,7 @@ impl XtoolM2Core {
                 "/v1/project/control/absolute-move",
                 json!({}),
                 json!({"coor": {"x": x, "y": y}, "speed": speed}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await?;
         Ok(())
@@ -360,7 +355,7 @@ impl XtoolM2Core {
                 "/v1/project/control/relative-move",
                 json!({}),
                 json!({"dx": dx, "dy": dy, "dz": dz, "speed": speed}),
-                XtoolM2Config::secs(self.config.request_timeout),
+                M2Config::secs(self.config.request_timeout),
             )
             .await?;
         Ok(())
@@ -379,7 +374,7 @@ struct M2Connection {
 
 impl M2Connection {
     async fn connect(
-        config: &XtoolM2Config,
+        config: &M2Config,
         events: Arc<dyn SessionEvents>,
         state: Arc<Mutex<DeviceState>>,
     ) -> Result<Arc<Self>, SessionError> {
@@ -404,7 +399,7 @@ impl M2Connection {
             None
         };
         let (socket, _) = timeout(
-            XtoolM2Config::secs(config.connect_timeout),
+            M2Config::secs(config.connect_timeout),
             connect_async_tls_with_config(request, None, false, connector),
         )
         .await

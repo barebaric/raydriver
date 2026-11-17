@@ -40,7 +40,7 @@ def decode_protocol_frame(frame):
     return json.loads(payload)
 
 
-class XtoolM2Emulator:
+class M2Emulator:
     """Emulate the M2 WS-V2 instruction channel for offline testing."""
 
     def __init__(self, ssl_context):

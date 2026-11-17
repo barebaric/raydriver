@@ -8,13 +8,13 @@ use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
 use crate::python::pyfuture::{none_obj, spawn_future};
-use crate::xtool::m2::{XtoolM2Config, XtoolM2Core};
+use crate::xtool::m2::session::{M2Config, M2Core};
 
-fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolM2Config> {
+fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
     let host = dict
         .and_then(|dict| get_str(dict, "host").ok().flatten())
         .unwrap_or_default();
-    let mut config = XtoolM2Config::new(&host);
+    let mut config = M2Config::new(&host);
     let Some(dict) = dict else {
         return Ok(config);
     };
@@ -44,23 +44,23 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolM2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(module = "raydriver.xtool")]
-pub struct XtoolM2Session {
-    core: Arc<XtoolM2Core>,
+#[pyclass(module = "raydriver.xtool.m2")]
+pub struct M2Session {
+    core: Arc<M2Core>,
     events: Arc<PyEvents>,
 }
 
-impl XtoolM2Session {
-    fn build(config: XtoolM2Config, event_callback: Option<Py<PyAny>>) -> Self {
+impl M2Session {
+    fn build(config: M2Config, event_callback: Option<Py<PyAny>>) -> Self {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = XtoolM2Core::new(config, events.clone());
+        let core = M2Core::new(config, events.clone());
         Self { core, events }
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl XtoolM2Session {
+impl M2Session {
     #[new]
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
@@ -188,14 +188,14 @@ impl XtoolM2Session {
 
     fn __repr__(&self) -> String {
         format!(
-            "XtoolM2Session(resource_uri={:?}, job_running={})",
+            "M2Session(resource_uri={:?}, job_running={})",
             self.core.resource_uri(),
             self.core.is_job_running(),
         )
     }
 }
 
-impl Drop for XtoolM2Session {
+impl Drop for M2Session {
     fn drop(&mut self) {
         self.core.abort_background_tasks_now();
     }

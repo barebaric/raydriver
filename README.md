@@ -199,7 +199,7 @@ asyncio.run(main())
 
 ### xTool M2
 
-`XtoolM2Session` connects to the M2's WS-V2 service for state
+`M2Session` connects to the M2's WS-V2 service for state
 monitoring, homing, motion and control of a job already staged on the
 machine. It does not upload or stream G-code jobs; use xTool Studio to
 stage those. M2 support uses a reverse-engineered local protocol and
@@ -213,7 +213,7 @@ the host:
 ```python
 import asyncio
 from raydriver.core import SessionEvent
-from raydriver.xtool import XtoolM2Session
+from raydriver.xtool.m2 import M2Session
 
 async def main():
     connected = asyncio.Event()
@@ -225,7 +225,7 @@ async def main():
         ):
             connected.set()
 
-    session = XtoolM2Session(
+    session = M2Session(
         config={
             "host": "192.168.1.50",
             "tls_allow_invalid_certs": True,
