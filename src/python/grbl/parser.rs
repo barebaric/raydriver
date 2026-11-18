@@ -74,6 +74,13 @@ fn parse_msg(line: &str) -> Option<(String, String)> {
     parser::parse_msg(line)
 }
 
+/// Parse a grblHAL `[BOARD:...]` build-info line.
+#[gen_stub_pyfunction(module = "raydriver.grbl.parser")]
+#[pyfunction]
+fn parse_board(line: &str) -> Option<String> {
+    parser::parse_board(line)
+}
+
 /// Extract a human-readable device name from build info lines.
 #[gen_stub_pyfunction(module = "raydriver.grbl.parser")]
 #[pyfunction]
@@ -211,6 +218,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "parse_opt_info",
             "parse_opt_flags",
             "parse_msg",
+            "parse_board",
             "extract_device_name",
             "extract_device_name_from_output",
             "is_grbl_output",
@@ -235,6 +243,7 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(pyo3::wrap_pyfunction!(parse_opt_info, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(parse_opt_flags, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(parse_msg, m.clone())?)?;
+    m.add_function(pyo3::wrap_pyfunction!(parse_board, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(extract_device_name, m.clone())?)?;
     m.add_function(pyo3::wrap_pyfunction!(
         extract_device_name_from_output,

@@ -16,6 +16,7 @@ __all__ = [
     "gcode_to_p_number",
     "is_grbl_output",
     "is_report_in_inches",
+    "parse_board",
     "parse_grbl_parser_state",
     "parse_grbl_settings",
     "parse_msg",
@@ -71,6 +72,11 @@ def is_grbl_output(data: typing.Sequence[builtins.int]) -> builtins.bool:
 def is_report_in_inches(settings_lines: typing.Sequence[builtins.str]) -> builtins.bool:
     r"""
     True when the `$13` (Report in inches) flag is set.
+    """
+
+def parse_board(line: builtins.str) -> typing.Optional[builtins.str]:
+    r"""
+    Parse a grblHAL `[BOARD:...]` build-info line.
     """
 
 def parse_grbl_parser_state(response_lines: typing.Sequence[builtins.str]) -> typing.Optional[builtins.str]:
