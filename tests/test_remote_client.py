@@ -75,6 +75,22 @@ def make_proxy(port, events, **extra):
     return create_session("grbl", config, DEFAULT_DIALECT, events.callback)
 
 
+async def connect_and_wait(session, events, timeout=10.0):
+    """Connect and wait for the device handshake to finish.
+
+    ``connect()`` only starts the connection loop; the transport is
+    opened and the handshake performed asynchronously afterwards.
+    Issuing a command before ``CONNECTED`` races that loop and fails
+    with "Serial transport not connected" on slow runners.
+    """
+    await session.connect()
+    await events.wait_for(
+        SessionEvent.ConnectionStatusChanged,
+        lambda event: event.status == "CONNECTED",
+        timeout=timeout,
+    )
+
+
 def test_factory_routes_local():
     session = create_session(
         "grbl", {"port": "/dev/ttyUSB0"}, DEFAULT_DIALECT, None
@@ -116,11 +132,7 @@ async def test_connect_and_interactive_command(remote_rig):
     events = EventRecorder()
     proxy = make_proxy(port, events)
     try:
-        await proxy.connect()
-        await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
-            lambda event: event.status == "CONNECTED",
-        )
+        await connect_and_wait(proxy, events)
         lines = await proxy.execute_interactive_command("$I")
         assert any("VER:" in line for line in lines)
         assert proxy.resource_uri is None or isinstance(
@@ -150,8 +162,8 @@ async def test_run_progress_parity(remote_rig):
     gcode = job_gcode(8)
     op_map = {i: i for i in range(8)}
     try:
-        await local.connect()
-        await proxy.connect()
+        await connect_and_wait(local, local_events)
+        await connect_and_wait(proxy, remote_events)
         await local.run(
             gcode,
             op_line_map=op_map,
@@ -191,13 +203,18 @@ async def test_read_settings_parity(remote_rig):
     local_mock = MockTransport()
     local_emulator = GrblEmulator(local_mock, speed_factor=10)
     local_task = asyncio.ensure_future(local_emulator.run())
+    local_events = EventRecorder()
     local = GrblSession.with_transport(
-        local_mock, config=FAST_TIMINGS, dialect=DEFAULT_DIALECT
+        local_mock,
+        config=FAST_TIMINGS,
+        dialect=DEFAULT_DIALECT,
+        event_callback=local_events.callback,
     )
-    proxy = make_proxy(port, EventRecorder())
+    remote_events = EventRecorder()
+    proxy = make_proxy(port, remote_events)
     try:
-        await local.connect()
-        await proxy.connect()
+        await connect_and_wait(local, local_events)
+        await connect_and_wait(proxy, remote_events)
         local_settings = [list(pair) for pair in await local.read_settings()]
         remote_settings = [list(pair) for pair in await proxy.read_settings()]
         assert local_settings == remote_settings
@@ -216,7 +233,7 @@ async def test_disconnect_sleeping_and_reattach(remote_rig):
     events = EventRecorder()
     proxy = make_proxy(port, events)
     try:
-        await proxy.connect()
+        await connect_and_wait(proxy, events)
         run_task = asyncio.ensure_future(
             proxy.run(job_gcode(40), op_line_map={i: i for i in range(40)})
         )
@@ -241,7 +258,7 @@ async def test_cancel_stops_job(remote_rig):
     events = EventRecorder()
     proxy = make_proxy(port, events)
     try:
-        await proxy.connect()
+        await connect_and_wait(proxy, events)
         run_task = asyncio.ensure_future(
             proxy.run(job_gcode(60), op_line_map={i: i for i in range(60)})
         )
@@ -255,9 +272,10 @@ async def test_cancel_stops_job(remote_rig):
 
 async def test_update_dialect_is_synchronous(remote_rig):
     port, mock = remote_rig
-    proxy = make_proxy(port, EventRecorder())
+    events = EventRecorder()
+    proxy = make_proxy(port, events)
     try:
-        await proxy.connect()
+        await connect_and_wait(proxy, events)
         result = proxy.update_dialect({**DEFAULT_DIALECT})
         assert result is None
         lines = await proxy.execute_interactive_command("$I")
@@ -299,7 +317,7 @@ async def test_token_loopback_without_tls():
     events = EventRecorder()
     proxy = make_proxy(server_port(server), events, token="secret")
     try:
-        await proxy.connect()
+        await connect_and_wait(proxy, events)
         lines = await proxy.execute_interactive_command("$I")
         assert any("VER:" in line for line in lines)
     finally:
@@ -345,7 +363,7 @@ async def test_tls_token_roundtrip():
         tls_hostname="localhost",
     )
     try:
-        await proxy.connect()
+        await connect_and_wait(proxy, events)
         lines = await proxy.execute_interactive_command("$I")
         assert any("VER:" in line for line in lines)
     finally:
