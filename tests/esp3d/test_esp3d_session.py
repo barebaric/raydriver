@@ -8,7 +8,7 @@ import pytest
 
 from raydriver.core import SessionEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.esp3d import Esp3dSession
+from raydriver.esp3d import Esp3dConfig, Esp3dSession
 from raydriver.esp3d.emulator import Esp3dEmulator
 
 FAST_CONFIG = {
@@ -76,8 +76,9 @@ async def wait_until(predicate, timeout=5.0, interval=0.01):
 
 
 def make_session(events, config=None, dialect=None):
+    merged = {**FAST_CONFIG, **(config or {})}
     return Esp3dSession(
-        config={**FAST_CONFIG, **(config or {})},
+        config=Esp3dConfig(**merged),
         dialect={**DIALECT, **(dialect or {})},
         event_callback=events.callback,
     )

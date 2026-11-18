@@ -7,6 +7,7 @@ XtoolSession supports D-series G-code jobs over the HTTP API. M2Session is avail
 
 import builtins
 import collections.abc
+from raydriver import config
 from raydriver import core
 from raydriver.core import types
 import typing
@@ -35,7 +36,7 @@ class XtoolSession:
     def is_job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> XtoolSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> XtoolSession: ...
     def connect(self) -> typing.Any:
         r"""
         Open the connection and start the background tasks.

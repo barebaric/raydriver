@@ -5,6 +5,7 @@ WebSocket response channel; jobs are uploaded and executed instead of
 being streamed line by line.
 """
 
+from raydriver.config import Esp3dConfig
 from raydriver.grbl import GrblSession as Esp3dSession
 
-__all__ = ["Esp3dSession"]
+__all__ = ["Esp3dConfig", "Esp3dSession"]

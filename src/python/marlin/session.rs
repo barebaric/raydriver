@@ -71,7 +71,12 @@ impl MarlinSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
-        config: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            imports = ("typing", "raydriver.config")
+        ))]
+        config: Option<Bound<'_, PyAny>>,
+
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
@@ -79,6 +84,7 @@ impl MarlinSession {
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = transport_kind_from_config(config.as_ref())?;
         let session_config = build_marlin_config(kind, config.as_ref())?;
         Self::build(session_config, dialect, event_callback)
@@ -89,7 +95,12 @@ impl MarlinSession {
     #[pyo3(signature = (transport, config=None, dialect=None, event_callback=None))]
     fn with_transport(
         transport: PyRef<'_, crate::python::core::mock::MockTransport>,
-        config: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            imports = ("typing", "raydriver.config")
+        ))]
+        config: Option<Bound<'_, PyAny>>,
+
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
@@ -97,6 +108,7 @@ impl MarlinSession {
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = TransportKind::Mock(transport.inner.clone());
         let session_config = build_marlin_config(kind, config.as_ref())?;
         Self::build(session_config, dialect, event_callback)
