@@ -28,6 +28,15 @@ While a job runs, `raydriver run` shows acknowledged lines, a
 progress bar, the device state, machine position, feed rate and ETA;
 `Ctrl-C` cancels the job and runs the safety shutdown.
 
+## API reference
+
+The Python API reference under [docs/api](docs/api) is generated from
+the `.pyi` type stubs. Regenerate it after changing the Rust bindings:
+
+```bash
+make docs
+```
+
 ## Daemon (remote sessions)
 
 The daemon runs the driver next to the hardware — e.g. on a

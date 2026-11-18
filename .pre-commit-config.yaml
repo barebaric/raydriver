@@ -11,7 +11,7 @@ repos:
     hooks:
       - id: pyright
         name: pyright
-        entry: npx --yes pyright python/raydriver tests
+        entry: npx --yes pyright python/raydriver tests tools
         language: system
         pass_filenames: false
-        files: ^(python/.*\.pyi?|tests/.*\.py|src/.*\.rs)$
+        files: ^(python/.*\.pyi?|tests/.*\.py|tools/.*\.py|src/.*\.rs)$

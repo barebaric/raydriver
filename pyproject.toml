@@ -27,6 +27,11 @@ test = [
     "pytest-asyncio",
     "pytest-timeout",
 ]
+docs = [
+    "mdformat",
+    "mdformat-frontmatter",
+    "mdformat-tables",
+]
 
 [project.scripts]
 raydriver = "raydriver.cli.main:main"
