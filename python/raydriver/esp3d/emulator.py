@@ -67,6 +67,7 @@ class Esp3dEmulator:
         self.commands = []
         self.uploaded = None
         self.started_files = []
+        self.status_line = STATUS_IDLE
         self._clients = set()
         self._servers = []
         self._job_task = None
@@ -108,6 +109,11 @@ class Esp3dEmulator:
 
     def broadcast(self, line):
         self._broadcast(line)
+
+    def set_status(self, line):
+        """Set the status reported for ``?`` polls and broadcast it."""
+        self.status_line = line
+        self.broadcast(line)
 
     # -------------------------------------------------------------
     # HTTP
@@ -184,7 +190,7 @@ class Esp3dEmulator:
             return
         self.commands.append(command)
         if command == "?":
-            self.broadcast(STATUS_IDLE)
+            self.broadcast(self.status_line)
             return
         if command.startswith("[ESP220]"):
             filename = command.removeprefix("[ESP220]").lstrip("/")
@@ -209,11 +215,11 @@ class Esp3dEmulator:
     def _start_job(self):
         if self._job_task is not None:
             self._job_task.cancel()
-        self.broadcast(STATUS_RUN)
+        self.set_status(STATUS_RUN)
 
         async def _job():
             await asyncio.sleep(self.job_duration)
-            self.broadcast(STATUS_IDLE)
+            self.set_status(STATUS_IDLE)
 
         self._job_task = asyncio.ensure_future(_job())
 

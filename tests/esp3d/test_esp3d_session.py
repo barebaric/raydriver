@@ -65,16 +65,6 @@ class EventRecorder:
         )
 
 
-async def wait_until(predicate, timeout=5.0, interval=0.01):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        result = predicate()
-        if result:
-            return result
-        await asyncio.sleep(interval)
-    raise AssertionError(f"condition not met within {timeout:.1f}s")
-
-
 def make_session(events, config=None, dialect=None):
     merged = {**FAST_CONFIG, **(config or {})}
     return Esp3dSession(
@@ -189,10 +179,13 @@ class TestCommands:
 
 class TestStateAndSettings:
     async def test_status_report_drives_state(self, rig):
-        session, emulator, _ = rig
-        emulator.broadcast("<Run|MPos:1.000,2.000,3.000|FS:100,0>")
-        await wait_until(lambda: session.state.status == DeviceStatus.RUN)
-        assert list(session.state.machine_pos) == [1.0, 2.0, 3.0]
+        _, emulator, events = rig
+        emulator.set_status("<Run|MPos:1.000,2.000,3.000|FS:100,0>")
+        event = await events.wait_for(
+            SessionEvent.StateChanged,
+            lambda e: e.state.status == DeviceStatus.RUN,
+        )
+        assert list(event.state.machine_pos) == [1.0, 2.0, 3.0]
 
     async def test_read_settings(self, rig):
         session, _, _ = rig

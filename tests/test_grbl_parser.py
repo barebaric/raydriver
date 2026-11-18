@@ -12,6 +12,7 @@ from raydriver.grbl.parser import (
     gcode_to_p_number,
     is_grbl_output,
     is_report_in_inches,
+    parse_board,
     parse_grbl_parser_state,
     parse_grbl_settings,
     parse_msg,
@@ -163,12 +164,31 @@ class TestDeviceName:
         lines = ["[MSG:mechine:Ortur]"]
         assert extract_device_name(lines) == "Ortur"
 
+    def test_board_line(self):
+        lines = ["[BOARD:A1 Pro Laser Master]"]
+        assert extract_device_name(lines) == "A1 Pro Laser Master"
+
+    def test_board_precedes_ver(self):
+        lines = ["[BOARD:A1 Pro Laser Master]", "[VER:1.1h.ORTUR:]"]
+        assert extract_device_name(lines) == "A1 Pro Laser Master"
+
+    def test_machine_msg_precedes_board(self):
+        lines = ["[BOARD:A1 Pro Laser Master]", "[MSG:machine:Ortur]"]
+        assert extract_device_name(lines) == "Ortur"
+
     def test_ver_build_name(self):
         lines = ["[VER:1.1h.ORTUR:]"]
         assert extract_device_name(lines) == "ORTUR"
 
     def test_unknown(self):
         assert extract_device_name(["[VER:1.1h:]"]) == "Unknown Grbl Device"
+
+    def test_parse_board(self):
+        assert parse_board("[BOARD:A1 Pro Laser Master]") == (
+            "A1 Pro Laser Master"
+        )
+        assert parse_board("[BOARD: ]") is None
+        assert parse_board("[VER:1.1h:]") is None
 
     def test_from_output_banner_fallback(self):
         assert (

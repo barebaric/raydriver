@@ -181,10 +181,22 @@ pub fn parse_msg(line: &str) -> Option<(String, String)> {
     Some((key.trim().to_string(), value.trim().to_string()))
 }
 
+/// Parse a grblHAL `[BOARD:...]` build-info line.
+pub fn parse_board(line: &str) -> Option<String> {
+    let content = line.strip_prefix("[BOARD:")?;
+    let board = content.strip_suffix(']').unwrap_or(content).trim();
+    if board.is_empty() {
+        None
+    } else {
+        Some(board.to_string())
+    }
+}
+
 /// Extract a human-readable device name from build info lines.
 ///
-/// Checks `[MSG:machine:...]` lines first, then falls back to the
-/// VER line's build-info field (e.g. `[VER:1.1h.ORTUR:]` → `ORTUR`).
+/// Checks `[MSG:machine:...]` lines first, then grblHAL's
+/// `[BOARD:...]` line, and finally falls back to the VER line's
+/// build-info field (e.g. `[VER:1.1h.ORTUR:]` → `ORTUR`).
 pub fn extract_device_name(build_info: &[String]) -> String {
     for line in build_info {
         if let Some((key, value)) = parse_msg(line) {
@@ -192,6 +204,11 @@ pub fn extract_device_name(build_info: &[String]) -> String {
             if key == "machine" || key == "mechine" {
                 return value;
             }
+        }
+    }
+    for line in build_info {
+        if let Some(board) = parse_board(line) {
+            return board;
         }
     }
     for line in build_info {
