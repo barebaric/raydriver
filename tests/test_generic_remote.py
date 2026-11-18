@@ -6,7 +6,9 @@ import asyncio
 
 import pytest
 import pytest_asyncio
+from conftest import EventRecorder
 
+from raydriver.core import SessionEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -23,6 +25,22 @@ FAST_TIMINGS = {
     "poll_response_interval": 0.01,
     "poll_response_attempts": 10,
 }
+
+
+async def connect_and_wait(session, events, timeout=10.0):
+    """Connect and wait for the device handshake to finish.
+
+    ``connect()`` only starts the connection loop; the transport is
+    opened and the handshake performed asynchronously afterwards.
+    Issuing a command before ``CONNECTED`` races that loop and fails
+    with "Serial transport not connected" on slow runners.
+    """
+    await asyncio.wait_for(session.connect(), timeout=timeout)
+    await events.wait_for(
+        SessionEvent.ConnectionStatusChanged,
+        lambda event: event.status == "CONNECTED",
+        timeout=timeout,
+    )
 
 
 def test_registry_capabilities():
@@ -108,14 +126,16 @@ async def test_device_list_includes_configured(rig):
 
 async def test_open_by_device_resolves_protocol(rig):
     _, port = rig
+    events = EventRecorder()
     session = open_session(
         {"remote_host": "127.0.0.1", "remote_port": port},
         device="/dev/ttyUSB0",
         dialect={},
+        event_callback=events.callback,
     )
     assert session.protocol is None
     try:
-        await asyncio.wait_for(session.connect(), timeout=10)
+        await connect_and_wait(session, events)
         assert session.protocol == "grbl"
         assert session.metadata is not None
         assert session.metadata["dialect_family"] == "grbl"
@@ -132,13 +152,25 @@ async def test_disconnect_releases_control_lease(rig):
     # (the machine) must then be able to take control of the device.
     _, port = rig
     endpoint = {"remote_host": "127.0.0.1", "remote_port": port}
-    first = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
-    await asyncio.wait_for(first.connect(), timeout=10)
+    first_events = EventRecorder()
+    first = open_session(
+        endpoint,
+        device="/dev/ttyUSB0",
+        dialect={},
+        event_callback=first_events.callback,
+    )
+    await connect_and_wait(first, first_events)
     await first.disconnect()
 
-    second = open_session(endpoint, device="/dev/ttyUSB0", dialect={})
+    second_events = EventRecorder()
+    second = open_session(
+        endpoint,
+        device="/dev/ttyUSB0",
+        dialect={},
+        event_callback=second_events.callback,
+    )
     try:
-        await asyncio.wait_for(second.connect(), timeout=10)
+        await connect_and_wait(second, second_events)
         reply = await asyncio.wait_for(
             second.execute_interactive_command("$I"), timeout=10
         )
