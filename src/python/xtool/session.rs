@@ -83,7 +83,12 @@ impl XtoolSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
-        config: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            imports = ("typing", "raydriver.config")
+        ))]
+        config: Option<Bound<'_, PyAny>>,
+
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
@@ -91,6 +96,7 @@ impl XtoolSession {
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        let config = crate::python::config::config_dict(config.as_ref())?;
         let config = build_config(config.as_ref())?;
         let dialect = parse_dialect(dialect.as_ref())?;
         Self::build(config, dialect, event_callback)

@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from raydriver.analyzer.listener import is_loopback, make_client_ssl_context
+from raydriver.config import RemoteEndpoint, SessionConfig
 from raydriver.core import SessionEvent
 from raydriver.core.types import DeviceState
 from raydriver.protocols import protocol_info
@@ -36,6 +38,17 @@ REMOTE_KEYS = (
     "tls_hostname",
     "url",
 )
+
+
+def _config_dict(
+    config: SessionConfig | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """Normalize a typed config or mapping to the wire mapping."""
+    if config is None:
+        return {}
+    if isinstance(config, SessionConfig):
+        return config.to_dict()
+    return dict(config)
 
 
 def _remote_endpoint(config: dict[str, Any]) -> dict[str, Any] | None:
@@ -67,7 +80,7 @@ def _remote_endpoint(config: dict[str, Any]) -> dict[str, Any] | None:
 
 def create_session(
     protocol_name: str,
-    config: dict[str, Any] | None,
+    config: SessionConfig | Mapping[str, Any] | None,
     dialect: dict[str, Any] | None,
     event_callback: Callable[[Any], None] | None,
 ) -> Any:
@@ -78,7 +91,7 @@ def create_session(
     a single ``url`` (``raydriver://host:port#token``). Plain
     ``host``/``port`` keep their local meaning.
     """
-    config = config or {}
+    config = _config_dict(config)
     endpoint = _remote_endpoint(config)
     if endpoint is None:
         return default_session_factory(
@@ -92,22 +105,26 @@ def create_session(
     )
 
 
-def _normalize_endpoint(endpoint: dict[str, Any] | str) -> dict[str, Any]:
-    """Accept an endpoint dict or a ``raydriver://host:port#token`` URL."""
+def _normalize_endpoint(
+    endpoint: RemoteEndpoint | Mapping[str, Any] | str,
+) -> dict[str, Any]:
+    """Accept a RemoteEndpoint, mapping or ``raydriver://`` URL."""
     if isinstance(endpoint, str):
         endpoint = {"url": endpoint}
-    normalized = _remote_endpoint(endpoint)
+    elif isinstance(endpoint, RemoteEndpoint):
+        endpoint = endpoint.to_dict()
+    normalized = _remote_endpoint(dict(endpoint))
     if normalized is None:
         raise ValueError("endpoint needs remote_host or a raydriver:// url")
     return normalized
 
 
 def open_session(
-    endpoint: dict[str, Any] | str,
+    endpoint: RemoteEndpoint | Mapping[str, Any] | str,
     *,
     device: str | None = None,
     session_id: str | None = None,
-    config: dict[str, Any] | None = None,
+    config: SessionConfig | Mapping[str, Any] | None = None,
     dialect: dict[str, Any] | None = None,
     event_callback: Callable[[Any], None] | None = None,
 ) -> "RemoteSession":
@@ -124,7 +141,7 @@ def open_session(
         raise ValueError("open_session needs a device or session_id")
     return RemoteSession(
         None,
-        config or {},
+        _config_dict(config),
         dialect,
         event_callback,
         _normalize_endpoint(endpoint),

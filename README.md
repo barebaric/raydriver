@@ -168,10 +168,12 @@ make check   # lint + test
 
 ```python
 import asyncio
-from raydriver.grbl import GrblSession, SessionEvent
+from raydriver.config import GrblSerialConfig
+from raydriver.core import SessionEvent
+from raydriver.grbl import GrblSession
 
 session = GrblSession(
-    config={"port": "/dev/ttyUSB0", "baudrate": 115200},
+    config=GrblSerialConfig(port="/dev/ttyUSB0", baudrate=115200),
     dialect={
         "home_all": "$H",
         "home_axis": "$H{axis_letter}",

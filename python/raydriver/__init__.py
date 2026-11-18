@@ -7,6 +7,7 @@ the compiled module.
 
 Submodules
 ----------
+- raydriver.config — typed session configuration dataclasses
 - raydriver.core — shared transports, value types and session events
 - raydriver.esp3d — ESP3D / FluidNC sessions over HTTP and WebSocket
 - raydriver.grbl — GRBL device sessions and response parsers

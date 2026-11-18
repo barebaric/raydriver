@@ -65,13 +65,19 @@ impl M2Session {
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
     fn new(
-        config: Option<Bound<'_, PyDict>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            imports = ("typing", "raydriver.config")
+        ))]
+        config: Option<Bound<'_, PyAny>>,
+
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
             imports = ("collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        let config = crate::python::config::config_dict(config.as_ref())?;
         Ok(Self::build(build_config(config.as_ref())?, event_callback))
     }
 

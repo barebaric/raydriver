@@ -8,6 +8,7 @@ The central type is GrblSession: it owns the connection lifecycle (handshake, st
 
 import builtins
 import collections.abc
+from raydriver import config
 from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
@@ -47,9 +48,9 @@ class GrblSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.SessionConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """

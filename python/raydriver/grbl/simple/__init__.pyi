@@ -6,6 +6,7 @@ The minimal ping-pong GRBL session: one line at a time, waiting for each ok/erro
 
 import builtins
 import collections.abc
+from raydriver import config
 from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
@@ -36,9 +37,9 @@ class GrblSimpleSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[dict], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSimpleSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSimpleSession: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[dict] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSimpleSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.SessionConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSimpleSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """

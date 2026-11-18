@@ -6,6 +6,7 @@ M2 WS-V2 driver.
 
 import builtins
 import collections.abc
+from raydriver import config
 from raydriver import core
 from raydriver.core import types
 import typing
@@ -36,7 +37,7 @@ class M2Session:
         r"""
         WebSocket URI of the configured device.
         """
-    def __new__(cls, config: typing.Optional[dict], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> M2Session:
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> M2Session:
         r"""
         Create an M2 session for the configured host.
         """
