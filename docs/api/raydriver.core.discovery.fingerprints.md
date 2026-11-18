@@ -3,6 +3,38 @@ title: raydriver.core.discovery.fingerprints
 sidebar_label: raydriver.core.discovery.fingerprints
 ---
 
+## HttpFingerprint
+
+Confirms a generic HTTP service by matching the response body.
+
+The probe GETs *path* and reports a match when the endpoint answers `200` with a body matching
+*match_regex* (matched case-insensitively), bounded by *timeout* seconds and *max_bytes* of body. It
+returns a truthy value on a match, and `None` on any failure.
+
+### `match_regex`
+
+```python
+match_regex: str
+```
+
+### `max_bytes`
+
+```python
+max_bytes: int
+```
+
+### `path`
+
+```python
+path: str
+```
+
+### `timeout`
+
+```python
+timeout: float
+```
+
 ## TcpFingerprint
 
 Confirms a generic TCP service by matching a response line.

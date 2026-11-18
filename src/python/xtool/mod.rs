@@ -4,7 +4,14 @@
 pub(crate) mod m2;
 pub(crate) mod session;
 
+use std::time::Duration;
+
 use pyo3::prelude::*;
+use pyo3::types::PyString;
+use pyo3_stub_gen::derive::gen_stub_pyfunction;
+
+use crate::python::pyfuture::spawn_future;
+use crate::xtool::session::probe_machine_type;
 
 pub(crate) const MODULE_DOC: &str = "\
 xTool device drivers implemented in Rust.
@@ -16,13 +23,54 @@ explicit and disabled by default.
 
 pyo3_stub_gen::module_doc!("raydriver.xtool", "{}", MODULE_DOC);
 
+/// Queries the machine type an xTool device reports for itself.
+///
+/// GETs the machine-type endpoint at *host*:*port* and resolves to
+/// the reported type when it names an xTool machine, and `None` on
+/// any failure.
+#[gen_stub_pyfunction(module = "raydriver.xtool")]
+#[pyfunction(signature = (host, port, timeout=2.0))]
+#[gen_stub(override_return_type(
+    type_repr = "typing.Awaitable[typing.Optional[str]]",
+    imports = ("typing",)
+))]
+fn query_machine_type<'py>(
+    py: Python<'py>,
+    host: String,
+    port: u16,
+    timeout: f64,
+) -> PyResult<Bound<'py, PyAny>> {
+    spawn_future(py, async move {
+        let machine_type = probe_machine_type(
+            &host,
+            port,
+            Duration::from_secs_f64(timeout.max(0.01)),
+        )
+        .await
+        .ok()
+        .filter(|machine_type| {
+            machine_type.to_ascii_lowercase().contains("xtool")
+        });
+        Python::attach(|py| match machine_type {
+            Some(machine_type) => Ok(PyString::new(py, &machine_type)
+                .to_owned()
+                .into_any()
+                .unbind()),
+            None => Ok(py.None()),
+        })
+    })
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     let xtool_mod = PyModule::new(py, "xtool")?;
 
     xtool_mod.setattr("__doc__", MODULE_DOC)?;
-    xtool_mod.add("__all__", vec!["XtoolSession", "m2"])?;
+    xtool_mod
+        .add("__all__", vec!["XtoolSession", "query_machine_type", "m2"])?;
     xtool_mod.add_class::<session::XtoolSession>()?;
+    xtool_mod
+        .add_function(wrap_pyfunction!(query_machine_type, &xtool_mod)?)?;
     m2::register(&xtool_mod)?;
 
     m.add_submodule(&xtool_mod)?;
