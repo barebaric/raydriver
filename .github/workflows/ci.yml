@@ -23,12 +23,13 @@ jobs:
         run: pip install dist/raydriver-*.whl
 
       - name: Lint Python
-        run: pip install ruff && ruff check tests/ python/
+        run: pip install ruff && ruff check tests/ python/ tools/
 
       - name: Run pyright
         run: |
           pip install pytest pytest-asyncio
-          npx --yes pyright --pythonpath $(which python) python/raydriver tests
+          pip install mdformat mdformat-frontmatter mdformat-tables
+          npx --yes pyright --pythonpath $(which python) python/raydriver tests tools
 
       - name: Validate stubs in wheel
         run: |

@@ -12,6 +12,7 @@
 - `make format-python` — format Python only (ruff handles formatting and import sorting)
 - `make test` — run the full test suite. make sure to "make dev" before you test
 - `make check` — lint + test
+- `make docs` — generate the API reference from the `.pyi` stubs
 - `make build` — build the wheel (release)
 
 ## CLI
