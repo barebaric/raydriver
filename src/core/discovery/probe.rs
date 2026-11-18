@@ -1,16 +1,21 @@
-//! Protocol-neutral TCP confirmation probes.
+//! Protocol-neutral TCP and HTTP confirmation probes.
 //!
-//! A probe connects to a host, optionally sends a command and returns
-//! the first response line starting with the declared prefix. It is
-//! used both by the subnet scanner (confirming reachable listeners)
-//! and by mDNS fingerprinting (confirming generic service
+//! A probe connects to a host and confirms the declared firmware:
+//! the TCP probe optionally sends a command and returns the first
+//! response line starting with the declared prefix; the HTTP probe
+//! GETs a path and matches the response body against a pattern.
+//! They are used both by the subnet scanner (confirming reachable
+//! listeners) and by mDNS fingerprinting (confirming generic service
 //! announcements) before a driver claims a device.
 
 use std::time::Duration;
 
+use regex::Regex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::{timeout, Instant};
+
+use crate::core::http;
 
 /// Longest line reported back to the caller.
 const MAX_BANNER_LEN: usize = 80;
@@ -115,4 +120,39 @@ fn truncate(line: &str) -> String {
         .nth(MAX_BANNER_LEN)
         .unwrap_or(line.len());
     line[..end].to_string()
+}
+
+/// One HTTP probe configuration.
+pub struct HttpProbe<'a> {
+    /// Request path, including any query string.
+    pub path: &'a str,
+    /// Case-insensitive pattern the response body must match.
+    pub match_regex: &'a Regex,
+    /// Maximum time for connect and exchange.
+    pub timeout: Duration,
+    /// Maximum body bytes retained for matching.
+    pub max_bytes: usize,
+}
+
+/// Performs a GET against *host*:*port* and returns the matching
+/// body excerpt, or `None` when the endpoint does not answer like
+/// the declared firmware. Never fails: a transport error, a non-200
+/// status and a non-matching body all yield `None`.
+pub async fn probe_http(
+    host: &str,
+    port: u16,
+    probe: &HttpProbe<'_>,
+) -> Option<String> {
+    let response = http::get(host, port, probe.path, probe.timeout)
+        .await
+        .ok()?;
+    if response.status != 200 {
+        return None;
+    }
+    let end = response.body.len().min(probe.max_bytes);
+    let text = String::from_utf8_lossy(&response.body[..end]);
+    probe
+        .match_regex
+        .find(&text)
+        .map(|matched| matched.as_str().to_string())
 }

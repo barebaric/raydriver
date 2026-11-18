@@ -4,8 +4,31 @@
 import builtins
 import typing
 __all__ = [
+    "HttpFingerprint",
     "TcpFingerprint",
 ]
+
+@typing.final
+class HttpFingerprint:
+    r"""
+    Confirms a generic HTTP service by matching the response body.
+    
+    The probe GETs *path* and reports a match when the endpoint
+    answers `200` with a body matching *match_regex* (matched
+    case-insensitively), bounded by *timeout* seconds and *max_bytes*
+    of body. It returns a truthy value on a match, and `None` on any
+    failure.
+    """
+    @property
+    def path(self) -> builtins.str: ...
+    @property
+    def match_regex(self) -> builtins.str: ...
+    @property
+    def timeout(self) -> builtins.float: ...
+    @property
+    def max_bytes(self) -> builtins.int: ...
+    def __new__(cls, path: builtins.str, match_regex: builtins.str, timeout: builtins.float = 1.5, max_bytes: builtins.int = 4096) -> HttpFingerprint: ...
+    def __call__(self, host: builtins.str, port: builtins.int) -> typing.Awaitable[typing.Any]: ...
 
 @typing.final
 class TcpFingerprint:

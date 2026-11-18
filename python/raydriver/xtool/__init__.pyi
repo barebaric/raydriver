@@ -15,6 +15,7 @@ from . import m2
 __all__ = [
     "XtoolSession",
     "m2",
+    "query_machine_type",
 ]
 
 @typing.final
@@ -100,4 +101,13 @@ class XtoolSession:
         """
     def update_dialect(self, dialect: dict) -> None: ...
     def __repr__(self) -> builtins.str: ...
+
+def query_machine_type(host: builtins.str, port: builtins.int, timeout: builtins.float = 2.0) -> typing.Awaitable[typing.Optional[str]]:
+    r"""
+    Queries the machine type an xTool device reports for itself.
+    
+    GETs the machine-type endpoint at *host*:*port* and resolves to
+    the reported type when it names an xTool machine, and `None` on
+    any failure.
+    """
 

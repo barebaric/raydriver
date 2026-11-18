@@ -272,34 +272,12 @@ impl XtoolCore {
     /// every command silently fails.
     async fn verify_machine(&self) -> Result<String, SessionError> {
         let timeout = XtoolConfig::secs(self.config.request_timeout);
-        let response = http::get(
+        let machine_type = probe_machine_type(
             &self.config.host,
             self.config.http_port,
-            "/getmachinetype",
             timeout,
         )
-        .await
-        .and_then(|response| {
-            if response.status == 200 {
-                Ok(response)
-            } else {
-                Err(SessionError::Connection(format!(
-                    "unexpected HTTP status {} from /getmachinetype",
-                    response.status
-                )))
-            }
-        })?;
-        let payload: HashMap<String, Value> =
-            serde_json::from_str(&response.text()).map_err(|err| {
-                SessionError::Device(format!(
-                    "unexpected response from /getmachinetype: {err}"
-                ))
-            })?;
-        let machine_type = payload
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        .await?;
         if !machine_type.to_ascii_lowercase().contains("xtool") {
             return Err(SessionError::Device(format!(
                 "the device at {}:{} did not identify itself as an \
@@ -871,6 +849,41 @@ impl XtoolCore {
 
 /// Map a WebSocket event line to ``(status, error)``.  Returns
 /// ``Unknown`` for lines that carry no state information.
+/// GETs the machine-type endpoint and returns the reported type.
+///
+/// Fails on transport errors, unexpected HTTP statuses and
+/// malformed JSON bodies; a missing type field yields an empty
+/// string. The xTool identification itself is the caller's check.
+pub async fn probe_machine_type(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<String, SessionError> {
+    let response = http::get(host, port, "/getmachinetype", timeout)
+        .await
+        .and_then(|response| {
+            if response.status == 200 {
+                Ok(response)
+            } else {
+                Err(SessionError::Connection(format!(
+                    "unexpected HTTP status {} from /getmachinetype",
+                    response.status
+                )))
+            }
+        })?;
+    let payload: HashMap<String, Value> =
+        serde_json::from_str(&response.text()).map_err(|err| {
+            SessionError::Device(format!(
+                "unexpected response from /getmachinetype: {err}"
+            ))
+        })?;
+    Ok(payload
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string())
+}
+
 fn parse_event(line: &str) -> (DeviceStatus, Option<DeviceError>) {
     let (status, error) = match line {
         "ok:IDLE" | "WORK_STOPPED" => (DeviceStatus::Idle, None),

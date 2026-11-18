@@ -235,3 +235,27 @@ update_dialect(dialect: dict) -> None
 | --------- | ------ | ----------- |
 | `dialect` | `dict` |             |
 | _Returns_ | `None` |             |
+
+## Functions
+
+### `query_machine_type()`
+
+```python
+query_machine_type(
+    host: str,
+    port: int,
+    timeout: float = 2.0,
+) -> Awaitable[Optional[str]]
+```
+
+Queries the machine type an xTool device reports for itself.
+
+GETs the machine-type endpoint at *host*:*port* and resolves to the reported type when it names an
+xTool machine, and `None` on any failure.
+
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| `host`    | `str`                      |             |
+| `port`    | `int`                      |             |
+| `timeout` | `float = 2.0`              |             |
+| _Returns_ | `Awaitable[Optional[str]]` |             |

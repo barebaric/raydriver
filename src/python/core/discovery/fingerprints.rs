@@ -5,16 +5,21 @@
 //! the network channel calls it with a candidate's address and port.
 //! `TcpFingerprint` provides the common case: confirm a raw TCP
 //! service by sending an optional command and matching a response
-//! line prefix. Protocol-specific command strings stay with the
-//! driver that declares them.
+//! line prefix. `HttpFingerprint` confirms an HTTP endpoint by
+//! matching its response body. Protocol-specific command strings
+//! stay with the driver that declares them.
 
 use std::time::Duration;
 
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyBool;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use regex::{Regex, RegexBuilder};
 
-use crate::core::discovery::probe::{probe_tcp, TcpProbe};
+use crate::core::discovery::probe::{
+    probe_http, probe_tcp, HttpProbe, TcpProbe,
+};
 use crate::python::pyfuture::spawn_future;
 
 use super::helpers;
@@ -123,6 +128,106 @@ impl TcpFingerprint {
     }
 }
 
+/// Confirms a generic HTTP service by matching the response body.
+///
+/// The probe GETs *path* and reports a match when the endpoint
+/// answers `200` with a body matching *match_regex* (matched
+/// case-insensitively), bounded by *timeout* seconds and *max_bytes*
+/// of body. It returns a truthy value on a match, and `None` on any
+/// failure.
+#[gen_stub_pyclass(module = "raydriver.core.discovery.fingerprints")]
+#[pyclass(
+    module = "raydriver.core.discovery.fingerprints",
+    frozen,
+    skip_from_py_object
+)]
+#[derive(Clone)]
+pub struct HttpFingerprint {
+    path: String,
+    match_regex: String,
+    regex: Regex,
+    timeout: f64,
+    max_bytes: usize,
+}
+
+#[gen_stub_pymethods]
+#[pymethods]
+impl HttpFingerprint {
+    #[new]
+    #[pyo3(signature = (path, match_regex, timeout=1.5, max_bytes=4096))]
+    fn new(
+        path: String,
+        match_regex: String,
+        timeout: f64,
+        max_bytes: usize,
+    ) -> PyResult<Self> {
+        let regex = RegexBuilder::new(&match_regex)
+            .case_insensitive(true)
+            .build()
+            .map_err(|err| {
+                PyValueError::new_err(format!("invalid match_regex: {err}"))
+            })?;
+        Ok(Self {
+            path,
+            match_regex,
+            regex,
+            timeout,
+            max_bytes,
+        })
+    }
+
+    #[getter]
+    pub(crate) fn path(&self) -> String {
+        self.path.clone()
+    }
+
+    #[getter]
+    pub(crate) fn match_regex(&self) -> String {
+        self.match_regex.clone()
+    }
+
+    #[getter]
+    pub(crate) fn timeout(&self) -> f64 {
+        self.timeout
+    }
+
+    #[getter]
+    pub(crate) fn max_bytes(&self) -> usize {
+        self.max_bytes
+    }
+
+    #[gen_stub(override_return_type(type_repr = "typing.Awaitable[typing.Any]", imports = ("typing",)))]
+    fn __call__<'py>(
+        &self,
+        py: Python<'py>,
+        host: String,
+        port: u16,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let config = self.clone();
+        spawn_future(py, async move {
+            let matched = probe_http(
+                &host,
+                port,
+                &HttpProbe {
+                    path: &config.path,
+                    match_regex: &config.regex,
+                    timeout: Duration::from_secs_f64(config.timeout.max(0.01)),
+                    max_bytes: config.max_bytes,
+                },
+            )
+            .await
+            .is_some();
+            Python::attach(|py| {
+                if matched {
+                    Ok(PyBool::new(py, true).to_owned().into_any().unbind())
+                } else {
+                    Ok(py.None())
+                }
+            })
+        })
+    }
+}
+
 pub fn register(discovery_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = discovery_mod.py();
     let module = PyModule::new(py, "fingerprints")?;
@@ -131,6 +236,7 @@ pub fn register(discovery_mod: &Bound<'_, PyModule>) -> PyResult<()> {
         "Reusable fingerprint probes for generic mDNS service types.",
     )?;
     module.add_class::<TcpFingerprint>()?;
+    module.add_class::<HttpFingerprint>()?;
     helpers::attach_submodule(
         discovery_mod,
         &module,
