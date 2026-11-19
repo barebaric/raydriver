@@ -172,19 +172,6 @@ Move to an absolute position (mm); `speed` in mm/min.
 | `speed`   | `Optional[float] = None` |             |
 | _Returns_ | `Any`                    |             |
 
-### `probe_device()`
-
-```python
-probe_device() -> Any
-```
-
-Run the device census over the session: the parsed `/api/version` and `/api/printer` responses,
-interpreted into the structured census dict. Local and remote sessions probe identically.
-
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
-
 ### `probe_info()`
 
 ```python
