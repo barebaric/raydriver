@@ -94,8 +94,10 @@ impl M2Session {
     /// Stop monitoring and close the connection.
     fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let core = self.core.clone();
+        let events = self.events.clone();
         spawn_future(py, async move {
             core.disconnect().await;
+            events.quiesce();
             Ok(Python::attach(none_obj))
         })
     }
@@ -203,6 +205,7 @@ impl M2Session {
 
 impl Drop for M2Session {
     fn drop(&mut self) {
+        self.events.close();
         self.core.abort_background_tasks_now();
     }
 }

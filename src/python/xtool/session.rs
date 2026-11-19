@@ -115,8 +115,10 @@ impl XtoolSession {
     /// Stop all background tasks and close the connection.
     fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let core = self.core.clone();
+        let events = self.events.clone();
         spawn_future(py, async move {
             core.cleanup().await;
+            events.quiesce();
             Ok(Python::attach(none_obj))
         })
     }
