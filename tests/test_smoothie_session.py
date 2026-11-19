@@ -191,6 +191,42 @@ class TestEmulatorJobs:
         await events.wait_for(SessionEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 
+    async def test_progress_survives_a_pending_drain(self, smoothie_rig):
+        """A drain scheduled before the job must still deliver the
+        job's progress to the callback installed when it starts."""
+        session, mock, emulator, events = smoothie_rig
+        loop = asyncio.get_running_loop()
+        real_call_soon_threadsafe = loop.call_soon_threadsafe
+        held = []
+
+        def hold_drainers(callback, *args, **kwargs):
+            if type(callback).__name__ == "EventDrainer":
+                held.append(callback)
+            else:
+                real_call_soon_threadsafe(callback, *args, **kwargs)
+
+        setattr(loop, "call_soon_threadsafe", hold_drainers)
+        done = []
+        run_task = None
+        try:
+            await wait_until(lambda: held)
+            run_task = asyncio.ensure_future(
+                session.run(
+                    "G1 X1 F1000\nG1 X2 F1000\n",
+                    {0: 0, 1: 1},
+                    done.append,
+                )
+            )
+            await wait_until(lambda: len(gcode_sends(mock)) >= 2)
+        finally:
+            setattr(loop, "call_soon_threadsafe", real_call_soon_threadsafe)
+            while held:
+                held.pop(0)()
+                await asyncio.sleep(0)
+        await asyncio.wait_for(run_task, 5)
+        await events.wait_for(SessionEvent.JobFinished)
+        assert done == [0, 1]
+
     async def test_probe_queries(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
         version = await session.execute_interactive_command("version")

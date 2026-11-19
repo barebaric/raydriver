@@ -65,7 +65,7 @@ enum QueuedEvent {
 pub(crate) struct PyEvents {
     event_callback: Option<Py<PyAny>>,
     loop_: Mutex<Option<Py<PyAny>>>,
-    progress_callback: Mutex<Option<Py<PyAny>>>,
+    progress_callback: Arc<Mutex<Option<Py<PyAny>>>>,
     queue: Arc<EventQueue>,
 }
 
@@ -102,14 +102,15 @@ impl EventQueue {
 
 /// The loop-side drain callable: invoked via
 /// `loop.call_soon_threadsafe(drain)`; runs on the event loop
-/// thread and delivers every queued event.  Carries both callbacks
-/// so each queued event routes to its own callback no matter which
+/// thread and delivers every queued event.  Carries the event
+/// callback plus a handle to the shared progress callback slot, so
+/// each queued event routes to its current callback no matter which
 /// schedule call drained the batch.
 #[pyclass(module = "raydriver.core")]
 struct EventDrainer {
     queue: Arc<EventQueue>,
     events: Option<Py<PyAny>>,
-    progress: Option<Py<PyAny>>,
+    progress: Arc<Mutex<Option<Py<PyAny>>>>,
 }
 
 #[pymethods]
@@ -124,7 +125,7 @@ impl PyEvents {
         Self {
             event_callback,
             loop_: Mutex::new(None),
-            progress_callback: Mutex::new(None),
+            progress_callback: Arc::new(Mutex::new(None)),
             queue: Arc::new(EventQueue::default()),
         }
     }
@@ -180,12 +181,7 @@ impl PyEvents {
                     EventDrainer {
                         queue: self.queue.clone(),
                         events: Some(callback.clone().unbind()),
-                        progress: self
-                            .progress_callback
-                            .lock()
-                            .unwrap()
-                            .as_ref()
-                            .map(|cb| cb.clone_ref(py)),
+                        progress: self.progress_callback.clone(),
                     },
                 )?;
                 loop_py
@@ -207,10 +203,9 @@ impl PyEvents {
         }
         let result: PyResult<()> = Python::attach(|py| {
             let progress_guard = self.progress_callback.lock().unwrap();
-            let Some(callback) = progress_guard.as_ref() else {
+            if progress_guard.is_none() {
                 return Ok(());
-            };
-            let callback = callback.clone_ref(py);
+            }
             drop(progress_guard);
             let loop_guard = self.loop_.lock().unwrap();
             let Some(loop_) = loop_guard.as_ref() else {
@@ -234,7 +229,7 @@ impl PyEvents {
                             .event_callback
                             .as_ref()
                             .map(|cb| cb.clone_ref(py)),
-                        progress: Some(callback),
+                        progress: self.progress_callback.clone(),
                     },
                 )?;
                 if let Err(err) = loop_py
@@ -344,10 +339,13 @@ impl EventDrainer {
                     }
                 }
                 QueuedEvent::Progress(op_index) => {
-                    let Some(callback) = self.progress.as_ref() else {
+                    let progress_guard = self.progress.lock().unwrap();
+                    let Some(callback) = progress_guard.as_ref() else {
                         continue;
                     };
-                    if let Err(err) = callback.call1(py, (op_index,)) {
+                    let callback = callback.clone_ref(py);
+                    drop(progress_guard);
+                    if let Err(err) = callback.bind(py).call1((op_index,)) {
                         log::warn!("progress callback failed: {err}");
                     }
                 }
