@@ -1,5 +1,6 @@
 //! The `raydriver.smoothie` Python submodule.
 
+pub(crate) mod probe;
 pub(crate) mod session;
 
 use pyo3::prelude::*;
@@ -17,7 +18,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let smoothie_mod = PyModule::new(py, "smoothie")?;
 
     smoothie_mod.setattr("__doc__", MODULE_DOC)?;
-    smoothie_mod.add("__all__", vec!["SmoothieSession"])?;
+    smoothie_mod.add("__all__", vec!["SmoothieSession", "probe"])?;
+    probe::register(&smoothie_mod)?;
     smoothie_mod.add_class::<session::SmoothieSession>()?;
 
     m.add_submodule(&smoothie_mod)?;

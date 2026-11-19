@@ -132,6 +132,36 @@ impl SmoothieSession {
     }
 
     /// Send a command and await its full response.
+    /// Run the device census: query ``version`` and the
+    /// ``config-get`` motion keys, and return the structured result
+    /// as a dict.
+    fn probe_device<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            let mut replies: Vec<Vec<String>> = Vec::new();
+            for command in crate::smoothie::probe::CENSUS_COMMANDS {
+                replies.push(
+                    core.execute_interactive_command(command.to_string())
+                        .await?,
+                );
+            }
+            let census = crate::smoothie::probe::describe(
+                &replies[0],
+                &replies[1],
+                &replies[2],
+                &replies[3],
+                &replies[4],
+                &replies[5],
+            );
+            Python::attach(|py| {
+                crate::python::core::json::value_to_py(py, &census)
+            })
+        })
+    }
+
     fn execute_interactive_command<'py>(
         &self,
         py: Python<'py>,

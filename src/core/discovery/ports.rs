@@ -272,3 +272,117 @@ pub fn list_usb_ports() -> Vec<String> {
         .filter(|p| is_usb_serial_port(p))
         .collect()
 }
+
+/// The common serial baud rates offered to applications.
+pub fn list_baud_rates() -> Vec<u32> {
+    vec![
+        9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600, 1_000_000,
+        1_843_200,
+    ]
+}
+
+/// Resolves a USB ``vid:pid`` pair to a device path by scanning the
+/// available ports.
+///
+/// Unlike a fixed path, a VID:PID match survives the OS
+/// re-enumerating devices (e.g. ttyUSB0 becoming ttyUSB1 after a
+/// reconnect). If several devices share the same VID:PID, the
+/// first one on the bus wins. Returns ``None`` when no matching
+/// device is present.
+pub fn resolve_vidpid(vid: u16, pid: u16) -> Option<String> {
+    resolve_vidpid_in(&list_port_info(), vid, pid)
+}
+
+/// The matching logic over a caller-supplied port inventory, so the
+/// enumeration backend stays replaceable (tests patch it).
+pub fn resolve_vidpid_in(
+    infos: &[SerialPortInfo],
+    vid: u16,
+    pid: u16,
+) -> Option<String> {
+    infos
+        .iter()
+        .find(|info| info.vid == Some(vid) && info.pid == Some(pid))
+        .map(|info| info.device.clone())
+}
+
+/// Why serial ports may be unreachable for this process.
+///
+/// ``NoPorts`` and ``NoAccess`` are the plain conditions; the
+/// ``Snap*`` variants apply when the process runs inside a snap,
+/// whose confinement changes the remedy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PermissionIssue {
+    None,
+    NoPorts,
+    NoAccess,
+    SnapNoPorts,
+    SnapNoAccess,
+}
+
+impl PermissionIssue {
+    /// The wire form: a stable lowercase name applications map to
+    /// their own localized messages.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::NoPorts => "no_ports",
+            Self::NoAccess => "no_access",
+            Self::SnapNoPorts => "snap_no_ports",
+            Self::SnapNoAccess => "snap_no_access",
+        }
+    }
+}
+
+#[cfg(unix)]
+fn port_is_accessible(path: &str) -> bool {
+    use std::ffi::CString;
+    let Ok(c_path) = CString::new(path) else {
+        return false;
+    };
+    // access(2) checks the real identity the same way the shell
+    // would — the pure-metadata bits cannot model group membership,
+    // which is exactly what this diagnostic looks for (dialout).
+    unsafe { libc::access(c_path.as_ptr(), libc::R_OK | libc::W_OK) == 0 }
+}
+
+#[cfg(not(unix))]
+fn port_is_accessible(_path: &str) -> bool {
+    false
+}
+
+/// Diagnoses systemic serial-port access problems.
+///
+/// On POSIX systems, checks whether there are visible USB serial
+/// ports at all and whether the process could open any of them — a
+/// strong indicator that the user is not in the correct group
+/// (e.g. ``dialout``) or, in a snap, lacks the necessary
+/// permissions. Non-POSIX platforms always report
+/// [`PermissionIssue::None`].
+pub fn check_permission_issue() -> PermissionIssue {
+    check_permission_issue_over(&list_usb_ports())
+}
+
+/// The diagnostic over a caller-supplied port inventory, so the
+/// enumeration backend stays replaceable (tests patch it).
+pub fn check_permission_issue_over(ports: &[String]) -> PermissionIssue {
+    if !cfg!(unix) {
+        return PermissionIssue::None;
+    }
+    let in_snap = std::env::var_os("SNAP").is_some();
+    if ports.is_empty() {
+        return if in_snap {
+            PermissionIssue::SnapNoPorts
+        } else {
+            PermissionIssue::NoPorts
+        };
+    }
+    if ports.iter().any(|path| port_is_accessible(path)) {
+        return PermissionIssue::None;
+    }
+    if in_snap {
+        PermissionIssue::SnapNoAccess
+    } else {
+        PermissionIssue::NoAccess
+    }
+}

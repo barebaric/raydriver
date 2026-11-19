@@ -5,7 +5,7 @@
 
 mod engine;
 mod fingerprints;
-mod helpers;
+pub(crate) mod helpers;
 mod mdns_channel;
 mod mdns_scan;
 mod ports;

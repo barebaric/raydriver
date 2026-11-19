@@ -1,6 +1,7 @@
 //! The `raydriver.core` Python submodule: shared device primitives.
 
 pub(crate) mod discovery;
+pub(crate) mod json;
 pub(crate) mod mock;
 pub(crate) mod serial;
 pub(crate) mod types;

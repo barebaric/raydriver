@@ -5,13 +5,16 @@ import builtins
 import typing
 __all__ = [
     "SerialPortInfo",
+    "check_permission_issue",
     "glob_ports",
     "is_usb_serial_port",
+    "list_baud_rates",
     "list_port_info",
     "list_ports",
     "list_serial_ports",
     "list_usb_ports",
     "natural_key",
+    "resolve_vidpid",
     "safe_list_ports_linux",
     "sort_ports",
 ]
@@ -38,6 +41,14 @@ class SerialPortInfo:
     def __new__(cls, device: builtins.str, description: typing.Optional[builtins.str] = None, manufacturer: typing.Optional[builtins.str] = None, vid: typing.Optional[builtins.int] = None, pid: typing.Optional[builtins.int] = None) -> SerialPortInfo: ...
     def __repr__(self) -> builtins.str: ...
 
+def check_permission_issue() -> builtins.str:
+    r"""
+    Diagnoses systemic serial-port access problems (missing
+    `dialout` group membership, snap confinement). Returns a
+    structured result; the application supplies the localized
+    message.
+    """
+
 def glob_ports(dir: builtins.str, prefix: builtins.str) -> builtins.list[builtins.str]:
     r"""
     Glob-style prefix listing of one directory; the enumeration
@@ -50,6 +61,11 @@ def is_usb_serial_port(port: builtins.str) -> builtins.bool:
     Heuristically determines if a port path refers to a USB serial
     device. On non-POSIX systems (e.g. Windows), every port is treated
     as potentially USB.
+    """
+
+def list_baud_rates() -> builtins.list[builtins.int]:
+    r"""
+    The common serial baud rates offered to applications.
     """
 
 def list_port_info() -> builtins.list[SerialPortInfo]:
@@ -73,6 +89,13 @@ def natural_key(s: builtins.str) -> list:
     r"""
     Splits a string into lowercase words and numbers so ttyUSB2 sorts
     before ttyUSB10.
+    """
+
+def resolve_vidpid(vid: builtins.int, pid: builtins.int) -> typing.Optional[builtins.str]:
+    r"""
+    Resolves a USB `vid:pid` pair (e.g. FTDI 0x0403/0x6001) to a
+    concrete device path by scanning the available ports; `None`
+    when no matching device is present.
     """
 
 def safe_list_ports_linux() -> builtins.list[builtins.str]:
