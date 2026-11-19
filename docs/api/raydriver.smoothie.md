@@ -104,8 +104,6 @@ Queue a command and await its response (identical to `execute_interactive_comman
 execute_interactive_command(command: str) -> Any
 ```
 
-Send a command and await its full response.
-
 | Parameter | Type  | Description |
 | --------- | ----- | ----------- |
 | `command` | `str` |             |
@@ -152,6 +150,19 @@ Move to an absolute position (mm) at `speed` (mm/min).
 | `x`       | `float` |             |
 | `y`       | `float` |             |
 | _Returns_ | `Any`   |             |
+
+### `probe_device()`
+
+```python
+probe_device() -> Any
+```
+
+Send a command and await its full response. Run the device census: query `version` and the
+`config-get` motion keys, and return the structured result as a dict.
+
+| Parameter | Type  | Description |
+| --------- | ----- | ----------- |
+| _Returns_ | `Any` |             |
 
 ### `run()`
 

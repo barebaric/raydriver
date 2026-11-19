@@ -45,6 +45,19 @@ vid: Optional[int]
 
 ## Functions
 
+### `check_permission_issue()`
+
+```python
+check_permission_issue() -> str
+```
+
+Diagnoses systemic serial-port access problems (missing `dialout` group membership, snap
+confinement). Returns a structured result; the application supplies the localized message.
+
+| Parameter | Type  | Description |
+| --------- | ----- | ----------- |
+| _Returns_ | `str` |             |
+
 ### `glob_ports()`
 
 ```python
@@ -73,6 +86,18 @@ Windows), every port is treated as potentially USB.
 | --------- | ------ | ----------- |
 | `port`    | `str`  |             |
 | _Returns_ | `bool` |             |
+
+### `list_baud_rates()`
+
+```python
+list_baud_rates() -> list[int]
+```
+
+The common serial baud rates offered to applications.
+
+| Parameter | Type        | Description |
+| --------- | ----------- | ----------- |
+| _Returns_ | `list[int]` |             |
 
 ### `list_port_info()`
 
@@ -123,6 +148,21 @@ Splits a string into lowercase words and numbers so ttyUSB2 sorts before ttyUSB1
 | --------- | ------ | ----------- |
 | `s`       | `str`  |             |
 | _Returns_ | `list` |             |
+
+### `resolve_vidpid()`
+
+```python
+resolve_vidpid(vid: int, pid: int) -> Optional[str]
+```
+
+Resolves a USB `vid:pid` pair (e.g. FTDI 0x0403/0x6001) to a concrete device path by scanning the
+available ports; `None` when no matching device is present.
+
+| Parameter | Type            | Description |
+| --------- | --------------- | ----------- |
+| `vid`     | `int`           |             |
+| `pid`     | `int`           |             |
+| _Returns_ | `Optional[str]` |             |
 
 ### `safe_list_ports_linux()`
 

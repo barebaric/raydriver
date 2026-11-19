@@ -114,6 +114,19 @@ True when the `$13` (Report in inches) flag is set.
 | `settings_lines` | `Sequence[str]` |             |
 | _Returns_        | `bool`          |             |
 
+### `parse_board()`
+
+```python
+parse_board(line: str) -> Optional[str]
+```
+
+Parse a grblHAL `[BOARD:...]` build-info line.
+
+| Parameter | Type            | Description |
+| --------- | --------------- | ----------- |
+| `line`    | `str`           |             |
+| _Returns_ | `Optional[str]` |             |
+
 ### `parse_grbl_parser_state()`
 
 ```python
