@@ -23,6 +23,7 @@ pub mod core;
 pub mod esp3d;
 pub mod grbl;
 pub mod marlin;
+pub mod octoprint;
 pub mod smoothie;
 pub mod xtool;
 

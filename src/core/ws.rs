@@ -49,16 +49,56 @@ impl WsClient {
         origin: Option<&str>,
         timeout: Duration,
     ) -> Result<Self, SessionError> {
+        Self::connect_path(host, port, "/", origin, timeout).await
+    }
+
+    /// Like [`connect`], but requests a specific server path (e.g.
+    /// an API mounted under a URL prefix).
+    pub async fn connect_path(
+        host: &str,
+        port: u16,
+        path: &str,
+        origin: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Self, SessionError> {
         tokio::time::timeout(timeout, async {
             let stream = TcpStream::connect((host, port))
                 .await
                 .map_err(|e| WsError(e.to_string()))?;
-            handshake(stream, host, port, origin)
+            handshake(stream, host, port, path, origin)
                 .await
                 .map_err(|e| SessionError::Connection(e.0))
         })
         .await
         .map_err(|_| SessionError::Timeout)?
+    }
+
+    /// Send a text message to the server.
+    pub async fn send_text(&mut self, text: &str) -> Result<(), SessionError> {
+        self.send_frame(0x1, text.as_bytes()).await
+    }
+
+    async fn send_frame(
+        &mut self,
+        opcode: u8,
+        payload: &[u8],
+    ) -> Result<(), SessionError> {
+        let mut frame = vec![0x80 | opcode];
+        if payload.len() > 125 {
+            frame.push(0x80 | 126);
+            frame.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+        } else {
+            frame.push(0x80 | payload.len() as u8);
+        }
+        let mask = random_mask();
+        frame.extend_from_slice(&mask);
+        for (i, byte) in payload.iter().enumerate() {
+            frame.push(byte ^ mask[i % 4]);
+        }
+        self.writer
+            .write_all(&frame)
+            .await
+            .map_err(|e| SessionError::Connection(e.to_string()))
     }
 
     /// Receive the next text message, transparently answering pings
@@ -178,10 +218,11 @@ async fn handshake(
     mut stream: TcpStream,
     host: &str,
     port: u16,
+    path: &str,
     origin: Option<&str>,
 ) -> Result<WsClient, WsError> {
     let key = random_key();
-    let mut req = format!("GET / HTTP/1.1\r\nHost: {host}:{port}\r\n");
+    let mut req = format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\n");
     req.push_str("Upgrade: websocket\r\nConnection: Upgrade\r\n");
     req.push_str(&format!("Sec-WebSocket-Key: {key}\r\n"));
     req.push_str("Sec-WebSocket-Version: 13\r\n");

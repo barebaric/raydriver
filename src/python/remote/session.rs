@@ -280,6 +280,7 @@ impl PySessionFactory {
             "grbl_simple" => ("raydriver.grbl.simple", "GrblSimpleSession"),
             "esp3d" => ("raydriver.esp3d", "Esp3dSession"),
             "smoothie" => ("raydriver.smoothie", "SmoothieSession"),
+            "octoprint" => ("raydriver.octoprint", "OctoPrintSession"),
             "marlin" => ("raydriver.marlin", "MarlinSession"),
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(

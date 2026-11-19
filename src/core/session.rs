@@ -58,6 +58,11 @@ pub enum SessionError {
     Device(String),
     #[error("buffer stall: {0}")]
     BufferStall(String),
+    /// The session cannot perform the operation at all (as opposed
+    /// to failing at it): the protocol has no such capability, and
+    /// the uniform session surface still exposes the method.
+    #[error("unsupported operation: {0}")]
+    Unsupported(String),
     #[error("{0}")]
     Other(String),
 }

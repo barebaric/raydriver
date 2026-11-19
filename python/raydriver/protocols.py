@@ -10,7 +10,7 @@ use from both the daemon and the client.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 #: Methods every session implements, regardless of protocol.
@@ -43,9 +43,12 @@ class ProtocolInfo:
     """Metadata describing one session protocol.
 
     ``capabilities`` is derived from the method/property surface so
-    the two never drift apart. ``dialect_family`` is a hint clients
-    can map to their own command-dialect definitions; it is not a
-    driver selection.
+    the two never drift apart. Because every session implements the
+    uniform method surface, a capability that is present but not
+    *meaningful* for a protocol (a settings reader that returns
+    nothing) is switched off explicitly via ``capability_overrides``.
+    ``dialect_family`` is a hint clients can map to their own
+    command-dialect definitions; it is not a driver selection.
     """
 
     name: str
@@ -55,10 +58,11 @@ class ProtocolInfo:
     config_keys: tuple[str, ...]
     methods: frozenset[str]
     properties: frozenset[str]
+    capability_overrides: dict[str, bool] = field(default_factory=dict)
 
     @property
     def capabilities(self) -> dict[str, bool]:
-        return {
+        capabilities = {
             "uses_gcode": True,
             "supports_settings": "read_settings" in self.methods,
             "supports_probing": "run_probe_cycle" in self.methods,
@@ -67,6 +71,8 @@ class ProtocolInfo:
             "supports_unit_detection": "detect_unit_system" in self.methods,
             "reports_buffer_stats": "buffer_count" in self.properties,
         }
+        capabilities.update(self.capability_overrides)
+        return capabilities
 
     def to_dict(self) -> dict[str, Any]:
         """The wire form served by ``protocol/list``."""
@@ -131,6 +137,34 @@ PROTOCOLS: dict[str, ProtocolInfo] = {
         config_keys=("host", "tcp_port"),
         methods=COMMON_METHODS | frozenset({"set_hold", "clear_alarm"}),
         properties=COMMON_PROPERTIES,
+    ),
+    "octoprint": ProtocolInfo(
+        name="octoprint",
+        label="OctoPrint",
+        dialect_family="grbl",
+        connection="network",
+        config_keys=("host", "port", "path", "api_key"),
+        methods=COMMON_METHODS
+        | frozenset(
+            {
+                "clear_alarm",
+                "probe_info",
+                "read_wcs_offsets",
+                "read_parser_state",
+                "run_probe_cycle",
+                "read_settings",
+                "write_setting",
+                "detect_unit_system",
+                "set_hold",
+            }
+        ),
+        properties=COMMON_PROPERTIES,
+        # Every session implements the uniform surface; these
+        # capabilities are present but not meaningful here.
+        capability_overrides={
+            "supports_settings": False,
+            "supports_unit_detection": False,
+        },
     ),
     "marlin": ProtocolInfo(
         name="marlin",

@@ -132,6 +132,27 @@ fn build(name: &str) -> ProtocolInfo {
             methods: methods(&["set_hold", "clear_alarm"]),
             properties: common_properties(),
         },
+        "octoprint" => ProtocolInfo {
+            name: "octoprint",
+            label: "OctoPrint",
+            dialect_family: "grbl",
+            connection: "network",
+            config_keys: &["host", "port", "path", "api_key"],
+            // The session implements the uniform surface, but the
+            // server API cannot back settings or unit claims and
+            // returns empty results for them, so those methods are
+            // not advertised as remote-callable.
+            methods: methods(&[
+                "clear_alarm",
+                "probe_device",
+                "probe_info",
+                "read_wcs_offsets",
+                "read_parser_state",
+                "run_probe_cycle",
+                "set_hold",
+            ]),
+            properties: common_properties(),
+        },
         _ => ProtocolInfo {
             name: "marlin",
             label: "Marlin",
@@ -145,8 +166,15 @@ fn build(name: &str) -> ProtocolInfo {
 }
 
 /// The protocols the daemon can host.
-pub fn names() -> [&'static str; 5] {
-    ["grbl", "grbl_simple", "esp3d", "smoothie", "marlin"]
+pub fn names() -> [&'static str; 6] {
+    [
+        "grbl",
+        "grbl_simple",
+        "esp3d",
+        "smoothie",
+        "octoprint",
+        "marlin",
+    ]
 }
 
 pub fn is_known(name: &str) -> bool {
