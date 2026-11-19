@@ -44,3 +44,34 @@ pub(crate) fn value_to_py(
     };
     Ok(any)
 }
+
+/// Converts a Python value into its serde JSON equivalent; non-JSON
+/// types raise.
+pub(crate) fn py_to_value(value: &Bound<'_, PyAny>) -> PyResult<Value> {
+    if value.is_none() {
+        Ok(Value::Null)
+    } else if let Ok(flag) = value.extract::<bool>() {
+        Ok(Value::Bool(flag))
+    } else if let Ok(int) = value.extract::<i64>() {
+        Ok(Value::from(int))
+    } else if let Ok(float) = value.extract::<f64>() {
+        Ok(Value::from(float))
+    } else if let Ok(text) = value.extract::<String>() {
+        Ok(Value::String(text))
+    } else if let Ok(list) = value.cast::<PyList>() {
+        let items: PyResult<Vec<Value>> =
+            list.iter().map(|item| py_to_value(&item)).collect();
+        Ok(Value::Array(items?))
+    } else if let Ok(dict) = value.cast::<PyDict>() {
+        let mut entries = serde_json::Map::new();
+        for (key, item) in dict.iter() {
+            let key: String = key.extract()?;
+            entries.insert(key, py_to_value(&item)?);
+        }
+        Ok(Value::Object(entries))
+    } else {
+        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+            "value is not JSON-serializable",
+        ))
+    }
+}

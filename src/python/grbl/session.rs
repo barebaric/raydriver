@@ -4,7 +4,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use pyo3::exceptions::{PyConnectionError, PyRuntimeError, PyTimeoutError};
+use pyo3::exceptions::{
+    PyConnectionError, PyNotImplementedError, PyRuntimeError, PyTimeoutError,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -29,6 +31,9 @@ impl From<SessionError> for PyErr {
             SessionError::Device(msg) => PyRuntimeError::new_err(msg),
             SessionError::BufferStall(msg) => {
                 PyConnectionError::new_err(format!("buffer stall: {msg}"))
+            }
+            SessionError::Unsupported(msg) => {
+                PyNotImplementedError::new_err(msg)
             }
             SessionError::Other(msg) => PyRuntimeError::new_err(msg),
         }

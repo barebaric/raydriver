@@ -117,6 +117,21 @@ class XtoolConfig(SessionConfig):
 
 
 @dataclass(frozen=True, kw_only=True)
+class OctoPrintConfig(SessionConfig):
+    """Connection settings for an OctoPrint server."""
+
+    host: str
+    port: int = 80
+    path: str = "/"
+    api_key: str = ""
+    request_timeout: float = 30.0
+    connect_timeout: float = 10.0
+    poll_interval: float = 2.0
+    reconnect_delay: float = 5.0
+    ws_ping_interval: float = 30.0
+
+
+@dataclass(frozen=True, kw_only=True)
 class M2Config(SessionConfig):
     host: str
     port: int = 28900
