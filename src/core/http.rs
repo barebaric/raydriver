@@ -35,7 +35,18 @@ pub async fn get(
     path: &str,
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
-    request(host, port, "GET", path, None, None, timeout).await
+    get_with_headers(host, port, path, &[], timeout).await
+}
+
+/// Perform a GET request with extra request headers.
+pub async fn get_with_headers(
+    host: &str,
+    port: u16,
+    path: &str,
+    extra_headers: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<HttpResponse, SessionError> {
+    request(host, port, "GET", path, None, extra_headers, timeout).await
 }
 
 /// Perform a POST request with a plain-text body.
@@ -47,13 +58,27 @@ pub async fn post(
     body: &[u8],
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
+    post_with_headers(host, port, path, content_type, body, &[], timeout).await
+}
+
+/// Perform a POST request with extra request headers.
+#[allow(clippy::too_many_arguments)]
+pub async fn post_with_headers(
+    host: &str,
+    port: u16,
+    path: &str,
+    content_type: &str,
+    body: &[u8],
+    extra_headers: &[(&str, &str)],
+    timeout: Duration,
+) -> Result<HttpResponse, SessionError> {
     request(
         host,
         port,
         "POST",
         path,
         Some((content_type, body)),
-        None,
+        extra_headers,
         timeout,
     )
     .await
@@ -68,6 +93,35 @@ pub async fn post_multipart(
     field: &str,
     filename: &str,
     file: &[u8],
+    timeout: Duration,
+) -> Result<HttpResponse, SessionError> {
+    post_multipart_fields(
+        host,
+        port,
+        path,
+        field,
+        filename,
+        file,
+        &[],
+        &[],
+        timeout,
+    )
+    .await
+}
+
+/// Perform a POST request with a `multipart/form-data` body carrying
+/// a single file field plus plain value fields and extra request
+/// headers.
+#[allow(clippy::too_many_arguments)]
+pub async fn post_multipart_fields(
+    host: &str,
+    port: u16,
+    path: &str,
+    field: &str,
+    filename: &str,
+    file: &[u8],
+    fields: &[(&str, &str)],
+    extra_headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
     let boundary = format!("raydriver{}", std::process::id());
@@ -86,6 +140,19 @@ pub async fn post_multipart(
         .as_bytes(),
     );
     body.extend_from_slice(file);
+    for (name, value) in fields {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{b}\r\n\
+                 Content-Disposition: form-data; name=\"{name}\"\r\n\
+                 \r\n{value}",
+                b = boundary,
+                name = name,
+                value = value,
+            )
+            .as_bytes(),
+        );
+    }
     body.extend_from_slice(format!("\r\n--{b}--\r\n", b = boundary).as_bytes());
     let content_type = format!("multipart/form-data; boundary={boundary}");
     request(
@@ -94,7 +161,7 @@ pub async fn post_multipart(
         "POST",
         path,
         Some((&content_type, &body)),
-        None,
+        extra_headers,
         timeout,
     )
     .await
@@ -106,14 +173,14 @@ async fn request(
     method: &str,
     path: &str,
     body: Option<(&str, &[u8])>,
-    _extra: Option<()>,
+    extra_headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
     tokio::time::timeout(timeout, async {
         let stream = TcpStream::connect((host, port))
             .await
             .map_err(|e| SessionError::Connection(e.to_string()))?;
-        exchange(stream, host, port, method, path, body)
+        exchange(stream, host, port, method, path, body, extra_headers)
             .await
             .map_err(|e| SessionError::Connection(e.to_string()))
     })
@@ -128,11 +195,15 @@ async fn exchange(
     method: &str,
     path: &str,
     body: Option<(&str, &[u8])>,
+    extra_headers: &[(&str, &str)],
 ) -> Result<HttpResponse, std::io::Error> {
     let mut req = format!("{method} {path} HTTP/1.1\r\n");
     req.push_str(&format!("Host: {host}:{port}\r\n"));
     req.push_str("Accept: */*\r\n");
     req.push_str("Connection: close\r\n");
+    for (name, value) in extra_headers {
+        req.push_str(&format!("{name}: {value}\r\n"));
+    }
     match body {
         Some((content_type, payload)) => {
             req.push_str(&format!("Content-Type: {content_type}\r\n"));

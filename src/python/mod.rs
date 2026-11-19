@@ -5,6 +5,7 @@ pub(crate) mod core;
 pub(crate) mod events;
 pub(crate) mod grbl;
 pub(crate) mod marlin;
+pub(crate) mod octoprint;
 pub(crate) mod pyfuture;
 pub(crate) mod runtime;
 pub(crate) mod smoothie;
@@ -159,6 +160,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     grbl::register(m)?;
     marlin::register(m)?;
     smoothie::register(m)?;
+    octoprint::register(m)?;
     xtool::register(m)?;
     register_atexit_hook(m)?;
     Ok(())
