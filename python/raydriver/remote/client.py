@@ -639,6 +639,9 @@ class RemoteSession:
     async def set_focus_power(self, power: float | None = None) -> None:
         await self._command("set_focus_power", power=power)
 
+    async def probe_device(self) -> Any:
+        return await self._command("probe_device")
+
     async def read_settings(self) -> Any:
         return await self._command("read_settings")
 

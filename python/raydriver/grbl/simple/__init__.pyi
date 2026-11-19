@@ -43,10 +43,13 @@ class GrblSimpleSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def connect(self) -> typing.Any:
+    def probe_device(self) -> typing.Any:
         r"""
         Open the connection and start the background tasks.
+        Run the device census: query `$I` and `$$`, and return the
+        structured result as a dict.
         """
+    def connect(self) -> typing.Any: ...
     def disconnect(self) -> typing.Any:
         r"""
         Stop all background tasks and close the transport.

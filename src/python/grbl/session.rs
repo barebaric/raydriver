@@ -269,6 +269,26 @@ impl GrblSession {
     }
 
     /// Open the connection and start the background tasks.
+    /// Run the device census: query `$I` and `$$`, and return the
+    /// structured result as a dict.
+    fn probe_device<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            let build_info =
+                core.execute_interactive_command("$I".to_string()).await?;
+            let settings_lines =
+                core.execute_interactive_command("$$".to_string()).await?;
+            let census =
+                crate::grbl::probe::describe(&build_info, &settings_lines);
+            Python::attach(|py| {
+                crate::python::core::json::value_to_py(py, &census)
+            })
+        })
+    }
+
     fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();

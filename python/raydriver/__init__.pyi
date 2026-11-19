@@ -10,14 +10,59 @@ from . import octoprint
 from . import smoothie
 from . import xtool
 __all__ = [
+    "ProtocolInfo",
     "core",
     "grbl",
     "init_logging",
     "marlin",
     "octoprint",
+    "protocol_info",
+    "protocols",
+    "protocols_payload",
     "smoothie",
     "xtool",
 ]
+
+@typing.final
+class ProtocolInfo:
+    r"""
+    One protocol's metadata: label, config shape, method surface and
+    derived capabilities.
+    """
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def label(self) -> builtins.str: ...
+    @property
+    def dialect_family(self) -> builtins.str:
+        r"""
+        A hint clients can map to their own command-dialect
+        definitions; it is not a driver selection.
+        """
+    @property
+    def connection(self) -> builtins.str: ...
+    @property
+    def config_keys(self) -> builtins.list[builtins.str]: ...
+    @property
+    def methods(self) -> builtins.list[builtins.str]:
+        r"""
+        The sorted method surface of the session.
+        """
+    @property
+    def properties(self) -> builtins.list[builtins.str]:
+        r"""
+        The sorted property surface of the session.
+        """
+    @property
+    def capabilities(self) -> typing.Any:
+        r"""
+        What applications can do with the protocol, derived from the
+        method/property surface so the two never drift apart.
+        """
+    def to_dict(self) -> typing.Any:
+        r"""
+        The wire form served by `protocol/list`.
+        """
 
 def init_logging(filter: typing.Optional[builtins.str] = None, path: typing.Optional[builtins.str] = None) -> None:
     r"""
@@ -27,5 +72,20 @@ def init_logging(filter: typing.Optional[builtins.str] = None, path: typing.Opti
     ``warn`` and can be overridden with an ``env_logger`` filter
     string argument or via ``RUST_LOG`` (which always wins).  Calling
     again re-targets output and replaces the filter.
+    """
+
+def protocol_info(name: builtins.str) -> ProtocolInfo:
+    r"""
+    Look up a protocol's metadata, raising `KeyError` if unknown.
+    """
+
+def protocols() -> typing.Any:
+    r"""
+    The registry as a name → metadata mapping.
+    """
+
+def protocols_payload() -> typing.Any:
+    r"""
+    The `protocol/list` payload: every protocol's metadata.
     """
 

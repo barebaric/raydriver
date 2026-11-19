@@ -12,9 +12,11 @@ from raydriver.core import transport
 from raydriver.core import types
 import typing
 from . import parser
+from . import probe
 __all__ = [
     "MarlinSession",
     "parser",
+    "probe",
 ]
 
 @typing.final
@@ -45,10 +47,15 @@ class MarlinSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def connect(self) -> typing.Any:
+    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> typing.Any:
         r"""
         Open the connection and start the background tasks.
+        Run the device census: query M115, M211, M503 and M149,
+        and return the structured result as a dict. *boot_lines* are
+        the startup messages the caller observed on the session,
+        used to refine the firmware version.
         """
+    def connect(self) -> typing.Any: ...
     def disconnect(self) -> typing.Any:
         r"""
         Stop all background tasks and close the transport.

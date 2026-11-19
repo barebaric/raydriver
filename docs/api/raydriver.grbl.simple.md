@@ -56,8 +56,6 @@ Abort the running job: soft reset, pending-command cleanup and safety shutdown.
 connect() -> Any
 ```
 
-Open the connection and start the background tasks.
-
 | Parameter | Type  | Description |
 | --------- | ----- | ----------- |
 | _Returns_ | `Any` |             |
@@ -156,6 +154,19 @@ Move to an absolute position (mm) at `speed` (mm/min).
 | `x`       | `float` |             |
 | `y`       | `float` |             |
 | _Returns_ | `Any`   |             |
+
+### `probe_device()`
+
+```python
+probe_device() -> Any
+```
+
+Open the connection and start the background tasks. Run the device census: query `$I` and `$$`, and
+return the structured result as a dict.
+
+| Parameter | Type  | Description |
+| --------- | ----- | ----------- |
+| _Returns_ | `Any` |             |
 
 ### `read_parser_state()`
 
