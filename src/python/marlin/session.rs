@@ -115,6 +115,38 @@ impl MarlinSession {
     }
 
     /// Open the connection and start the background tasks.
+    /// Run the device census: query M115, M211, M503 and M149,
+    /// and return the structured result as a dict. *boot_lines* are
+    /// the startup messages the caller observed on the session,
+    /// used to refine the firmware version.
+    #[pyo3(signature = (boot_lines=None))]
+    fn probe_device<'py>(
+        &self,
+        py: Python<'py>,
+        boot_lines: Option<Vec<String>>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            let mut replies: Vec<Vec<String>> = Vec::new();
+            for command in crate::marlin::probe::CENSUS_COMMANDS {
+                let lines = core
+                    .execute_interactive_command(command.to_string())
+                    .await?;
+                replies.push(crate::marlin::probe::filter_ok_lines(&lines));
+            }
+            let census = crate::marlin::probe::describe(
+                &replies[0],
+                &replies[1],
+                &replies[2],
+                &replies[3],
+                &boot_lines.unwrap_or_default(),
+            );
+            Python::attach(|py| {
+                crate::python::core::json::value_to_py(py, &census)
+            })
+        })
+    }
+
     fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();

@@ -595,7 +595,7 @@ impl RemoteSession {
 
     // -- command surface -------------------------------------------------
 
-    async fn command(
+    pub(crate) async fn command(
         self: &Arc<Self>,
         method: &str,
         args: Value,

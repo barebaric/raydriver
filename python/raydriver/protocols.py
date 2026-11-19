@@ -97,6 +97,7 @@ _GRBL_EXTRA = frozenset(
         "read_parser_state",
         "run_probe_cycle",
         "detect_unit_system",
+        "probe_device",
     }
 )
 
@@ -135,7 +136,8 @@ PROTOCOLS: dict[str, ProtocolInfo] = {
         dialect_family="smoothieware",
         connection="telnet",
         config_keys=("host", "tcp_port"),
-        methods=COMMON_METHODS | frozenset({"set_hold", "clear_alarm"}),
+        methods=COMMON_METHODS
+        | frozenset({"set_hold", "clear_alarm", "probe_device"}),
         properties=COMMON_PROPERTIES,
     ),
     "octoprint": ProtocolInfo(
@@ -173,7 +175,13 @@ PROTOCOLS: dict[str, ProtocolInfo] = {
         connection="serial",
         config_keys=("port", "baudrate"),
         methods=COMMON_METHODS
-        | frozenset({"clear_alarm", "detect_unit_system"}),
+        | frozenset(
+            {
+                "clear_alarm",
+                "detect_unit_system",
+                "probe_device",
+            }
+        ),
         properties=COMMON_PROPERTIES,
     ),
 }

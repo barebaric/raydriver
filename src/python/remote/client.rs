@@ -433,6 +433,22 @@ impl RemoteSession {
         })
     }
 
+    /// Run the device census over the session.
+    #[pyo3(signature = ())]
+    fn probe_device<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        spawn_future(py, async move {
+            let value = inner
+                .command("probe_device", serde_json::json!({}))
+                .await
+                .map_err(connection)?;
+            Python::attach(|py| value_to_py(py, &value))
+        })
+    }
+
     fn read_settings<'py>(
         &self,
         py: Python<'py>,

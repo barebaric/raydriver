@@ -209,6 +209,18 @@ move_to(speed: float, x: float, y: float) -> Any
 | `y`       | `float` |             |
 | _Returns_ | `Any`   |             |
 
+### `probe_device()`
+
+```python
+probe_device() -> Any
+```
+
+Run the device census over the session.
+
+| Parameter | Type  | Description |
+| --------- | ----- | ----------- |
+| _Returns_ | `Any` |             |
+
 ### `read_parser_state()`
 
 ```python
