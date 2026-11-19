@@ -362,11 +362,20 @@ impl SessionCore {
                 let _ = task.await;
             }
         }
-        let reader = self.reader_task.lock().unwrap().take();
-        if let Some(task) = reader {
-            task.abort();
-        }
+        self.abort_reader_task().await;
         self.transport.close().await;
+    }
+
+    /// Abort and reap the RX reader task.  It must not outlive the
+    /// connection it belongs to: a lingering reader keeps delivering
+    /// session events after the Python event loop is gone, which
+    /// crashes the interpreter on Windows.
+    async fn abort_reader_task(&self) {
+        let task = self.reader_task.lock().unwrap().take();
+        if let Some(task) = task {
+            task.abort();
+            let _ = task.await;
+        }
     }
 
     /// Abort every background task without awaiting, for use from
@@ -475,9 +484,7 @@ impl SessionCore {
                     }
                 }
 
-                if let Some(task) = self.reader_task.lock().unwrap().take() {
-                    task.abort();
-                }
+                self.abort_reader_task().await;
                 self.transport.close().await;
             }
 
