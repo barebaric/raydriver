@@ -282,6 +282,45 @@ fn list_usb_ports(py: Python<'_>) -> PyResult<Vec<String>> {
         .collect())
 }
 
+/// The common serial baud rates offered to applications.
+#[gen_stub_pyfunction(module = "raydriver.core.discovery.ports")]
+#[pyfunction]
+fn list_baud_rates() -> Vec<u32> {
+    core_ports::list_baud_rates()
+}
+
+/// Resolves a USB `vid:pid` pair (e.g. FTDI 0x0403/0x6001) to a
+/// concrete device path by scanning the available ports; `None`
+/// when no matching device is present.
+#[gen_stub_pyfunction(module = "raydriver.core.discovery.ports")]
+#[pyfunction]
+fn resolve_vidpid(
+    py: Python<'_>,
+    vid: u16,
+    pid: u16,
+) -> PyResult<Option<String>> {
+    let infos = helpers::attr(py, "ports", "list_port_info")?.call0()?;
+    let infos: Vec<SerialPortInfo> = infos.extract()?;
+    let core_infos: Vec<CorePortInfo> =
+        infos.iter().map(|info| info.inner.clone()).collect();
+    Ok(core_ports::resolve_vidpid_in(&core_infos, vid, pid))
+}
+
+/// Diagnoses systemic serial-port access problems (missing
+/// `dialout` group membership, snap confinement). Returns a
+/// structured result; the application supplies the localized
+/// message.
+#[gen_stub_pyfunction(module = "raydriver.core.discovery.ports")]
+#[pyfunction]
+fn check_permission_issue(py: Python<'_>) -> PyResult<String> {
+    let ports: Vec<String> = helpers::attr(py, "ports", "list_usb_ports")?
+        .call0()?
+        .extract()?;
+    Ok(core_ports::check_permission_issue_over(&ports)
+        .as_str()
+        .to_string())
+}
+
 pub fn register(
     discovery_mod: &Bound<'_, PyModule>,
     core_mod: &Bound<'_, PyModule>,
@@ -305,6 +344,9 @@ pub fn register(
     module.add_function(wrap_pyfunction!(list_ports, &module)?)?;
     module.add_function(wrap_pyfunction!(list_port_info, &module)?)?;
     module.add_function(wrap_pyfunction!(list_usb_ports, &module)?)?;
+    module.add_function(wrap_pyfunction!(list_baud_rates, &module)?)?;
+    module.add_function(wrap_pyfunction!(resolve_vidpid, &module)?)?;
+    module.add_function(wrap_pyfunction!(check_permission_issue, &module)?)?;
     helpers::attach_submodule(
         discovery_mod,
         &module,

@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # All branches: stacked PRs target their parent branch, and each
+  # layer's CI must run before the stack merges.
   pull_request:
-    branches: [main]
 
 jobs:
   lint:

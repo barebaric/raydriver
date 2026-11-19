@@ -11,8 +11,10 @@ from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
 import typing
+from . import probe
 __all__ = [
     "SmoothieSession",
+    "probe",
 ]
 
 @typing.final
@@ -49,10 +51,14 @@ class SmoothieSession:
         r"""
         Stop all background tasks and close the transport.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any:
+    def probe_device(self) -> typing.Any:
         r"""
         Send a command and await its full response.
+        Run the device census: query ``version`` and the
+        ``config-get`` motion keys, and return the structured result
+        as a dict.
         """
+    def execute_interactive_command(self, command: builtins.str) -> typing.Any: ...
     def execute_command(self, command: builtins.str) -> typing.Any:
         r"""
         Queue a command and await its response (identical to
