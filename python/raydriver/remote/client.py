@@ -150,9 +150,8 @@ def open_session(
     )
 
 
-async def list_devices(endpoint: dict[str, Any] | str) -> list[dict[str, Any]]:
-    """The devices a daemon knows about, each with its protocol and
-    label as info — the source for a device picker."""
+async def _device_list(endpoint: dict[str, Any] | str) -> dict[str, Any]:
+    """The raw ``device/list`` payload from a daemon."""
     ep = _normalize_endpoint(endpoint)
     _, replies = await rins.daemon_rpc(
         ep["remote_host"],
@@ -166,7 +165,25 @@ async def list_devices(endpoint: dict[str, Any] | str) -> list[dict[str, Any]]:
         raise ConnectionError(
             reply.get("error", {}).get("message", "device/list failed")
         )
-    return reply["payload"].get("devices", [])
+    return reply.get("payload", {})
+
+
+async def list_devices(endpoint: dict[str, Any] | str) -> list[dict[str, Any]]:
+    """The devices a daemon knows about, each with its protocol and
+    label as info — the source for a device picker."""
+    return (await _device_list(endpoint)).get("devices", [])
+
+
+async def list_cameras(endpoint: dict[str, Any] | str) -> list[dict[str, Any]]:
+    """The cameras a daemon advertises on the device host.
+
+    Each entry is ``{"name": str, "uri": str, "type": str}`` where
+    ``type`` is one of Rayforge's network source types
+    (``http_stream``, ``http_snapshot``, ``rtsp``). Video never
+    crosses the control link; clients open *uri* with their own
+    network-camera source.
+    """
+    return (await _device_list(endpoint)).get("cameras", [])
 
 
 async def list_protocols(

@@ -14,7 +14,12 @@ from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.protocols import PROTOCOLS, protocol_info
 from raydriver.remote import protocol
-from raydriver.remote.client import list_devices, list_protocols, open_session
+from raydriver.remote.client import (
+    list_cameras,
+    list_devices,
+    list_protocols,
+    open_session,
+)
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 FAST_TIMINGS = {
@@ -122,6 +127,35 @@ async def test_device_list_includes_configured(rig):
     assert devices[0]["device"] == "/dev/ttyUSB0"
     assert devices[0]["protocol"] == "grbl"
     assert devices[0]["label"] == "GRBL"
+
+
+async def test_camera_list(rig):
+    daemon, port = rig
+    cameras = [
+        {
+            "name": "Enclosure",
+            "uri": "http://pi.local:8080/stream",
+            "type": "http_stream",
+        },
+        {
+            "name": "Bed",
+            "uri": "http://pi.local:8080/bed",
+            "type": "http_snapshot",
+        },
+    ]
+    daemon.config.cameras = cameras
+    assert (
+        await list_cameras({"remote_host": "127.0.0.1", "remote_port": port})
+        == cameras
+    )
+
+
+async def test_camera_list_empty(rig):
+    _, port = rig
+    assert (
+        await list_cameras({"remote_host": "127.0.0.1", "remote_port": port})
+        == []
+    )
 
 
 async def test_open_by_device_resolves_protocol(rig):

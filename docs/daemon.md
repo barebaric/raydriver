@@ -180,10 +180,10 @@ sources (`http_stream`, `http_snapshot`, `rtsp`) consume them.
 }
 ```
 
-The endpoints surface in `device/list` and the mDNS TXT records;
-the Rayforge wizard and camera dialog prefill the URI. Keep video
-endpoints LAN-only or firewalled — they are separate from the TLS
-control channel.
+The endpoints surface in `device/list`; the mDNS TXT records
+announce how many cameras the daemon has. Clients list the full
+endpoints with `list_cameras`. Keep video endpoints LAN-only or
+firewalled — they are separate from the TLS control channel.
 
 ## Clients
 
@@ -212,12 +212,15 @@ print(session.metadata["capabilities"])
 ```
 
 `list_devices` returns the daemon's configured (and open) devices,
-each with its `protocol` and `label` as info; `list_protocols`
-returns the full metadata table (label, capabilities, config keys,
-dialect family). `open_session` accepts a device reference or an
-existing `session_id` — never a protocol. The token is the one
-printed by `daemon add` / `daemon status`. The endpoint may be a
-URL or a dict (`remote_host`, `remote_port`, `token`, `tls_ca`,
+each with its `protocol` and `label` as info; `list_cameras` returns
+the advertised camera endpoints (`name`, `uri`, `type`);
+`list_protocols` returns the full metadata table (label,
+capabilities, config keys, dialect family). Video never crosses the
+control link, so clients open each camera `uri` with their own
+network-camera source. `open_session` accepts a device reference or
+an existing `session_id` — never a protocol. The token is the one
+printed by `daemon add` / `daemon status`. The endpoint may be a URL
+or a dict (`remote_host`, `remote_port`, `token`, `tls_ca`,
 `tls_hostname`).
 
 The returned proxy exposes the same method and event surface as a

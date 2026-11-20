@@ -7,8 +7,8 @@ Submodules
 - raydriver.remote.daemon — session host: listener, registry,
   lease, event ring and fan-out
 - raydriver.remote.client — RemoteSession proxy, the protocol-agnostic
-  open_session / list_devices / list_protocols API, and the
-  create_session factory
+  open_session / list_devices / list_protocols / list_cameras API,
+  and the create_session factory
 - raydriver.remote.mdns — optional _raydriver._tcp announce and
   browse (extra: daemon)
 - raydriver.remote.inspect — read-only daemon inspection for the
