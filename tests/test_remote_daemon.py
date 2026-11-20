@@ -295,7 +295,11 @@ async def test_reattach_replays_exact_events(rig):
     assert "replayed" in reply["payload"]
     expected = [p for p in recorded if p["seq"] > mid]
     got = [p for p in other.events if p["seq"] > mid]
-    assert got == expected
+    # The daemon keeps emitting status polls while the test runs, so
+    # the replayed ring can extend beyond what the first client read.
+    # The replay must still reproduce the recorded window exactly.
+    assert got[: len(expected)] == expected
+    assert [p["seq"] for p in got] == list(range(mid + 1, mid + 1 + len(got)))
 
 
 async def test_first_attach_gets_snapshot(rig):
