@@ -34,11 +34,7 @@ CLIENTS: list["DaemonClient"] = []
 async def _cleanup_clients():
     yield
     for client in list(CLIENTS):
-        client.writer.close()
-        try:
-            await client.writer.wait_closed()
-        except (OSError, ConnectionError):
-            pass
+        client.writer.transport.abort()
     CLIENTS.clear()
     current = asyncio.current_task()
     for task in asyncio.all_tasks():
