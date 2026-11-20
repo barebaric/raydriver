@@ -275,7 +275,7 @@ impl RemoteSession {
             .unwrap()
             .clone()
             .ok_or_else(|| "no session to attach".to_string())?;
-        let reply = self
+        let mut reply = self
             .request(
                 protocol::SESSION_ATTACH,
                 json!({
@@ -285,6 +285,34 @@ impl RemoteSession {
                 }),
             )
             .await?;
+        // A just-dropped connection may not have been noticed by the
+        // daemon yet. Retry briefly: the daemon starts the lease
+        // grace period when it sees the old socket close.
+        for _ in 0..40 {
+            if reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+                break;
+            }
+            let code = reply
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            if code != protocol::LEASE_TAKEN {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            reply = self
+                .request(
+                    protocol::SESSION_ATTACH,
+                    json!({
+                        "session_id": session_id,
+                        "after_seq":
+                            self.last_seq.load(Ordering::SeqCst),
+                        "role": "control",
+                    }),
+                )
+                .await?;
+        }
         check_reply(&reply)?;
         if let Some(snapshot) = reply
             .get("payload")
