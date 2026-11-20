@@ -992,6 +992,7 @@ dependencies = [
  "sha1 0.10.7",
  "thiserror",
  "tokio",
+ "tokio-rustls",
  "tokio-serial",
  "tokio-tungstenite",
  "uuid",

@@ -3,6 +3,7 @@
 //! TCP scan), the discovery result types, and the driver-facing
 //! discovery subsystem (declarations, channels, engine, session).
 
+mod daemon;
 mod engine;
 mod fingerprints;
 pub(crate) mod helpers;
@@ -304,6 +305,7 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
             "serial_channel",
             "mdns_channel",
             "raydriver_channel",
+            "daemon",
             "engine",
             "session",
         ],
@@ -339,6 +341,7 @@ pub fn register(core_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     serial_channel::register(&discovery_mod)?;
     mdns_channel::register(&discovery_mod)?;
     raydriver_channel::register(&discovery_mod)?;
+    daemon::register(&discovery_mod)?;
     engine::register(&discovery_mod)?;
     session::register(&discovery_mod)?;
     Ok(())

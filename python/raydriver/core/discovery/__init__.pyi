@@ -3,6 +3,7 @@
 
 import builtins
 import typing
+from . import daemon
 from . import engine
 from . import fingerprints
 from . import mdns_channel
@@ -16,6 +17,7 @@ from . import spec
 __all__ = [
     "DeviceIdentity",
     "DiscoveredDevice",
+    "daemon",
     "device_key",
     "engine",
     "find_subnet_devices",

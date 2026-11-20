@@ -180,10 +180,27 @@ sources (`http_stream`, `http_snapshot`, `rtsp`) consume them.
 }
 ```
 
-The endpoints surface in `device/list` and the mDNS TXT records;
-the Rayforge wizard and camera dialog prefill the URI. Keep video
-endpoints LAN-only or firewalled — they are separate from the TLS
-control channel.
+The endpoints surface in `device/list`; the mDNS TXT records
+announce how many cameras the daemon has. Query the full list with
+the Rust-backed camera helper (token and TLS included):
+
+```python
+from raydriver.core.discovery import daemon as daemon_api
+
+cameras = await daemon_api.list_cameras(
+    "pi.local",
+    8765,
+    token="<your token>",
+    tls_ca="/path/to/daemon-cert.pem",
+)
+for camera in cameras:
+    print(camera["name"], camera["type"], camera["uri"])
+```
+
+`tls_hostname` overrides the verified certificate name when it
+differs from the address. A token is only sent over TLS, except to
+loopback. Keep video endpoints LAN-only or firewalled — they are
+separate from the TLS control channel.
 
 ## Clients
 
