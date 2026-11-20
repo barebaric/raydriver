@@ -27,6 +27,24 @@ from raydriver.remote import protocol
 from raydriver.remote.daemon import ClientQueue, Daemon, DaemonConfig
 
 CERTS = Path(__file__).parent / "certs"
+CLIENTS: list["DaemonClient"] = []
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_clients():
+    yield
+    for client in list(CLIENTS):
+        client.writer.close()
+        try:
+            await client.writer.wait_closed()
+        except (OSError, ConnectionError):
+            pass
+    CLIENTS.clear()
+    current = asyncio.current_task()
+    for task in asyncio.all_tasks():
+        if task is not current:
+            task.cancel()
+    await asyncio.sleep(0)
 
 
 CA = CERTS / "daemon-test-ca.pem"
@@ -174,6 +192,7 @@ async def connect_client(port, token=None, ssl_context=None):
         )
         reply = await read_frame(reader)
         assert reply["ok"], reply
+    CLIENTS.append(client)
     return client
 
 
