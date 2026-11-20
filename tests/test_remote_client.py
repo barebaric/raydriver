@@ -284,6 +284,15 @@ async def test_update_dialect_is_synchronous(remote_rig):
         await proxy.aclose()
 
 
+async def test_update_dialect_before_connect(remote_rig):
+    port, mock = remote_rig
+    proxy = make_proxy(port, EventRecorder())
+    try:
+        proxy.update_dialect({**DEFAULT_DIALECT})
+    finally:
+        await proxy.aclose()
+
+
 async def test_token_requires_tls(remote_rig):
     port, mock = remote_rig
     # Non-loopback endpoint: the refusal fires before any connect.
