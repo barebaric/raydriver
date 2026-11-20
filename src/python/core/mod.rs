@@ -1,5 +1,6 @@
 //! The `raydriver.core` Python submodule: shared device primitives.
 
+pub(crate) mod bluetooth;
 pub(crate) mod discovery;
 pub(crate) mod json;
 pub(crate) mod mock;
@@ -25,6 +26,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "__all__",
         vec![
             "SessionEvent",
+            "bluetooth",
             "discovery",
             "list_serial_ports",
             "types",
@@ -50,6 +52,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     types::register(&types_mod)?;
     core_mod.add_submodule(&types_mod)?;
 
+    bluetooth::register(&core_mod)?;
     discovery::register(&core_mod)?;
 
     m.add_submodule(&core_mod)?;

@@ -6,11 +6,13 @@ Shared device primitives: transports, value types and session events. The protoc
 
 import builtins
 import typing
+from . import bluetooth
 from . import discovery
 from . import transport
 from . import types
 __all__ = [
     "SessionEvent",
+    "bluetooth",
     "discovery",
     "list_serial_ports",
     "transport",

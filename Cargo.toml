@@ -64,5 +64,16 @@ name = "stub_gen"
 path = "src/bin/stub_gen.rs"
 required-features = ["python"]
 
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus = { version = "6.4", default-features = false, features = ["tokio"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-io-bluetooth = "0.3"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Devices_Bluetooth", "Win32_Foundation", "Win32_Networking_WinSock"] }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

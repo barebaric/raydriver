@@ -372,7 +372,7 @@ Swap the dialect command templates at runtime.
 ```python
 with_transport(
     transport: transport.MockTransport,
-    config: Optional[Union[dict, config.GrblSerialConfig, config.Esp3dConfig]] = None,
+    config: Optional[Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]] = None,
     dialect: Optional[dict] = None,
     event_callback: Optional[Callable[[core.SessionEvent], object]] = None,
 ) -> GrblSession
@@ -380,13 +380,13 @@ with_transport(
 
 Build a session around a \[`MockTransport`\] (for tests).
 
-| Parameter        | Type                                                                        | Description |
-| ---------------- | --------------------------------------------------------------------------- | ----------- |
-| `transport`      | `transport.MockTransport`                                                   |             |
-| `config`         | `Optional[Union[dict, config.GrblSerialConfig, config.Esp3dConfig]] = None` |             |
-| `dialect`        | `Optional[dict] = None`                                                     |             |
-| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                    |             |
-| _Returns_        | `GrblSession`                                                               |             |
+| Parameter        | Type                                                                                                                             | Description |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `transport`      | `transport.MockTransport`                                                                                                        |             |
+| `config`         | `Optional[Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]] = None` |             |
+| `dialect`        | `Optional[dict] = None`                                                                                                          |             |
+| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                                                                         |             |
+| _Returns_        | `GrblSession`                                                                                                                    |             |
 
 ### `write_setting()`
 

@@ -174,6 +174,32 @@ config_pyclass!(
 );
 
 config_pyclass!(
+    /// GRBL over Bluetooth Classic SPP/RFCOMM.
+    GrblBluetoothConfig,
+    required: [address: String],
+    fields: [
+        channel: u8 = 1,
+        poll_status_while_running: bool = false,
+        deadlock_detection: bool = false,
+        rx_buffer_size_override: i64 = 0,
+        stall_timeout_min: f64 = 5.0,
+        stall_timeout_max: f64 = 120.0,
+        stall_timeout_safety_factor: f64 = 3.0,
+        stall_timeout_default: f64 = 30.0,
+        safety_shutdown_delay: f64 = 0.2,
+        unanswered_poll_limit: u32 = 3,
+        poll_response_attempts: u32 = 10,
+        poll_response_interval: f64 = 0.1,
+        handshake_timeout: f64 = 6.0,
+        handshake_poll_interval: f64 = 0.5,
+        status_poll_interval: f64 = 0.5,
+        reconnect_delay: f64 = 5.0,
+        command_timeout: f64 = 10.0,
+    ],
+    optional: [cached_rx_buffer_size: Option<i64> = None],
+);
+
+config_pyclass!(
     /// Configuration for the minimal ping-pong GRBL session.
     GrblSimpleConfig,
     required: [port: String],
@@ -337,6 +363,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<GrblSessionOptions>()?;
     module.add_class::<GrblSerialConfig>()?;
     module.add_class::<GrblTelnetConfig>()?;
+    module.add_class::<GrblBluetoothConfig>()?;
     module.add_class::<GrblSimpleConfig>()?;
     module.add_class::<Esp3dConfig>()?;
     module.add_class::<SmoothieConfig>()?;

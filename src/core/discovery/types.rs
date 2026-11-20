@@ -60,6 +60,9 @@ pub fn device_key(
             "{driver_name}:raydriver://{remote_host}:{remote_port}:{resource}"
         );
     }
+    if let Some(address) = get_str("address") {
+        return format!("{driver_name}:bt://{address}");
+    }
     if let Some(serial_port) = get_str("port") {
         return format!("{driver_name}:{serial_port}");
     }

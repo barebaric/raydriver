@@ -164,6 +164,7 @@ fn safe_list_ports_linux(py: Python<'_>) -> PyResult<Vec<String>> {
     for (dir, prefix) in [
         ("/dev", "ttyUSB"),
         ("/dev", "ttyACM"),
+        ("/dev", "rfcomm"),
         ("/dev/serial/by-id", ""),
         ("/dev/serial/by-path", ""),
     ] {
