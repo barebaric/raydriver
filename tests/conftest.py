@@ -4,6 +4,7 @@ emulator (raydriver.grbl.emulator)."""
 import asyncio
 import faulthandler
 import os
+import sys
 import time
 
 import pytest
@@ -14,7 +15,10 @@ from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
 
 
-def _arm_freeze_watchdog():
+def if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+_arm_freeze_watchdog():
     """Dump all thread stacks periodically when diagnosing a stall.
 
     Opt-in via ``RAYDRIVER_FREEZE_WATCHDOG=1``.  The dump runs on a
@@ -29,6 +33,9 @@ def _arm_freeze_watchdog():
         60, repeat=True, file=open("freeze-dump.txt", "w")
     )
 
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _arm_freeze_watchdog()
 
