@@ -260,5 +260,7 @@ async def test_per_protocol_method_validation(rig):
     daemon, port = rig
     # clear_alarm exists on Smoothie/Marlin, not GRBL: the daemon must
     # reject it for a grbl session even though it is in the union.
-    assert "clear_alarm" not in protocol_info("grbl").methods
+    host = daemon._resolve_device("/dev/ttyUSB0")[3]
+    assert host is not None
+    assert "clear_alarm" not in protocol_info(host.protocol_name).methods
     assert "clear_alarm" in protocol.SESSION_METHODS

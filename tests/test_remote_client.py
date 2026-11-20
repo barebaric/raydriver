@@ -26,9 +26,8 @@ from raydriver.remote.client import RemoteSession, create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 CERTS = Path(__file__).parent / "certs"
-CA = CERTS / "daemon-test-ca.pem"
-CERT = CERTS / "daemon-test-cert.pem"
-KEY = CERTS / "daemon-test-key.pem"
+CERT = CERTS / "analyzer-test-cert.pem"
+KEY = CERTS / "analyzer-test-key.pem"
 
 
 def job_gcode(lines):
@@ -239,7 +238,8 @@ async def test_disconnect_sleeping_and_reattach(remote_rig):
             proxy.run(job_gcode(40), op_line_map={i: i for i in range(40)})
         )
         await wait_until(lambda: proxy.job_running)
-        proxy.drop_connection()  # simulate the network dropping
+        assert proxy._writer is not None
+        proxy._writer.close()  # simulate the network dropping
         with pytest.raises(ConnectionError):
             await run_task
         await events.wait_for(
@@ -359,7 +359,7 @@ async def test_tls_token_roundtrip():
         server_port(server),
         events,
         token="secret",
-        tls_ca=str(CA),
+        tls_ca=str(CERT),
         tls_hostname="localhost",
     )
     try:

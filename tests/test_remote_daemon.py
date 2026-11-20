@@ -25,9 +25,8 @@ from raydriver.remote import protocol
 from raydriver.remote.daemon import ClientQueue, Daemon, DaemonConfig
 
 CERTS = Path(__file__).parent / "certs"
-CA = CERTS / "daemon-test-ca.pem"
-CERT = CERTS / "daemon-test-cert.pem"
-KEY = CERTS / "daemon-test-key.pem"
+CERT = CERTS / "analyzer-test-cert.pem"
+KEY = CERTS / "analyzer-test-key.pem"
 
 
 def job_gcode(lines):
@@ -282,7 +281,6 @@ async def test_reattach_replays_exact_events(rig):
     await client.connect_session(sid)
     await client.run_job(sid, 10)
     await client.wait_for_event("job_finished")
-    await client.collect(0.05)
     recorded = list(client.events)
     mid = recorded[len(recorded) // 2]["seq"]
 
@@ -295,11 +293,7 @@ async def test_reattach_replays_exact_events(rig):
     assert "replayed" in reply["payload"]
     expected = [p for p in recorded if p["seq"] > mid]
     got = [p for p in other.events if p["seq"] > mid]
-    # The daemon keeps emitting status polls while the test runs, so
-    # the replayed ring can extend beyond what the first client read.
-    # The replay must still reproduce the recorded window exactly.
-    assert got[: len(expected)] == expected
-    assert [p["seq"] for p in got] == list(range(mid + 1, mid + 1 + len(got)))
+    assert got == expected
 
 
 async def test_first_attach_gets_snapshot(rig):
@@ -537,7 +531,7 @@ async def test_tls_roundtrip():
         client = await connect_client(
             server_port(server),
             token="secret",
-            ssl_context=make_client_ssl_context(str(CA)),
+            ssl_context=make_client_ssl_context(str(CERT)),
         )
         reply = await client.request(protocol.DEVICE_LIST)
         assert reply["ok"]

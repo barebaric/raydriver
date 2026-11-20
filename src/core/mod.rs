@@ -9,7 +9,6 @@
 pub mod dialect;
 pub mod discovery;
 pub mod http;
-pub mod remote;
 pub mod session;
 pub mod transport;
 pub mod types;
