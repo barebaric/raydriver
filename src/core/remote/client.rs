@@ -846,13 +846,6 @@ impl RemoteSession {
                     "args": {"dialect": dialect},
                 }),
             );
-        } else {
-            let session = self.clone();
-            tokio::spawn(async move {
-                let _ = session
-                    .command("update_dialect", json!({"dialect": dialect}))
-                    .await;
-            });
         }
     }
 }
