@@ -30,9 +30,9 @@ from typing import Any
 from raydriver import service
 from raydriver.core import list_serial_ports
 from raydriver.paths import default_config_path
+from raydriver.protocols import PROTOCOLS
 from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
-from raydriver.protocols import PROTOCOLS
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 DEFAULT_CONFIG_PATH = default_config_path()
