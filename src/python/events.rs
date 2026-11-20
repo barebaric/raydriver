@@ -67,6 +67,8 @@ pub(crate) struct PyEvents {
     loop_: Mutex<Option<Py<PyAny>>>,
     progress_callback: Arc<Mutex<Option<Py<PyAny>>>>,
     queue: Arc<EventQueue>,
+    closed: AtomicBool,
+    schedule_lock: Mutex<()>,
 }
 
 /// Events waiting to be delivered on the loop thread, plus a flag
@@ -127,7 +129,24 @@ impl PyEvents {
             loop_: Mutex::new(None),
             progress_callback: Arc::new(Mutex::new(None)),
             queue: Arc::new(EventQueue::default()),
+            closed: AtomicBool::new(false),
+            schedule_lock: Mutex::new(()),
         }
+    }
+
+    /// Stop accepting new events.  Safe to call while holding the
+    /// GIL: it never blocks on an in-flight schedule.
+    pub(crate) fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+    }
+
+    /// Stop accepting new events and wait until any in-flight
+    /// schedule has left the loop, so the caller can close the loop
+    /// without racing a worker thread.  Must not be called under the
+    /// GIL; use it from async teardown.
+    pub(crate) fn quiesce(&self) {
+        self.close();
+        let _guard = self.schedule_lock.lock().unwrap();
     }
 
     /// Remember the running event loop so events can be marshaled
@@ -150,7 +169,11 @@ impl PyEvents {
     /// attached only for the single `call_soon_threadsafe` signal;
     /// the event is materialized into a Python object at drain time.
     fn schedule(&self, event: SessionEvent) {
-        if self.event_callback.is_none() {
+        if self.event_callback.is_none() || self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let _guard = self.schedule_lock.lock().unwrap();
+        if self.closed.load(Ordering::SeqCst) {
             return;
         }
         let result: PyResult<()> = Python::attach(|py| {
@@ -198,7 +221,13 @@ impl PyEvents {
 
     /// Queue a progress report for delivery.
     fn schedule_progress(&self, op_index: i64) {
-        if self.progress_callback.lock().unwrap().is_none() {
+        if self.closed.load(Ordering::SeqCst) {
+            return;
+        }
+        let _guard = self.schedule_lock.lock().unwrap();
+        if self.closed.load(Ordering::SeqCst)
+            || self.progress_callback.lock().unwrap().is_none()
+        {
             return;
         }
         let result: PyResult<()> = Python::attach(|py| {

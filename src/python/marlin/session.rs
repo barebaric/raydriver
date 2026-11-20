@@ -127,8 +127,10 @@ impl MarlinSession {
     /// Stop all background tasks and close the transport.
     fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let core = self.core.clone();
+        let events = self.events.clone();
         spawn_future(py, async move {
             core.cleanup().await;
+            events.quiesce();
             Ok(Python::attach(none_obj))
         })
     }
@@ -389,6 +391,7 @@ impl Drop for MarlinSession {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared
         // runtime and marshal events onto a possibly-closed loop.
+        self.events.close();
         self.core.abort_background_tasks_now();
     }
 }
