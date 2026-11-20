@@ -7,6 +7,8 @@ and TLS, keepalive and slow-client protection.
 """
 
 import asyncio
+import json
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,13 @@ def op_map(lines):
     return [[i, i] for i in range(lines)]
 
 
+async def read_frame(reader):
+    prefix = await reader.readexactly(4)
+    (size,) = struct.unpack(">I", prefix)
+    payload = await reader.readexactly(size)
+    return json.loads(payload)
+
+
 class DaemonClient:
     """Minimal protocol client: requests, event log, auto-pong."""
 
@@ -56,7 +65,7 @@ class DaemonClient:
     async def _read_loop(self):
         try:
             while True:
-                msg = await protocol.read_frame(self.reader)
+                msg = await read_frame(self.reader)
                 type_ = msg.get("type")
                 if type_ == protocol.PING:
                     await protocol.write_frame(
@@ -69,7 +78,7 @@ class DaemonClient:
                     future = self._pending.pop(msg_id, None)
                     if future is not None and not future.done():
                         future.set_result(msg)
-        except (ConnectionError, OSError):
+        except (asyncio.IncompleteReadError, ConnectionError, OSError):
             pass
 
     async def request(self, type_, payload=None):
@@ -154,14 +163,14 @@ async def connect_client(port, token=None, ssl_context=None):
         server_hostname="localhost" if ssl_context else None,
     )
     client = DaemonClient(reader, writer)
-    welcome = await protocol.read_frame(reader)
+    welcome = await read_frame(reader)
     assert welcome["type"] == protocol.WELCOME
     client.welcome = welcome["payload"]
     if welcome["payload"]["auth_required"]:
         await protocol.write_frame(
             writer, protocol.request(0, protocol.AUTH, {"token": token})
         )
-        reply = await protocol.read_frame(reader)
+        reply = await read_frame(reader)
         assert reply["ok"], reply
     client.start()
     return client
@@ -514,12 +523,12 @@ async def test_wrong_token_closes_connection():
         reader, writer = await asyncio.open_connection(
             "127.0.0.1", server_port(server)
         )
-        welcome = await protocol.read_frame(reader)
+        welcome = await read_frame(reader)
         assert welcome["payload"]["auth_required"] is True
         await protocol.write_frame(
             writer, protocol.request(1, protocol.AUTH, {"token": "x"})
         )
-        reply = await protocol.read_frame(reader)
+        reply = await read_frame(reader)
         assert reply["error"]["code"] == protocol.AUTH_FAILED
         assert await asyncio.wait_for(reader.read(), 5.0) == b""
         writer.close()
