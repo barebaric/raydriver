@@ -27,26 +27,6 @@ from raydriver.remote import protocol
 from raydriver.remote.daemon import ClientQueue, Daemon, DaemonConfig
 
 CERTS = Path(__file__).parent / "certs"
-CLIENTS: list["DaemonClient"] = []
-
-
-@pytest.fixture(autouse=True)
-async def _close_clients():
-    yield
-    clients = list(CLIENTS)
-    CLIENTS.clear()
-    for client in clients:
-        if client._reader_task is not None:
-            client._reader_task.cancel()
-            try:
-                await client._reader_task
-            except (asyncio.CancelledError, Exception):
-                pass
-        client.writer.close()
-        try:
-            await client.writer.wait_closed()
-        except (OSError, ConnectionError):
-            pass
 
 
 CA = CERTS / "daemon-test-ca.pem"
@@ -78,42 +58,28 @@ class DaemonClient:
         self.events = []
         self.welcome: dict[str, Any] | None = None
         self._id = 0
-        self._pending: dict[int, asyncio.Future] = {}
-        self._reader_task: asyncio.Task | None = None
 
-    def start(self):
-        self._reader_task = asyncio.ensure_future(self._read_loop())
-
-    async def _read_loop(self):
-        try:
-            while True:
-                msg = await read_frame(self.reader)
-                type_ = msg.get("type")
-                if type_ == protocol.PING:
-                    await protocol.write_frame(
-                        self.writer, {"type": protocol.PONG}
-                    )
-                elif type_ == protocol.EVENT:
-                    self.events.append(msg["payload"])
-                else:
-                    msg_id = msg.get("id")
-                    future = self._pending.pop(msg_id, None)
-                    if future is not None and not future.done():
-                        future.set_result(msg)
-        except (asyncio.IncompleteReadError, ConnectionError, OSError):
-            pass
+    async def _pump(self):
+        msg = await read_frame(self.reader)
+        type_ = msg.get("type")
+        if type_ == protocol.PING:
+            await protocol.write_frame(self.writer, {"type": protocol.PONG})
+            return None
+        if type_ == protocol.EVENT:
+            self.events.append(msg["payload"])
+            return None
+        return msg
 
     async def request(self, type_, payload=None):
         self._id += 1
-        msg_id = self._id
-        future = asyncio.get_running_loop().create_future()
-        self._pending[msg_id] = future
         await protocol.write_frame(
-            self.writer, protocol.request(msg_id, type_, payload)
+            self.writer, protocol.request(self._id, type_, payload)
         )
-        msg = await future
-        assert msg.get("id") == msg_id, msg
-        return msg
+        while True:
+            msg = await self._pump()
+            if msg is not None:
+                assert msg.get("id") == self._id, msg
+                return msg
 
     async def wait_for_event(self, kind, pred=None, timeout=10.0):
         deadline = time.monotonic() + timeout
@@ -122,15 +88,29 @@ class DaemonClient:
                 event = payload["event"]
                 if event.get("kind") == kind and (pred is None or pred(event)):
                     return payload
-            if time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 kinds = [p["event"].get("kind") for p in self.events]
                 raise AssertionError(
                     f"event {kind!r} not observed; got {kinds}"
                 )
-            await asyncio.sleep(0.01)
+            try:
+                await asyncio.wait_for(self._pump(), timeout=remaining)
+            except asyncio.TimeoutError:
+                kinds = [p["event"].get("kind") for p in self.events]
+                raise AssertionError(
+                    f"event {kind!r} timed out; got {kinds}"
+                ) from None
 
     async def collect(self, duration):
-        await asyncio.sleep(duration)
+        deadline = time.monotonic() + duration
+        while time.monotonic() < deadline:
+            try:
+                await asyncio.wait_for(
+                    self._pump(), timeout=deadline - time.monotonic()
+                )
+            except asyncio.TimeoutError:
+                break
 
     async def open_session(self, role="control", force=False):
         reply = await self.request(
@@ -194,8 +174,6 @@ async def connect_client(port, token=None, ssl_context=None):
         )
         reply = await read_frame(reader)
         assert reply["ok"], reply
-    client.start()
-    CLIENTS.append(client)
     return client
 
 
