@@ -285,7 +285,7 @@ Swap the dialect command templates at runtime.
 ```python
 with_transport(
     transport: transport.MockTransport,
-    config: Optional[Union[dict, config.SessionConfig]] = None,
+    config: Optional[Union[dict, config.MarlinConfig]] = None,
     dialect: Optional[dict] = None,
     event_callback: Optional[Callable[[core.SessionEvent], Any]] = None,
 ) -> MarlinSession
@@ -296,7 +296,7 @@ Build a session around a \[`MockTransport`\] (for tests).
 | Parameter        | Type                                                  | Description |
 | ---------------- | ----------------------------------------------------- | ----------- |
 | `transport`      | `transport.MockTransport`                             |             |
-| `config`         | `Optional[Union[dict, config.SessionConfig]] = None`  |             |
+| `config`         | `Optional[Union[dict, config.MarlinConfig]] = None`   |             |
 | `dialect`        | `Optional[dict] = None`                               |             |
 | `event_callback` | `Optional[Callable[[core.SessionEvent], Any]] = None` |             |
 | _Returns_        | `MarlinSession`                                       |             |

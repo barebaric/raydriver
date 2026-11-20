@@ -84,7 +84,7 @@ impl GrblSimpleSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.GrblSimpleConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
@@ -108,7 +108,7 @@ impl GrblSimpleSession {
     fn with_transport(
         transport: PyRef<'_, MockTransport>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.GrblSimpleConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,

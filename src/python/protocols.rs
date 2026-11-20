@@ -1,8 +1,7 @@
 //! Python bindings for the protocol registry (`raydriver.protocols`).
 //!
-//! Registered on the root module; the pure-Python
-//! `raydriver.protocols` package delegates here via module-level
-//! `__getattr__`.
+//! Registered as the `raydriver.protocols` submodule (stub-only: no
+//! Python file shadows it).
 
 use pyo3::exceptions::PyKeyError;
 use pyo3::prelude::*;
@@ -20,8 +19,8 @@ use crate::python::core::json::value_to_py;
 /// the two never drift apart. ``dialect_family`` is a hint clients
 /// can map to their own command-dialect definitions; it is not a
 /// driver selection.
-#[gen_stub_pyclass]
-#[pyclass(frozen, module = "raydriver")]
+#[gen_stub_pyclass(module = "raydriver.protocols")]
+#[pyclass(frozen, module = "raydriver.protocols")]
 pub struct ProtocolInfo {
     inner: core::ProtocolInfo,
 }
@@ -91,7 +90,7 @@ impl ProtocolInfo {
 }
 
 /// Look up a protocol's metadata, raising ``KeyError`` if unknown.
-#[gen_stub_pyfunction]
+#[gen_stub_pyfunction(module = "raydriver.protocols")]
 #[pyfunction]
 fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
     core::protocol_info(name)
@@ -100,7 +99,7 @@ fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
 }
 
 /// Every protocol's metadata, keyed by protocol name.
-#[gen_stub_pyfunction]
+#[gen_stub_pyfunction(module = "raydriver.protocols")]
 #[gen_stub(override_return_type(
     type_repr = "dict[builtins.str, ProtocolInfo]",
 ))]
@@ -117,7 +116,7 @@ fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
 }
 
 /// The ``protocol/list`` payload: every protocol's metadata.
-#[gen_stub_pyfunction]
+#[gen_stub_pyfunction(module = "raydriver.protocols")]
 #[gen_stub(override_return_type(type_repr = "dict[builtins.str, typing.Any]", imports = ("typing",)))]
 #[pyfunction]
 fn protocols_payload(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
@@ -125,9 +124,34 @@ fn protocols_payload(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<ProtocolInfo>()?;
-    m.add_function(wrap_pyfunction!(protocol_info, m)?)?;
-    m.add_function(wrap_pyfunction!(protocols, m)?)?;
-    m.add_function(wrap_pyfunction!(protocols_payload, m)?)?;
+    let py = m.py();
+    let module = PyModule::new(py, "protocols")?;
+    module.setattr(
+        "__doc__",
+        "Protocol registry: identity, config shape and capability \
+         claims for every hostable session protocol.",
+    )?;
+    module.add(
+        "__all__",
+        vec!["PROTOCOLS", "ProtocolInfo", "protocol_info", "protocols"],
+    )?;
+    // The registry as a name -> metadata mapping.
+    let protocols_dict = protocols(py)?;
+    module.setattr("PROTOCOLS", protocols_dict)?;
+    module.add_class::<ProtocolInfo>()?;
+    module.add_function(wrap_pyfunction!(protocol_info, &module)?)?;
+    module.add_function(wrap_pyfunction!(protocols, &module)?)?;
+    module.add_function(wrap_pyfunction!(protocols_payload, &module)?)?;
+    crate::python::core::discovery::helpers::attach_submodule(
+        m,
+        &module,
+        "raydriver.protocols",
+    )?;
     Ok(())
 }
+
+pyo3_stub_gen::module_variable!(
+    "raydriver.protocols",
+    "PROTOCOLS",
+    std::collections::HashMap<String, ProtocolInfo>
+);

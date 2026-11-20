@@ -66,7 +66,7 @@ impl M2Session {
     /// Create an M2 session for the configured host.
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.M2Config]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,

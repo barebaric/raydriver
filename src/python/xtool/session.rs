@@ -84,7 +84,7 @@ impl XtoolSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.XtoolConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,

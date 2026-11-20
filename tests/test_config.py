@@ -67,7 +67,7 @@ def test_grbl_options_defaults_are_flattened():
 
 def test_configs_are_keyword_only():
     with pytest.raises(TypeError):
-        GrblSerialConfig("/dev/null")
+        GrblSerialConfig("/dev/null")  # pyright: ignore[reportCallIssue]
 
 
 def test_session_accepts_typed_config():

@@ -37,7 +37,7 @@ class M2Session:
         r"""
         WebSocket URI of the configured device.
         """
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> M2Session:
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.M2Config]], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> M2Session:
         r"""
         Create an M2 session for the configured host.
         """

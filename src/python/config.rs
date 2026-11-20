@@ -37,7 +37,7 @@ macro_rules! config_pyclass {
     ) => {
         $(#[$doc])*
         #[gen_stub_pyclass]
-        #[pyclass(frozen, module = "raydriver")]
+        #[pyclass(frozen, module = "raydriver.config")]
         pub struct $name {
             $(pub $req: $reqty,)*
             $(pub $field: $fieldty,)*
@@ -324,18 +324,31 @@ config_pyclass!(
     ],
 );
 
-/// Register the config pyclasses on the root `raydriver` module.
+/// Register the config pyclasses as the `raydriver.config`
+/// submodule (stub-only: no Python file shadows it).
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<GrblSessionOptions>()?;
-    m.add_class::<GrblSerialConfig>()?;
-    m.add_class::<GrblTelnetConfig>()?;
-    m.add_class::<GrblSimpleConfig>()?;
-    m.add_class::<Esp3dConfig>()?;
-    m.add_class::<SmoothieConfig>()?;
-    m.add_class::<MarlinConfig>()?;
-    m.add_class::<XtoolConfig>()?;
-    m.add_class::<OctoPrintConfig>()?;
-    m.add_class::<M2Config>()?;
-    m.add_class::<RemoteEndpoint>()?;
+    let py = m.py();
+    let module = PyModule::new(py, "config")?;
+    module.setattr(
+        "__doc__",
+        "Typed session configuration classes: transport and timing \
+         fields per protocol, rejecting typos at type-checking time.",
+    )?;
+    module.add_class::<GrblSessionOptions>()?;
+    module.add_class::<GrblSerialConfig>()?;
+    module.add_class::<GrblTelnetConfig>()?;
+    module.add_class::<GrblSimpleConfig>()?;
+    module.add_class::<Esp3dConfig>()?;
+    module.add_class::<SmoothieConfig>()?;
+    module.add_class::<MarlinConfig>()?;
+    module.add_class::<XtoolConfig>()?;
+    module.add_class::<OctoPrintConfig>()?;
+    module.add_class::<M2Config>()?;
+    module.add_class::<RemoteEndpoint>()?;
+    crate::python::core::discovery::helpers::attach_submodule(
+        m,
+        &module,
+        "raydriver.config",
+    )?;
     Ok(())
 }
