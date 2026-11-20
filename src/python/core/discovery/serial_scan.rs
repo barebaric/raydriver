@@ -14,12 +14,61 @@ use pyo3::types::PyBytes;
 use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
+use pyo3_stub_gen::{PyStubType, TypeInfo};
 
 use crate::core::discovery::serial;
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 use super::helpers;
 use super::ports::SerialPortInfo;
+
+/// A replaceable serial-scan callable: the serial channel resolves
+/// its scanner from its module namespace at call time (see helpers),
+/// so the attribute is typed as an async callable resolving to the
+/// captured observations.
+pub(crate) struct ScanSerialFn;
+
+impl PyStubType for ScanSerialFn {
+    fn type_output() -> TypeInfo {
+        let observation = PortObservation::type_output();
+        let mut import = observation.import.clone();
+        import.insert("collections.abc".into());
+        import.insert("builtins".into());
+        TypeInfo {
+            name: format!(
+                "collections.abc.Callable[..., \
+                 collections.abc.Awaitable[builtins.list[{}]]]",
+                observation.name
+            ),
+            source_module: None,
+            import,
+            type_refs: observation.type_refs,
+        }
+    }
+}
+
+/// A replaceable USB-metadata callable: the scan resolves it from
+/// its module namespace at call time, so the attribute is typed as
+/// a callable resolving to the port infos.
+pub(crate) struct ListPortInfoFn;
+
+impl PyStubType for ListPortInfoFn {
+    fn type_output() -> TypeInfo {
+        let info = SerialPortInfo::type_output();
+        let mut import = info.import.clone();
+        import.insert("collections.abc".into());
+        import.insert("builtins".into());
+        TypeInfo {
+            name: format!(
+                "collections.abc.Callable[[], builtins.list[{}]]",
+                info.name
+            ),
+            source_module: None,
+            import,
+            type_refs: info.type_refs,
+        }
+    }
+}
 
 /// Raw output captured from one port during a scan.
 #[gen_stub_pyclass(module = "raydriver.core.discovery.serial_scan")]
@@ -111,7 +160,7 @@ fn scan_serial_ports<'py>(
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     exclude_ports: Option<Bound<'_, PyAny>>,
     timeout: Option<f64>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<PortObservation>>> {
     let mut port_list = match helpers::opt_strings(ports)? {
         Some(ports) => ports,
         None => {
@@ -135,10 +184,8 @@ fn scan_serial_ports<'py>(
         .unwrap_or_else(|| serial::BAUD_CANDIDATES.to_vec());
     if port_list.is_empty() {
         return spawn_future(py, async move {
-            Python::attach(|py| {
-                let empty: Vec<PortObservation> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
-            })
+            let empty: Vec<PortObservation> = Vec::new();
+            Ok(empty)
         });
     }
 
@@ -154,18 +201,16 @@ fn scan_serial_ports<'py>(
     spawn_future(py, async move {
         let observations =
             serial::scan_serial_ports(port_list, rates, deadline).await;
-        Python::attach(|py| {
-            let out: Vec<PortObservation> = observations
-                .into_iter()
-                .map(|obs| PortObservation {
-                    info: info_map.get(&obs.port).cloned(),
-                    port: obs.port,
-                    baud_rate: obs.baud_rate,
-                    data: obs.data,
-                })
-                .collect();
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
-        })
+        let out: Vec<PortObservation> = observations
+            .into_iter()
+            .map(|obs| PortObservation {
+                info: info_map.get(&obs.port).cloned(),
+                port: obs.port,
+                baud_rate: obs.baud_rate,
+                data: obs.data,
+            })
+            .collect();
+        Ok(out)
     })
 }
 
@@ -200,5 +245,5 @@ pyo3_stub_gen::module_variable!(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.serial_scan",
     "list_port_info",
-    Py<PyAny>
+    ListPortInfoFn
 );

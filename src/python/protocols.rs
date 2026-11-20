@@ -117,7 +117,7 @@ fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
 
 /// The ``protocol/list`` payload: every protocol's metadata.
 #[gen_stub_pyfunction(module = "raydriver.protocols")]
-#[gen_stub(override_return_type(type_repr = "dict[builtins.str, typing.Any]", imports = ("typing",)))]
+#[gen_stub(override_return_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
 #[pyfunction]
 fn protocols_payload(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
     Ok(value_to_py(py, &core::protocols_payload())?.into_bound(py))

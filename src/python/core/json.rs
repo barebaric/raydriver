@@ -6,7 +6,43 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyString};
+use pyo3_stub_gen::{PyStubType, TypeInfo};
 use serde_json::Value;
+
+/// A JSON object payload: the stubs type it as
+/// ``dict[str, object]`` — keys are strings, values are arbitrary
+/// JSON values the caller inspects further.
+pub(crate) struct JsonDict(pub Py<PyDict>);
+
+impl<'py> IntoPyObject<'py> for JsonDict {
+    type Target = PyDict;
+    type Output = Bound<'py, PyDict>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        Ok(self.0.into_bound(py))
+    }
+}
+
+impl PyStubType for JsonDict {
+    fn type_output() -> TypeInfo {
+        TypeInfo {
+            name: "dict[builtins.str, builtins.object]".to_string(),
+            source_module: None,
+            import: ["builtins".into()].into_iter().collect(),
+            type_refs: Default::default(),
+        }
+    }
+}
+
+/// Converts a JSON object into a [`JsonDict`] payload.
+pub(crate) fn value_to_dict(
+    py: Python<'_>,
+    value: &Value,
+) -> PyResult<JsonDict> {
+    let any = value_to_py(py, value)?;
+    Ok(JsonDict(any.into_bound(py).cast_into::<PyDict>()?.unbind()))
+}
 
 /// Converts a serde JSON value into its Python equivalent.
 pub(crate) fn value_to_py(

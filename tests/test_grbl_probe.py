@@ -16,7 +16,7 @@ from raydriver.core import SessionEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
-from raydriver.grbl.probe import describe
+from raydriver.grbl.probe import GrblDeviceInfo, GrblFlavor, describe
 from raydriver.remote.client import create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
@@ -42,40 +42,40 @@ FULL_SETTINGS_LINES = [
 class TestDescribe:
     def test_full_census(self):
         info = describe(FULL_BUILD_INFO, FULL_SETTINGS_LINES)
-        assert isinstance(info, dict)
-        assert info["name"] == "ORTUR"
-        assert info["firmware_version"] == "1.1h"
-        assert info["rx_buffer_size"] == 511
-        assert info["compile_flags"] == "VMPH"
-        assert info["flavor"] == "stock"
-        assert info["max_travel"] == [400.0, 300.0]
-        assert info["max_speed"] == 3000
-        assert info["acceleration"] == 500
-        assert info["max_spindle"] == 1000
-        assert info["laser_mode"] is True
-        assert info["homing_enabled"] is True
-        assert info["report_inches"] is False
-        assert info["arc_tolerance"] == 0.002
-        assert info["single_axis_homing"] is True
-        assert info["settings"]["110"] == 3000.0
+        assert isinstance(info, GrblDeviceInfo)
+        assert info.name == "ORTUR"
+        assert info.firmware_version == "1.1h"
+        assert info.rx_buffer_size == 511
+        assert info.compile_flags == "VMPH"
+        assert info.flavor == GrblFlavor.STOCK
+        assert info.max_travel == (400.0, 300.0)
+        assert info.max_speed == 3000
+        assert info.acceleration == 500
+        assert info.max_spindle == 1000
+        assert info.laser_mode is True
+        assert info.homing_enabled is True
+        assert info.report_inches is False
+        assert info.arc_tolerance == 0.002
+        assert info.single_axis_homing is True
+        assert info.settings["110"] == 3000.0
 
     def test_minimal_census(self):
         info = describe([], [])
-        assert info["name"] == "Unknown Grbl Device"
-        assert info["firmware_version"] is None
-        assert info["rx_buffer_size"] is None
-        assert info["compile_flags"] == ""
-        assert info["flavor"] == "unknown"
-        assert info["settings"] == {}
-        assert info["max_travel"] is None
-        assert info["max_speed"] is None
-        assert info["acceleration"] is None
-        assert info["max_spindle"] is None
-        assert info["laser_mode"] is None
-        assert info["homing_enabled"] is None
-        assert info["report_inches"] is None
-        assert info["arc_tolerance"] is None
-        assert info["single_axis_homing"] is False
+        assert info.name == "Unknown Grbl Device"
+        assert info.firmware_version is None
+        assert info.rx_buffer_size is None
+        assert info.compile_flags == ""
+        assert info.flavor == GrblFlavor.UNKNOWN
+        assert info.settings == {}
+        assert info.max_travel is None
+        assert info.max_speed is None
+        assert info.acceleration is None
+        assert info.max_spindle is None
+        assert info.laser_mode is None
+        assert info.homing_enabled is None
+        assert info.report_inches is None
+        assert info.arc_tolerance is None
+        assert info.single_axis_homing is False
 
     def test_different_speeds_per_axis(self):
         info = describe(
@@ -87,57 +87,57 @@ class TestDescribe:
                 "$121=600.0",
             ],
         )
-        assert info["max_speed"] == 3000
-        assert info["acceleration"] == 600
+        assert info.max_speed == 3000
+        assert info.acceleration == 600
 
     def test_flavor_stock(self):
         build_info = ["[VER:1.1h:]", "[OPT:VMPH,63,511]"]
-        assert describe(build_info, [])["flavor"] == "stock"
+        assert describe(build_info, []).flavor == GrblFlavor.STOCK
 
     def test_flavor_stock_with_build_name(self):
         build_info = ["[VER:1.1h.ORTUR:]", "[OPT:VMPH,63,511]"]
-        assert describe(build_info, [])["flavor"] == "stock"
+        assert describe(build_info, []).flavor == GrblFlavor.STOCK
 
     def test_flavor_stock_with_comma_format(self):
         build_info = ["[VER:1.0.15,20240923:]", "[OPT:VMP,31,511]"]
-        assert describe(build_info, [])["flavor"] == "stock"
+        assert describe(build_info, []).flavor == GrblFlavor.STOCK
 
     def test_flavor_grblhal_in_ver_line(self):
         build_info = ["[VER:grblHAL 1.1f:]", "[OPT:VMP,31,511]"]
-        assert describe(build_info, [])["flavor"] == "grblhal"
+        assert describe(build_info, []).flavor == GrblFlavor.GRBLHAL
 
     def test_flavor_fluidnc_in_ver_line(self):
         build_info = ["[VER:FluidNC 3.6.1:]", "[OPT:VMP,31,511]"]
-        assert describe(build_info, [])["flavor"] == "fluidnc"
+        assert describe(build_info, []).flavor == GrblFlavor.FLUIDNC
 
     def test_flavor_grblhal_settings_keys(self):
         build_info = ["[VER:1.1f:]"]
         settings = ["$0=10", "$400=200.0", "$401=300.0"]
-        assert describe(build_info, settings)["flavor"] == "grblhal"
+        assert describe(build_info, settings).flavor == GrblFlavor.GRBLHAL
 
     def test_flavor_unknown(self):
-        assert describe(["garbage"], [])["flavor"] == "unknown"
+        assert describe(["garbage"], []).flavor == GrblFlavor.UNKNOWN
 
 
 class TestProbeDevice:
     async def test_probe_device_against_emulator(self, rig):
         session, mock, emulator, events = rig
         info = await session.probe_device()
-        assert isinstance(info, dict)
-        assert info["name"] == "EMULATOR"
-        assert info["firmware_version"] == "1.1h"
-        assert info["rx_buffer_size"] == 128
-        assert info["compile_flags"] == "V"
-        assert info["flavor"] == "stock"
-        assert info["max_travel"] == [400.0, 300.0]
-        assert info["max_speed"] == 500
-        assert info["acceleration"] == 10
-        assert info["max_spindle"] == 1000
-        assert info["laser_mode"] is False
-        assert info["homing_enabled"] is False
-        assert info["report_inches"] is False
-        assert info["arc_tolerance"] == pytest.approx(0.002)
-        assert info["single_axis_homing"] is False
+        assert isinstance(info, GrblDeviceInfo)
+        assert info.name == "EMULATOR"
+        assert info.firmware_version == "1.1h"
+        assert info.rx_buffer_size == 128
+        assert info.compile_flags == "V"
+        assert info.flavor == GrblFlavor.STOCK
+        assert info.max_travel == (400.0, 300.0)
+        assert info.max_speed == 500
+        assert info.acceleration == 10
+        assert info.max_spindle == 1000
+        assert info.laser_mode is False
+        assert info.homing_enabled is False
+        assert info.report_inches is False
+        assert info.arc_tolerance == pytest.approx(0.002)
+        assert info.single_axis_homing is False
 
 
 @pytest.fixture
@@ -191,10 +191,10 @@ class TestProbeDeviceRemote:
             info = await session.probe_device()
         finally:
             await session.disconnect()
-        assert isinstance(info, dict)
-        assert info["name"] == "EMULATOR"
-        assert info["firmware_version"] == "1.1h"
-        assert info["rx_buffer_size"] == 128
-        assert info["flavor"] == "stock"
-        assert info["max_speed"] == 500
-        assert info["acceleration"] == 10
+        assert isinstance(info, GrblDeviceInfo)
+        assert info.name == "EMULATOR"
+        assert info.firmware_version == "1.1h"
+        assert info.rx_buffer_size == 128
+        assert info.flavor == GrblFlavor.STOCK
+        assert info.max_speed == 500
+        assert info.acceleration == 10

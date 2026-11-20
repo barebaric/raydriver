@@ -73,7 +73,9 @@ def make_proxy(port, events, **extra):
         "remote_port": port,
         **extra,
     }
-    return create_session("grbl", config, DEFAULT_DIALECT, events.callback)
+    session = create_session("grbl", config, DEFAULT_DIALECT, events.callback)
+    assert isinstance(session, RemoteSession)
+    return session
 
 
 async def connect_and_wait(session, events, timeout=10.0):

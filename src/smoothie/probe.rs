@@ -6,7 +6,35 @@
 //! so local sessions and remote daemon proxies are probed
 //! identically.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+
+/// The structured result of probing a Smoothieware device: firmware
+/// identity and the motion limits applications need.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmoothieCensus {
+    pub firmware_version: Option<String>,
+    pub alpha_max: Option<f64>,
+    pub beta_max: Option<f64>,
+    pub alpha_rate: Option<f64>,
+    pub beta_rate: Option<f64>,
+    pub acceleration: Option<f64>,
+    pub max_travel: Option<(f64, f64)>,
+    pub max_speed: Option<i64>,
+    pub acceleration_steps: Option<i64>,
+}
+
+impl SmoothieCensus {
+    /// The wire form served by the daemon protocol.
+    pub fn to_json(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
+
+    /// Rebuilds a census from its wire form.
+    pub fn from_json(value: Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+}
 
 /// Commands the census queries, in order.
 pub const CENSUS_COMMANDS: [&str; 6] = [
@@ -60,7 +88,7 @@ pub fn describe(
     alpha_rate_lines: &[String],
     beta_rate_lines: &[String],
     acceleration_lines: &[String],
-) -> Value {
+) -> SmoothieCensus {
     let alpha_max = parse_float(alpha_max_lines);
     let beta_max = parse_float(beta_max_lines);
     let alpha_rate = parse_float(alpha_rate_lines);
@@ -71,28 +99,28 @@ pub fn describe(
         (Some(alpha_max), Some(beta_max))
             if alpha_max > 0.0 && beta_max > 0.0 =>
         {
-            json!([alpha_max, beta_max])
+            Some((alpha_max, beta_max))
         }
-        _ => Value::Null,
+        _ => None,
     };
 
     let max_speed = match (alpha_rate, beta_rate) {
         // config-get rates are in mm/s; machine configs are mm/min.
         (Some(alpha_rate), Some(beta_rate)) => {
-            json!((alpha_rate.min(beta_rate) * 60.0) as i64)
+            Some((alpha_rate.min(beta_rate) * 60.0) as i64)
         }
-        _ => Value::Null,
+        _ => None,
     };
 
-    json!({
-        "firmware_version": first_value(&filter_reply(version_lines)),
-        "alpha_max": alpha_max,
-        "beta_max": beta_max,
-        "alpha_rate": alpha_rate,
-        "beta_rate": beta_rate,
-        "acceleration": acceleration,
-        "max_travel": max_travel,
-        "max_speed": max_speed,
-        "acceleration_steps": acceleration.map(|value| value as i64),
-    })
+    SmoothieCensus {
+        firmware_version: first_value(&filter_reply(version_lines)),
+        alpha_max,
+        beta_max,
+        alpha_rate,
+        beta_rate,
+        acceleration,
+        max_travel,
+        max_speed,
+        acceleration_steps: acceleration.map(|value| value as i64),
+    }
 }

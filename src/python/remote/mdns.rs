@@ -6,11 +6,13 @@ use std::time::Duration;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pyfunction};
+use pyo3_stub_gen::derive::{
+    gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
+};
 
 use crate::core::remote::mdns as core;
-use crate::python::core::json::value_to_py;
-use crate::python::pyfuture::spawn_future;
+use crate::python::core::json::{value_to_dict, JsonDict};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::daemon::DaemonConfig;
 
 #[gen_stub_pyclass]
@@ -22,6 +24,7 @@ pub struct ServiceInfo {
     properties: HashMap<String, String>,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl ServiceInfo {
     fn parsed_addresses(&self) -> Vec<String> {
@@ -29,6 +32,10 @@ impl ServiceInfo {
     }
 
     #[getter]
+    #[gen_stub(override_return_type(
+        type_repr = "dict[builtins.bytes, builtins.bytes]",
+        imports = ("builtins",)
+    ))]
     fn properties(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let dict = PyDict::new(py);
         for (key, value) in &self.properties {
@@ -46,9 +53,10 @@ pub struct Announcer {
     info: Py<ServiceInfo>,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl Announcer {
-    fn close<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn close<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let inner = {
             let mut guard = self.inner.lock().unwrap();
             guard.take()
@@ -57,7 +65,7 @@ impl Announcer {
             if let Some(mut announcer) = inner {
                 announcer.close();
             }
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 }
@@ -68,11 +76,16 @@ impl Announcer {
 pub(crate) fn browse_daemons<'py>(
     py: Python<'py>,
     timeout: f64,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<JsonDict>>> {
     spawn_future(py, async move {
         let entries =
             core::browse_daemons(Duration::from_secs_f64(timeout)).await;
-        Python::attach(|py| value_to_py(py, &serde_json::Value::Array(entries)))
+        Python::attach(|py| {
+            entries
+                .iter()
+                .map(|entry| value_to_dict(py, entry))
+                .collect()
+        })
     })
 }
 
@@ -103,7 +116,7 @@ pub(crate) fn announce<'py>(
     config: PyRef<'_, DaemonConfig>,
     port: u16,
     name: Option<String>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Option<Announcer>>> {
     let cfg = config.inner.lock().unwrap().clone();
     let camera_count = cfg.cameras.as_array().map(Vec::len).unwrap_or(0);
     spawn_future(py, async move {
@@ -127,7 +140,7 @@ pub(crate) fn announce<'py>(
         properties.insert("cameras".to_string(), camera_count.to_string());
         Python::attach(|py| {
             let Some(inner) = inner else {
-                return Ok(py.None());
+                return Ok(None);
             };
             let info = Py::new(
                 py,
@@ -137,14 +150,10 @@ pub(crate) fn announce<'py>(
                     properties,
                 },
             )?;
-            Ok(Py::new(
-                py,
-                Announcer {
-                    inner: Mutex::new(Some(inner)),
-                    info,
-                },
-            )?
-            .into_any())
+            Ok(Some(Announcer {
+                inner: Mutex::new(Some(inner)),
+                info,
+            }))
         })
     })
 }

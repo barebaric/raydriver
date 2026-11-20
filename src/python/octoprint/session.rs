@@ -5,15 +5,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
+use crate::core::types::WcsOffsets;
 use crate::octoprint::session::{OctoPrintConfig, OctoPrintCore};
-use crate::python::core::json::value_to_py;
+use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_f64, get_i64, get_str};
-use crate::python::pyfuture::{none_obj, spawn_future};
+use crate::python::octoprint::probe::OctoPrintDeviceInfo;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
     let host = dict
@@ -95,8 +97,8 @@ impl OctoPrintSession {
         dialect: Option<Bound<'_, PyDict>>,
 
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -109,14 +111,18 @@ impl OctoPrintSession {
     /// Fetch the census payloads (the parsed ``/api/version`` and
     /// ``/api/printer`` responses) over the session, so local and
     /// remote probing use the same code path.
-    fn probe_info<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn probe_info<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<PyAwait<'py, Vec<JsonDict>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             let (version, printer) = core.probe_info().await?;
             Python::attach(|py| {
-                let pair =
-                    (value_to_py(py, &version)?, value_to_py(py, &printer)?);
-                Ok(PyList::new(py, [pair.0, pair.1])?.unbind().into_any())
+                Ok(vec![
+                    value_to_dict(py, &version)?,
+                    value_to_dict(py, &printer)?,
+                ])
             })
         })
     }
@@ -128,33 +134,32 @@ impl OctoPrintSession {
     fn probe_device<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, OctoPrintDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             let (version, printer) = core.probe_info().await?;
-            let census = crate::octoprint::probe::describe(&version, &printer);
-            Python::attach(|py| {
-                crate::python::core::json::value_to_py(py, &census)
+            Ok(OctoPrintDeviceInfo {
+                inner: crate::octoprint::probe::describe(&version, &printer),
             })
         })
     }
 
     /// Open the connection and start the background tasks.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.connect().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Stop all background tasks and close the connection.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cleanup().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -165,13 +170,10 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let lines = core.execute_interactive_command(&command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
+            Ok(core.execute_interactive_command(&command).await?)
         })
     }
 
@@ -180,11 +182,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.execute_command(&command).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -201,8 +203,12 @@ impl OctoPrintSession {
         gcode: String,
         op_line_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
+            imports = ("typing", "collections.abc")
+        ))]
         progress_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
@@ -210,7 +216,7 @@ impl OctoPrintSession {
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
             core.run(&gcode, op_map, estimates).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -219,11 +225,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         machine_code: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.run_raw(&machine_code).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -233,11 +239,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         axes: Option<Vec<String>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.home(axes.as_deref()).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -250,11 +256,11 @@ impl OctoPrintSession {
         y: f64,
         z: Option<f64>,
         speed: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.move_to(x, y, z, speed).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -264,11 +270,11 @@ impl OctoPrintSession {
         py: Python<'py>,
         speed: f64,
         deltas: Vec<(String, f64)>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.jog(Some(speed), &deltas).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -278,11 +284,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         hold: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_hold(hold).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -292,12 +298,12 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         emergency: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let _ = emergency;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cancel(false).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -306,11 +312,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         tool_number: i64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.select_tool(tool_number).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -321,11 +327,11 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -335,20 +341,20 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_focus_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Clear the printer's error state (M999) and reset locally.
-    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.clear_alarm().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -361,11 +367,11 @@ impl OctoPrintSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_wcs_offset(&wcs_slot, x, y, z).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -374,14 +380,9 @@ impl OctoPrintSession {
     fn read_wcs_offsets<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, WcsOffsets>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let offsets = core.read_wcs_offsets().await?;
-            Python::attach(|py| {
-                Ok(offsets.into_pyobject(py)?.unbind().into_any())
-            })
-        })
+        spawn_future(py, async move { Ok(core.read_wcs_offsets().await?) })
     }
 
     /// Read the G-code parser state; always `None` (the server API
@@ -389,14 +390,9 @@ impl OctoPrintSession {
     fn read_parser_state<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let state = core.read_parser_state().await?;
-            Python::attach(|py| {
-                Ok(state.into_pyobject(py)?.unbind().into_any())
-            })
-        })
+        spawn_future(py, async move { Ok(core.read_parser_state().await?) })
     }
 
     /// Run a probe cycle (G38.2); OctoPrint does not report probe
@@ -407,13 +403,12 @@ impl OctoPrintSession {
         axis_letter: String,
         max_travel: f64,
         feed_rate: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let pos = core
+            Ok(core
                 .run_probe_cycle(&axis_letter, max_travel, feed_rate)
-                .await?;
-            Python::attach(|py| Ok(pos.into_pyobject(py)?.unbind().into_any()))
+                .await?)
         })
     }
 
@@ -422,14 +417,9 @@ impl OctoPrintSession {
     fn read_settings<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<(String, String)>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let settings = core.read_settings().await?;
-            Python::attach(|py| {
-                Ok(settings.into_pyobject(py)?.unbind().into_any())
-            })
-        })
+        spawn_future(py, async move { Ok(core.read_settings().await?) })
     }
 
     /// Raise: the server API cannot write firmware settings.
@@ -438,11 +428,11 @@ impl OctoPrintSession {
         py: Python<'py>,
         key: String,
         value: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.write_setting(&key, &value).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -451,12 +441,9 @@ impl OctoPrintSession {
     fn detect_unit_system<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let unit = core.detect_unit_system().await?;
-            Python::attach(|py| Ok(unit.into_pyobject(py)?.unbind().into_any()))
-        })
+        spawn_future(py, async move { Ok(core.detect_unit_system().await?) })
     }
 
     /// Accept dialect command templates; commands are sent as

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use pyo3::exceptions::{PyConnectionError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyTuple};
+use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
@@ -16,9 +16,11 @@ use crate::core::remote::client::{
     RemoteSession as CoreRemoteSession,
 };
 use crate::core::remote::protocol::WireEvent;
-use crate::python::core::json::value_to_py;
+use crate::core::types::WcsOffsets;
+use crate::python::census::{census_from_json, DeviceCensus};
+use crate::python::core::json::{value_to_dict, value_to_py, JsonDict};
 use crate::python::core::types::DeviceState as PyDeviceState;
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::bridge::{py_to_json, running_loop};
 use crate::python::remote::events::wire_to_py_event;
 use crate::python::remote::session::PySessionFactory;
@@ -133,9 +135,25 @@ impl RemoteSession {
     fn new(
         py: Python<'_>,
         protocol_name: Option<String>,
+        #[gen_stub(override_type(
+            type_repr = "dict[builtins.str, builtins.object]",
+            imports = ("builtins",)
+        ))]
         config: Py<PyAny>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[dict[builtins.str, builtins.object]]",
+            imports = ("typing", "builtins")
+        ))]
         dialect: Option<Py<PyAny>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("typing", "collections.abc", "raydriver.core", "builtins")
+        ))]
         event_callback: Option<Py<PyAny>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
+            imports = ("typing", "builtins")
+        ))]
         endpoint: Py<PyAny>,
         device: Option<String>,
         session_id: Option<String>,
@@ -165,10 +183,10 @@ impl RemoteSession {
     }
 
     #[getter]
-    fn metadata(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn metadata(&self, py: Python<'_>) -> PyResult<Option<JsonDict>> {
         match self.inner.metadata() {
-            Some(metadata) => value_to_py(py, &metadata),
-            None => Ok(py.None()),
+            Some(metadata) => Ok(Some(value_to_dict(py, &metadata)?)),
+            None => Ok(None),
         }
     }
 
@@ -203,9 +221,9 @@ impl RemoteSession {
     }
 
     #[getter]
-    fn _endpoint(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn _endpoint(&self, py: Python<'_>) -> PyResult<JsonDict> {
         let endpoint = self.inner.endpoint();
-        value_to_py(
+        value_to_dict(
             py,
             &json!({
                 "remote_host": endpoint.host,
@@ -223,37 +241,37 @@ impl RemoteSession {
             .force_disconnect(message.as_deref().unwrap_or("connection lost"));
     }
 
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.connect().await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.disconnect().await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
-    fn attach<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn attach<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.attach().await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
-    fn aclose<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn aclose<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.aclose().await;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -261,14 +279,14 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner
                 .execute_interactive_command(&command)
                 .await
                 .map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_lines(value)
         })
     }
 
@@ -276,12 +294,12 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value =
                 inner.execute_command(&command).await.map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_lines(value)
         })
     }
 
@@ -295,22 +313,23 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         gcode: String,
-        op_line_map: Option<Py<PyAny>>,
+        op_line_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
+            imports = ("typing", "collections.abc")
+        ))]
         progress_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
-        let op_map = op_line_map
-            .map(|op_map| op_map_to_map(py, &op_map))
-            .transpose()?;
         self.events.set_progress_callback(progress_callback);
         let inner = self.inner.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
-            let result = inner.run(&gcode, op_map, op_estimates).await;
+            let result = inner.run(&gcode, op_line_map, op_estimates).await;
             events.set_progress_callback(None);
             result.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -318,11 +337,11 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         machine_code: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.run_raw(&machine_code).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -331,11 +350,11 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         hold: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.set_hold(hold).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -344,11 +363,11 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         emergency: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.cancel(emergency).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -358,12 +377,12 @@ impl RemoteSession {
         py: Python<'py>,
         axes: Option<Vec<String>>,
         active_wcs: Option<String>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let active_wcs = active_wcs.unwrap_or_else(|| "G54".to_string());
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.home(axes, &active_wcs).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -373,11 +392,11 @@ impl RemoteSession {
         speed: f64,
         x: f64,
         y: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.move_to(speed, x, y).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -385,13 +404,14 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         speed: f64,
-        deltas: Py<PyAny>,
-    ) -> PyResult<Bound<'py, PyAny>> {
-        let deltas = py_to_json(deltas.bind(py))?;
+        deltas: Vec<(String, f64)>,
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
+            let deltas = serde_json::to_value(deltas)
+                .map_err(|err| PyValueError::new_err(err.to_string()))?;
             inner.jog(speed, deltas).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -399,11 +419,11 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         tool_number: i64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.select_tool(tool_number).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -412,11 +432,11 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.set_power(power).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -425,38 +445,45 @@ impl RemoteSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.set_focus_power(power).await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
-    /// Run the device census over the session.
-    #[pyo3(signature = ())]
+    /// Run the device census over the session; marlin sessions
+    /// accept the boot lines captured at connect time.
+    #[pyo3(signature = (boot_lines = None))]
     fn probe_device<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+        boot_lines: Option<Vec<String>>,
+    ) -> PyResult<PyAwait<'py, DeviceCensus>> {
+        let protocol = self.inner.protocol().unwrap_or_default();
         let inner = self.inner.clone();
         spawn_future(py, async move {
+            let args = match boot_lines {
+                Some(lines) => json!({"boot_lines": lines}),
+                None => json!({}),
+            };
             let value = inner
-                .command("probe_device", serde_json::json!({}))
+                .command("probe_device", args)
                 .await
                 .map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            Python::attach(|py| census_from_json(py, &protocol, &value))
         })
     }
 
     fn read_settings<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<(String, String)>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner.read_settings().await.map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_settings(value)
         })
     }
 
@@ -465,14 +492,14 @@ impl RemoteSession {
         py: Python<'py>,
         key: String,
         value: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner
                 .write_setting(&key, &value)
                 .await
                 .map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
@@ -483,36 +510,36 @@ impl RemoteSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner
                 .set_wcs_offset(&wcs_slot, x, y, z)
                 .await
                 .map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
     fn read_wcs_offsets<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, WcsOffsets>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner.read_wcs_offsets().await.map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_wcs_offsets(value)
         })
     }
 
     fn read_parser_state<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner.read_parser_state().await.map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_optional_string(value)
         })
     }
 
@@ -522,39 +549,43 @@ impl RemoteSession {
         axis_letter: String,
         max_travel: f64,
         feed_rate: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<(f64, f64, f64)>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner
                 .run_probe_cycle(&axis_letter, max_travel, feed_rate)
                 .await
                 .map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_probe_point(value)
         })
     }
 
     fn detect_unit_system<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let value = inner.detect_unit_system().await.map_err(connection)?;
-            Python::attach(|py| value_to_py(py, &value))
+            decode_optional_string(value)
         })
     }
 
-    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.clear_alarm().await.map_err(connection)?;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 
     fn update_dialect(
         &self,
         py: Python<'_>,
+        #[gen_stub(override_type(
+            type_repr = "dict[builtins.str, builtins.object]",
+            imports = ("builtins",)
+        ))]
         dialect: Py<PyAny>,
     ) -> PyResult<()> {
         let dialect = config_to_value(py, &dialect)?;
@@ -579,25 +610,108 @@ fn config_to_value(py: Python<'_>, value: &Py<PyAny>) -> PyResult<Value> {
     py_to_json(bound)
 }
 
-fn op_map_to_map(
-    py: Python<'_>,
-    value: &Py<PyAny>,
-) -> PyResult<HashMap<usize, i64>> {
-    let mut result = HashMap::new();
-    let bound = value.bind(py);
-    if let Ok(dict) = bound.cast::<PyDict>() {
-        for (key, value) in dict.iter() {
-            result.insert(key.extract()?, value.extract()?);
-        }
-        return Ok(result);
+/// Decodes the response lines a hosted session returns for
+/// `execute_command` / `execute_interactive_command`.
+fn decode_lines(value: Value) -> PyResult<Vec<String>> {
+    let lines = value.as_array().ok_or_else(|| {
+        PyValueError::new_err("expected a list of response lines")
+    })?;
+    lines
+        .iter()
+        .map(|line| {
+            line.as_str().map(str::to_string).ok_or_else(|| {
+                PyValueError::new_err("response line is not a string")
+            })
+        })
+        .collect()
+}
+
+/// Decodes the `[key, value]` pairs `read_settings` returns.
+fn decode_settings(value: Value) -> PyResult<Vec<(String, String)>> {
+    let entries = value.as_array().ok_or_else(|| {
+        PyValueError::new_err("expected a list of [key, value] pairs")
+    })?;
+    entries
+        .iter()
+        .map(|entry| {
+            let pair = entry.as_array().ok_or_else(|| {
+                PyValueError::new_err("setting is not a [key, value] pair")
+            })?;
+            if pair.len() != 2 {
+                return Err(PyValueError::new_err(
+                    "setting is not a [key, value] pair",
+                ));
+            }
+            Ok((setting_text(&pair[0])?, setting_text(&pair[1])?))
+        })
+        .collect()
+}
+
+fn setting_text(value: &Value) -> PyResult<String> {
+    value
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| PyValueError::new_err("setting entry is not a string"))
+}
+
+/// Decodes the `[x, y, z]` triples `read_wcs_offsets` returns, keyed
+/// by WCS slot.
+fn decode_wcs_offsets(
+    value: Value,
+) -> PyResult<HashMap<String, (f64, f64, f64)>> {
+    let entries = value.as_object().ok_or_else(|| {
+        PyValueError::new_err("expected a mapping of WCS offsets")
+    })?;
+    let mut offsets = HashMap::with_capacity(entries.len());
+    for (slot, triple) in entries {
+        let mismatch = || {
+            PyValueError::new_err(format!(
+                "WCS offset {slot:?} is not an [x, y, z] triple"
+            ))
+        };
+        let coords = triple.as_array().ok_or_else(&mismatch)?;
+        let read = |index: usize| -> PyResult<f64> {
+            coords
+                .get(index)
+                .and_then(Value::as_f64)
+                .ok_or_else(&mismatch)
+        };
+        offsets.insert(slot.clone(), (read(0)?, read(1)?, read(2)?));
     }
-    for pair in bound.try_iter()? {
-        let pair = pair?;
-        let pair = pair.cast::<PyTuple>()?;
-        result
-            .insert(pair.get_item(0)?.extract()?, pair.get_item(1)?.extract()?);
+    Ok(offsets)
+}
+
+fn decode_optional_string(value: Value) -> PyResult<Option<String>> {
+    match value {
+        Value::Null => Ok(None),
+        Value::String(text) => Ok(Some(text)),
+        other => Err(PyValueError::new_err(format!(
+            "expected a string or null, got {other:?}"
+        ))),
     }
-    Ok(result)
+}
+
+/// Decodes the probe position `run_probe_cycle` returns (null on a
+/// failed probe).
+fn decode_probe_point(value: Value) -> PyResult<Option<(f64, f64, f64)>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    let coords = value.as_array().ok_or_else(|| {
+        PyValueError::new_err("expected a probe position triple or null")
+    })?;
+    let point = coords
+        .iter()
+        .map(|coord| {
+            coord.as_f64().ok_or_else(|| {
+                PyValueError::new_err("probe coordinate is not a number")
+            })
+        })
+        .collect::<PyResult<Vec<f64>>>()?;
+    if point.len() != 3 {
+        return Err(PyValueError::new_err("expected a probe position triple"));
+    }
+    Ok(Some((point[0], point[1], point[2])))
 }
 
 fn parse_endpoint(
@@ -737,12 +851,37 @@ const REMOTE_KEYS: [&str; 6] = [
 ];
 
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
+#[gen_stub(override_return_type(
+    type_repr = "typing.Union[RemoteSession, grbl.GrblSession, \
+                simple.GrblSimpleSession, smoothie.SmoothieSession, \
+                octoprint.OctoPrintSession, marlin.MarlinSession]",
+    imports = (
+        "typing",
+        "raydriver.grbl",
+        "raydriver.grbl.simple",
+        "raydriver.smoothie",
+        "raydriver.octoprint",
+        "raydriver.marlin",
+    ),
+))]
 #[pyfunction]
 pub(crate) fn create_session(
     py: Python<'_>,
     protocol_name: String,
+    #[gen_stub(override_type(
+        type_repr = "typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]",
+        imports = ("typing", "builtins", "raydriver.config")
+    ))]
     config: Py<PyAny>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[dict[builtins.str, builtins.object]]",
+        imports = ("typing", "builtins")
+    ))]
     dialect: Option<Py<PyAny>>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        imports = ("typing", "collections.abc", "raydriver.core", "builtins")
+    ))]
     event_callback: Option<Py<PyAny>>,
 ) -> PyResult<Py<PyAny>> {
     let config_value = config_to_value(py, &config)?;
@@ -799,11 +938,27 @@ pub(crate) fn create_session(
 ))]
 pub(crate) fn open_session(
     py: Python<'_>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
+        imports = ("typing", "builtins")
+    ))]
     endpoint: Py<PyAny>,
     device: Option<String>,
     session_id: Option<String>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]]",
+        imports = ("typing", "builtins", "raydriver.config")
+    ))]
     config: Option<Py<PyAny>>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[dict[builtins.str, builtins.object]]",
+        imports = ("typing", "builtins")
+    ))]
     dialect: Option<Py<PyAny>>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        imports = ("typing", "collections.abc", "raydriver.core", "builtins")
+    ))]
     event_callback: Option<Py<PyAny>>,
 ) -> PyResult<RemoteSession> {
     if device.is_none() && session_id.is_none() {
@@ -837,13 +992,22 @@ pub(crate) fn open_session(
 #[pyfunction]
 pub(crate) fn list_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
+        imports = ("typing", "builtins")
+    ))]
     endpoint: Py<PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<JsonDict>>> {
     let endpoint = parse_endpoint(py, &endpoint)?;
     spawn_future(py, async move {
         let devices =
             core::list_devices(&endpoint).await.map_err(connection)?;
-        Python::attach(|py| value_to_py(py, &Value::Array(devices)))
+        Python::attach(|py| {
+            devices
+                .iter()
+                .map(|device| value_to_dict(py, device))
+                .collect()
+        })
     })
 }
 
@@ -851,13 +1015,22 @@ pub(crate) fn list_devices<'py>(
 #[pyfunction]
 pub(crate) fn list_protocols<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
+        imports = ("typing", "builtins")
+    ))]
     endpoint: Py<PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<JsonDict>>> {
     let endpoint = parse_endpoint(py, &endpoint)?;
     spawn_future(py, async move {
         let protocols =
             core::list_protocols(&endpoint).await.map_err(connection)?;
-        Python::attach(|py| value_to_py(py, &Value::Array(protocols)))
+        Python::attach(|py| {
+            protocols
+                .iter()
+                .map(|protocol| value_to_dict(py, protocol))
+                .collect()
+        })
     })
 }
 

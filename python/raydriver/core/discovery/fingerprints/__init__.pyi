@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "HttpFingerprint",
@@ -16,8 +17,8 @@ class HttpFingerprint:
     The probe GETs *path* and reports a match when the endpoint
     answers `200` with a body matching *match_regex* (matched
     case-insensitively), bounded by *timeout* seconds and *max_bytes*
-    of body. It returns a truthy value on a match, and `None` on any
-    failure.
+    of body. It resolves to ``True`` on a match, and ``False`` on
+    any failure.
     """
     @property
     def path(self) -> builtins.str: ...
@@ -28,7 +29,11 @@ class HttpFingerprint:
     @property
     def max_bytes(self) -> builtins.int: ...
     def __new__(cls, path: builtins.str, match_regex: builtins.str, timeout: builtins.float = 1.5, max_bytes: builtins.int = 4096) -> HttpFingerprint: ...
-    def __call__(self, host: builtins.str, port: builtins.int) -> typing.Awaitable[typing.Any]: ...
+    def __call__(self, host: builtins.str, port: builtins.int) -> collections.abc.Awaitable[builtins.bool]:
+        r"""
+        The claim is boolean: ``True`` claims the candidate host for
+        the declaring driver, ``False`` leaves it unclaimed.
+        """
 
 @typing.final
 class TcpFingerprint:
@@ -37,8 +42,9 @@ class TcpFingerprint:
     
     The probe waits *banner_wait* seconds for an unsolicited banner,
     then (when *probe_command* is set) sends it and waits for the
-    remaining *timeout* seconds. It returns a truthy value when a
-    line starts with *match_prefix*, and `None` otherwise.
+    remaining *timeout* seconds. It resolves to whether a line
+    starts with *match_prefix*: ``True`` claims the candidate,
+    ``False`` does not.
     """
     @property
     def probe_command(self) -> typing.Optional[builtins.str]: ...
@@ -49,5 +55,9 @@ class TcpFingerprint:
     @property
     def timeout(self) -> builtins.float: ...
     def __new__(cls, probe_command: typing.Optional[builtins.str] = None, match_prefix: typing.Optional[builtins.str] = None, banner_wait: builtins.float = 1.0, timeout: builtins.float = 1.9) -> TcpFingerprint: ...
-    def __call__(self, host: builtins.str, port: builtins.int) -> typing.Awaitable[typing.Any]: ...
+    def __call__(self, host: builtins.str, port: builtins.int) -> collections.abc.Awaitable[builtins.bool]:
+        r"""
+        The claim is boolean: ``True`` claims the candidate host for
+        the declaring driver, ``False`` leaves it unclaimed.
+        """
 

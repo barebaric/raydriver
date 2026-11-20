@@ -11,7 +11,7 @@ sidebar_label: raydriver.core.discovery.serial_scan
 
 ### list_port_info
 
-`Any`
+`Callable[[], list[ports.SerialPortInfo]]`
 
 ## PortObservation
 
@@ -70,7 +70,7 @@ scan_serial_ports(
     baud_rates: Optional[Iterable[int]] = None,
     exclude_ports: Optional[Iterable[str]] = None,
     timeout: Optional[float] = None,
-) -> Any
+) -> Awaitable[list[PortObservation]]
 ```
 
 Probes every *port* at *baud_rates*, all ports in parallel, and returns one observation per port
@@ -82,10 +82,10 @@ When *timeout* is given the scan stops waiting after that many seconds: observat
 far are still returned and probes still in flight are cancelled, so a slow or silent adapter can
 never push a responsive machine past the deadline. Results keep the order of *ports*.
 
-| Parameter       | Type                             | Description |
-| --------------- | -------------------------------- | ----------- |
-| `ports`         | `Optional[Iterable[str]] = None` |             |
-| `baud_rates`    | `Optional[Iterable[int]] = None` |             |
-| `exclude_ports` | `Optional[Iterable[str]] = None` |             |
-| `timeout`       | `Optional[float] = None`         |             |
-| _Returns_       | `Any`                            |             |
+| Parameter       | Type                               | Description |
+| --------------- | ---------------------------------- | ----------- |
+| `ports`         | `Optional[Iterable[str]] = None`   |             |
+| `baud_rates`    | `Optional[Iterable[int]] = None`   |             |
+| `exclude_ports` | `Optional[Iterable[str]] = None`   |             |
+| `timeout`       | `Optional[float] = None`           |             |
+| _Returns_       | `Awaitable[list[PortObservation]]` |             |

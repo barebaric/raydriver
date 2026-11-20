@@ -609,7 +609,10 @@ async def test_client_queue_drops_raw_first():
     queue.put(state)  # overflow: the two raw frames make room
     drained = [await queue.get() for _ in range(3)]
     assert all(
-        frame["payload"]["event"]["kind"] == "state" for frame in drained
+        isinstance(frame["payload"], dict)
+        and isinstance(frame["payload"]["event"], dict)
+        and frame["payload"]["event"]["kind"] == "state"
+        for frame in drained
     )
 
 

@@ -120,7 +120,9 @@ class TestScanSerialPorts:
             assert len(observations) == 1
             observation = observations[0]
             assert observation["baud_rate"] == 115200
-            assert b"Grbl 1.1h" in observation["data"]
+            data = observation["data"]
+            assert isinstance(data, bytes)
+            assert b"Grbl 1.1h" in data
         finally:
             stop.set()
             thread.join(timeout=1.0)
@@ -180,7 +182,9 @@ class TestScanMdnsServices:
             assert service["host"] == "127.0.0.1"
             assert service["port"] == 12345
             assert service["server"] == "disc.local"
-            assert service["txt"]["version"] == "1.2.3"
+            txt = service["txt"]
+            assert isinstance(txt, dict)
+            assert txt["version"] == "1.2.3"
         finally:
             await aiozc.async_unregister_service(info)
             await aiozc.async_close()

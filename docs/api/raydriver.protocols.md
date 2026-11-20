@@ -107,11 +107,11 @@ Every protocol's metadata, keyed by protocol name.
 ### `protocols_payload()`
 
 ```python
-protocols_payload() -> dict[str, Any]
+protocols_payload() -> dict[str, object]
 ```
 
 The `protocol/list` payload: every protocol's metadata.
 
-| Parameter | Type             | Description |
-| --------- | ---------------- | ----------- |
-| _Returns_ | `dict[str, Any]` |             |
+| Parameter | Type                | Description |
+| --------- | ------------------- | ----------- |
+| _Returns_ | `dict[str, object]` |             |

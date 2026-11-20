@@ -19,10 +19,10 @@ use crate::core::discovery::daemon::{self, DaemonEntry, DaemonNote};
 use crate::core::discovery::types::{
     DeviceIdentity as CoreIdentity, DiscoveredDevice as CoreDevice, ParamValue,
 };
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 use super::helpers;
-use super::mdns_scan::MDNSService;
+use super::mdns_scan::{MDNSService, ScanMdnsFn};
 use super::types::DiscoveredDevice;
 
 const LOGGER: &str = "raydriver.core.discovery.raydriver_channel";
@@ -40,7 +40,9 @@ const REMOTE_DRIVER: &str = "RaydriverRemoteDriver";
 /// bounded by timeouts.
 #[gen_stub_pyfunction(module = "raydriver.core.discovery.raydriver_channel")]
 #[pyfunction]
-fn find_raydriver_devices(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+fn find_raydriver_devices(
+    py: Python<'_>,
+) -> PyResult<PyAwait<'_, Vec<DiscoveredDevice>>> {
     let scan = helpers::attr(py, "raydriver_channel", "scan_mdns_services")?;
     let scan_fut = helpers::wait_for(
         py,
@@ -67,7 +69,7 @@ fn find_raydriver_devices(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
                         );
                     }
                     let empty: Vec<DiscoveredDevice> = Vec::new();
-                    empty.into_pyobject(py).map(|o| o.unbind().into_any())
+                    Ok(empty)
                 });
             }
         };
@@ -89,9 +91,7 @@ fn find_raydriver_devices(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
                 Ok(())
             })?;
         }
-        Python::attach(|py| {
-            devices.into_pyobject(py).map(|o| o.unbind().into_any())
-        })
+        Ok(devices)
     })
 }
 
@@ -204,5 +204,5 @@ pyo3_stub_gen::module_variable!(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.raydriver_channel",
     "scan_mdns_services",
-    Py<PyAny>
+    ScanMdnsFn
 );

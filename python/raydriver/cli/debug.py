@@ -63,6 +63,16 @@ def _endpoint(
     return host, config.port, token, args.tls_ca
 
 
+def _as_dict(value: object) -> dict[str, Any]:
+    assert isinstance(value, dict)
+    return value
+
+
+def _as_dicts(value: object) -> list[dict[str, Any]]:
+    assert isinstance(value, list)
+    return value
+
+
 def _emit(args: argparse.Namespace, data: Any, rows: list[str]) -> None:
     if args.json:
         print(json.dumps(data, indent=2))
@@ -195,23 +205,24 @@ async def cmd_info(args: argparse.Namespace) -> int:
     except (ConnectionError, OSError, asyncio.TimeoutError) as err:
         print(f"error: {err}", file=sys.stderr)
         return 1
-    welcome = snap["welcome"]
+    welcome = _as_dict(snap["welcome"])
+    sessions = _as_dicts(snap["sessions"])
     rows = [
         f"Daemon {host}:{port}",
         f"  raydriver {welcome.get('raydriver')} "
         f"(protocol {welcome.get('protocol')})",
-        f"  sessions: {len(snap['sessions'])}  "
-        f"clients: {len(snap['clients'])}",
+        f"  sessions: {len(sessions)}  "
+        f"clients: {len(_as_dicts(snap['clients']))}",
     ]
-    for session in snap["sessions"]:
+    for session in sessions:
         rows.append(
             f"  session {session['session_id']} [{session['protocol']}] "
             f"{session.get('connection_status')} "
             f"config={session.get('config')}"
         )
     rows.append("  devices:")
-    rows.extend(f"    {entry['port']}" for entry in snap["devices"])
-    for camera in snap["cameras"]:
+    rows.extend(f"    {entry['port']}" for entry in _as_dicts(snap["devices"]))
+    for camera in _as_dicts(snap["cameras"]):
         rows.append(f"  camera {camera.get('name')}: {camera.get('uri')}")
     _emit(args, snap, rows)
     return 0
@@ -225,7 +236,7 @@ async def cmd_list(args: argparse.Namespace) -> int:
     state = "daemon not running"
     try:
         snap = await rins.snapshot(host, port, token, tls_ca)
-        live = snap["sessions"]
+        live = _as_dicts(snap["sessions"])
         state = "running"
     except (ConnectionError, OSError, asyncio.TimeoutError):
         pass
@@ -234,7 +245,7 @@ async def cmd_list(args: argparse.Namespace) -> int:
         rows.append("  (none configured)")
     matched: set[str] = set()
     for entry in config.sessions:
-        entry_config = entry.get("config") or {}
+        entry_config = _as_dict(entry.get("config") or {})
         device = entry_config.get("port") or entry_config.get("host") or "?"
         match = next(
             (
@@ -284,11 +295,11 @@ async def cmd_connection(args: argparse.Namespace) -> int:
     rows = [f"Rayforge connections to {host}:{port}:"]
     if not snap["clients"]:
         rows.append("  (no clients connected)")
-    for client in snap["clients"]:
+    for client in _as_dicts(snap["clients"]):
         roles = (
             ", ".join(
                 f"{session}:{role}"
-                for session, role in client["roles"].items()
+                for session, role in _as_dict(client["roles"]).items()
             )
             or "no sessions"
         )
@@ -296,7 +307,7 @@ async def cmd_connection(args: argparse.Namespace) -> int:
             f"  {client['address']} (id {client['id']}, "
             f"auth={client['authenticated']}) {roles}"
         )
-    for session in snap["sessions"]:
+    for session in _as_dicts(snap["sessions"]):
         holder = session.get("lease_holder") or "-"
         rows.append(
             f"  session {session['session_id']}: lease={holder} "

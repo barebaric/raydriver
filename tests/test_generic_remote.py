@@ -110,7 +110,9 @@ async def test_protocol_list(rig):
     assert {p["name"] for p in protocols} == set(PROTOCOLS)
     grbl = next(p for p in protocols if p["name"] == "grbl")
     assert grbl["label"] == "GRBL"
-    assert grbl["capabilities"]["supports_probing"] is True
+    capabilities = grbl["capabilities"]
+    assert isinstance(capabilities, dict)
+    assert capabilities["supports_probing"] is True
 
 
 async def test_device_list_includes_configured(rig):

@@ -32,7 +32,7 @@ job_running: bool
 ### `metadata`
 
 ```python
-metadata: Any
+metadata: Optional[dict[str, object]]
 ```
 
 ### `pending_commands`
@@ -68,73 +68,73 @@ state: types.DeviceState
 ### `aclose()`
 
 ```python
-aclose() -> Any
+aclose() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `attach()`
 
 ```python
-attach() -> Any
+attach() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `cancel()`
 
 ```python
-cancel(emergency: bool = False) -> Any
+cancel(emergency: bool = False) -> Awaitable[None]
 ```
 
-| Parameter   | Type           | Description |
-| ----------- | -------------- | ----------- |
-| `emergency` | `bool = False` |             |
-| _Returns_   | `Any`          |             |
+| Parameter   | Type              | Description |
+| ----------- | ----------------- | ----------- |
+| `emergency` | `bool = False`    |             |
+| _Returns_   | `Awaitable[None]` |             |
 
 ### `clear_alarm()`
 
 ```python
-clear_alarm() -> Any
+clear_alarm() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `connect()`
 
 ```python
-connect() -> Any
+connect() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `detect_unit_system()`
 
 ```python
-detect_unit_system() -> Any
+detect_unit_system() -> Awaitable[Optional[str]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| _Returns_ | `Awaitable[Optional[str]]` |             |
 
 ### `disconnect()`
 
 ```python
-disconnect() -> Any
+disconnect() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `drop_connection()`
 
@@ -150,24 +150,24 @@ drop_connection(message: Optional[str] = None) -> None
 ### `execute_command()`
 
 ```python
-execute_command(command: str) -> Any
+execute_command(command: str) -> Awaitable[list[str]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `command` | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                   | Description |
+| --------- | ---------------------- | ----------- |
+| `command` | `str`                  |             |
+| _Returns_ | `Awaitable[list[str]]` |             |
 
 ### `execute_interactive_command()`
 
 ```python
-execute_interactive_command(command: str) -> Any
+execute_interactive_command(command: str) -> Awaitable[list[str]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `command` | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                   | Description |
+| --------- | ---------------------- | ----------- |
+| `command` | `str`                  |             |
+| _Returns_ | `Awaitable[list[str]]` |             |
 
 ### `home()`
 
@@ -175,173 +175,186 @@ execute_interactive_command(command: str) -> Any
 home(
     axes: Optional[Sequence[str]] = None,
     active_wcs: Optional[str] = None,
-) -> Any
+) -> Awaitable[None]
 ```
 
 | Parameter    | Type                             | Description |
 | ------------ | -------------------------------- | ----------- |
 | `axes`       | `Optional[Sequence[str]] = None` |             |
 | `active_wcs` | `Optional[str] = None`           |             |
-| _Returns_    | `Any`                            |             |
+| _Returns_    | `Awaitable[None]`                |             |
 
 ### `jog()`
 
 ```python
-jog(speed: float, deltas: Any) -> Any
+jog(speed: float, deltas: Sequence[tuple[str, float]]) -> Awaitable[None]
 ```
 
-| Parameter | Type    | Description |
-| --------- | ------- | ----------- |
-| `speed`   | `float` |             |
-| `deltas`  | `Any`   |             |
-| _Returns_ | `Any`   |             |
+| Parameter | Type                          | Description |
+| --------- | ----------------------------- | ----------- |
+| `speed`   | `float`                       |             |
+| `deltas`  | `Sequence[tuple[str, float]]` |             |
+| _Returns_ | `Awaitable[None]`             |             |
 
 ### `move_to()`
 
 ```python
-move_to(speed: float, x: float, y: float) -> Any
+move_to(speed: float, x: float, y: float) -> Awaitable[None]
 ```
 
-| Parameter | Type    | Description |
-| --------- | ------- | ----------- |
-| `speed`   | `float` |             |
-| `x`       | `float` |             |
-| `y`       | `float` |             |
-| _Returns_ | `Any`   |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `speed`   | `float`           |             |
+| `x`       | `float`           |             |
+| `y`       | `float`           |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `probe_device()`
 
 ```python
-probe_device() -> Any
+probe_device(
+    boot_lines: Optional[Sequence[str]] = None,
+) -> Awaitable[grbl.probe.GrblDeviceInfo | marlin.probe.MarlinDeviceInfo | smoothie.probe.SmoothieDeviceInfo | octoprint.probe.OctoPrintDeviceInfo]
 ```
 
-Run the device census over the session.
+Run the device census over the session; marlin sessions accept the boot lines captured at connect
+time.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter    | Type                                                                                                                                                            | Description |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `boot_lines` | `Optional[Sequence[str]] = None`                                                                                                                                |             |
+| _Returns_    | `Awaitable[grbl.probe.GrblDeviceInfo &#124; marlin.probe.MarlinDeviceInfo &#124; smoothie.probe.SmoothieDeviceInfo &#124; octoprint.probe.OctoPrintDeviceInfo]` |             |
 
 ### `read_parser_state()`
 
 ```python
-read_parser_state() -> Any
+read_parser_state() -> Awaitable[Optional[str]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| _Returns_ | `Awaitable[Optional[str]]` |             |
 
 ### `read_settings()`
 
 ```python
-read_settings() -> Any
+read_settings() -> Awaitable[list[tuple[str, str]]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                               | Description |
+| --------- | ---------------------------------- | ----------- |
+| _Returns_ | `Awaitable[list[tuple[str, str]]]` |             |
 
 ### `read_wcs_offsets()`
 
 ```python
-read_wcs_offsets() -> Any
+read_wcs_offsets() -> Awaitable[dict[str, tuple[float, float, float]]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                                               | Description |
+| --------- | -------------------------------------------------- | ----------- |
+| _Returns_ | `Awaitable[dict[str, tuple[float, float, float]]]` |             |
 
 ### `run()`
 
 ```python
 run(
     gcode: str,
-    op_line_map: Optional[Any] = None,
+    op_line_map: Optional[Mapping[int, int]] = None,
     op_estimates: Optional[Sequence[float]] = None,
-    progress_callback: Optional[Any] = None,
-) -> Any
+    progress_callback: Optional[Callable[[int], object]] = None,
+) -> Awaitable[None]
 ```
 
-| Parameter           | Type                               | Description |
-| ------------------- | ---------------------------------- | ----------- |
-| `gcode`             | `str`                              |             |
-| `op_line_map`       | `Optional[Any] = None`             |             |
-| `op_estimates`      | `Optional[Sequence[float]] = None` |             |
-| `progress_callback` | `Optional[Any] = None`             |             |
-| _Returns_           | `Any`                              |             |
+| Parameter           | Type                                       | Description |
+| ------------------- | ------------------------------------------ | ----------- |
+| `gcode`             | `str`                                      |             |
+| `op_line_map`       | `Optional[Mapping[int, int]] = None`       |             |
+| `op_estimates`      | `Optional[Sequence[float]] = None`         |             |
+| `progress_callback` | `Optional[Callable[[int], object]] = None` |             |
+| _Returns_           | `Awaitable[None]`                          |             |
 
 ### `run_probe_cycle()`
 
 ```python
-run_probe_cycle(axis_letter: str, max_travel: float, feed_rate: float) -> Any
+run_probe_cycle(
+    axis_letter: str,
+    max_travel: float,
+    feed_rate: float,
+) -> Awaitable[Optional[tuple[float, float, float]]]
 ```
 
-| Parameter     | Type    | Description |
-| ------------- | ------- | ----------- |
-| `axis_letter` | `str`   |             |
-| `max_travel`  | `float` |             |
-| `feed_rate`   | `float` |             |
-| _Returns_     | `Any`   |             |
+| Parameter     | Type                                              | Description |
+| ------------- | ------------------------------------------------- | ----------- |
+| `axis_letter` | `str`                                             |             |
+| `max_travel`  | `float`                                           |             |
+| `feed_rate`   | `float`                                           |             |
+| _Returns_     | `Awaitable[Optional[tuple[float, float, float]]]` |             |
 
 ### `run_raw()`
 
 ```python
-run_raw(machine_code: str) -> Any
+run_raw(machine_code: str) -> Awaitable[None]
 ```
 
-| Parameter      | Type  | Description |
-| -------------- | ----- | ----------- |
-| `machine_code` | `str` |             |
-| _Returns_      | `Any` |             |
+| Parameter      | Type              | Description |
+| -------------- | ----------------- | ----------- |
+| `machine_code` | `str`             |             |
+| _Returns_      | `Awaitable[None]` |             |
 
 ### `select_tool()`
 
 ```python
-select_tool(tool_number: int) -> Any
+select_tool(tool_number: int) -> Awaitable[None]
 ```
 
-| Parameter     | Type  | Description |
-| ------------- | ----- | ----------- |
-| `tool_number` | `int` |             |
-| _Returns_     | `Any` |             |
+| Parameter     | Type              | Description |
+| ------------- | ----------------- | ----------- |
+| `tool_number` | `int`             |             |
+| _Returns_     | `Awaitable[None]` |             |
 
 ### `set_focus_power()`
 
 ```python
-set_focus_power(power: Optional[float] = None) -> Any
+set_focus_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
 | `power`   | `Optional[float] = None` |             |
-| _Returns_ | `Any`                    |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `set_hold()`
 
 ```python
-set_hold(hold: bool = True) -> Any
+set_hold(hold: bool = True) -> Awaitable[None]
 ```
 
-| Parameter | Type          | Description |
-| --------- | ------------- | ----------- |
-| `hold`    | `bool = True` |             |
-| _Returns_ | `Any`         |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `hold`    | `bool = True`     |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `set_power()`
 
 ```python
-set_power(power: Optional[float] = None) -> Any
+set_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
 | `power`   | `Optional[float] = None` |             |
-| _Returns_ | `Any`                    |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `set_wcs_offset()`
 
 ```python
-set_wcs_offset(wcs_slot: str, x: float, y: float, z: Optional[float]) -> Any
+set_wcs_offset(
+    wcs_slot: str,
+    x: float,
+    y: float,
+    z: Optional[float],
+) -> Awaitable[None]
 ```
 
 | Parameter  | Type              | Description |
@@ -350,30 +363,30 @@ set_wcs_offset(wcs_slot: str, x: float, y: float, z: Optional[float]) -> Any
 | `x`        | `float`           |             |
 | `y`        | `float`           |             |
 | `z`        | `Optional[float]` |             |
-| _Returns_  | `Any`             |             |
+| _Returns_  | `Awaitable[None]` |             |
 
 ### `update_dialect()`
 
 ```python
-update_dialect(dialect: Any) -> None
+update_dialect(dialect: dict[str, object]) -> None
 ```
 
-| Parameter | Type   | Description |
-| --------- | ------ | ----------- |
-| `dialect` | `Any`  |             |
-| _Returns_ | `None` |             |
+| Parameter | Type                | Description |
+| --------- | ------------------- | ----------- |
+| `dialect` | `dict[str, object]` |             |
+| _Returns_ | `None`              |             |
 
 ### `write_setting()`
 
 ```python
-write_setting(key: str, value: str) -> Any
+write_setting(key: str, value: str) -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `key`     | `str` |             |
-| `value`   | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `key`     | `str`             |             |
+| `value`   | `str`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ## Functions
 
@@ -382,61 +395,65 @@ write_setting(key: str, value: str) -> Any
 ```python
 create_session(
     protocol_name: str,
-    config: Any,
-    dialect: Optional[Any],
-    event_callback: Optional[Any],
-) -> Any
+    config: Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config],
+    dialect: Optional[dict[str, object]],
+    event_callback: Optional[Callable[[core.SessionEvent], object]],
+) -> Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]
 ```
 
-| Parameter        | Type            | Description |
-| ---------------- | --------------- | ----------- |
-| `protocol_name`  | `str`           |             |
-| `config`         | `Any`           |             |
-| `dialect`        | `Optional[Any]` |             |
-| `event_callback` | `Optional[Any]` |             |
-| _Returns_        | `Any`           |             |
+| Parameter        | Type                                                                                                                                                                                                                               | Description |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `protocol_name`  | `str`                                                                                                                                                                                                                              |             |
+| `config`         | `Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]` |             |
+| `dialect`        | `Optional[dict[str, object]]`                                                                                                                                                                                                      |             |
+| `event_callback` | `Optional[Callable[[core.SessionEvent], object]]`                                                                                                                                                                                  |             |
+| _Returns_        | `Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]`                                                                                     |             |
 
 ### `list_devices()`
 
 ```python
-list_devices(endpoint: Any) -> Any
+list_devices(
+    endpoint: Union[dict[str, object], str],
+) -> Awaitable[list[dict[str, object]]]
 ```
 
-| Parameter  | Type  | Description |
-| ---------- | ----- | ----------- |
-| `endpoint` | `Any` |             |
-| _Returns_  | `Any` |             |
+| Parameter  | Type                                 | Description |
+| ---------- | ------------------------------------ | ----------- |
+| `endpoint` | `Union[dict[str, object], str]`      |             |
+| _Returns_  | `Awaitable[list[dict[str, object]]]` |             |
 
 ### `list_protocols()`
 
 ```python
-list_protocols(endpoint: Any) -> Any
+list_protocols(
+    endpoint: Union[dict[str, object], str],
+) -> Awaitable[list[dict[str, object]]]
 ```
 
-| Parameter  | Type  | Description |
-| ---------- | ----- | ----------- |
-| `endpoint` | `Any` |             |
-| _Returns_  | `Any` |             |
+| Parameter  | Type                                 | Description |
+| ---------- | ------------------------------------ | ----------- |
+| `endpoint` | `Union[dict[str, object], str]`      |             |
+| _Returns_  | `Awaitable[list[dict[str, object]]]` |             |
 
 ### `open_session()`
 
 ```python
 open_session(
-    endpoint: Any,
+    endpoint: Union[dict[str, object], str],
     device: Optional[str] = None,
     session_id: Optional[str] = None,
-    config: Optional[Any] = None,
-    dialect: Optional[Any] = None,
-    event_callback: Optional[Any] = None,
+    config: Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None,
+    dialect: Optional[dict[str, object]] = None,
+    event_callback: Optional[Callable[[core.SessionEvent], object]] = None,
 ) -> RemoteSession
 ```
 
-| Parameter        | Type                   | Description |
-| ---------------- | ---------------------- | ----------- |
-| `endpoint`       | `Any`                  |             |
-| `device`         | `Optional[str] = None` |             |
-| `session_id`     | `Optional[str] = None` |             |
-| `config`         | `Optional[Any] = None` |             |
-| `dialect`        | `Optional[Any] = None` |             |
-| `event_callback` | `Optional[Any] = None` |             |
-| _Returns_        | `RemoteSession`        |             |
+| Parameter        | Type                                                                                                                                                                                                                                                | Description |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `endpoint`       | `Union[dict[str, object], str]`                                                                                                                                                                                                                     |             |
+| `device`         | `Optional[str] = None`                                                                                                                                                                                                                              |             |
+| `session_id`     | `Optional[str] = None`                                                                                                                                                                                                                              |             |
+| `config`         | `Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None` |             |
+| `dialect`        | `Optional[dict[str, object]] = None`                                                                                                                                                                                                                |             |
+| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                                                                                                                                                                                            |             |
+| _Returns_        | `RemoteSession`                                                                                                                                                                                                                                     |             |

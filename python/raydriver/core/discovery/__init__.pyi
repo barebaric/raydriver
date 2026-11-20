@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 from . import daemon
 from . import engine
@@ -52,7 +53,7 @@ class DeviceIdentity:
     @property
     def usb_pid(self) -> typing.Optional[builtins.int]: ...
     @property
-    def tokens(self) -> typing.Any:
+    def tokens(self) -> builtins.frozenset[builtins.str]:
         r"""
         The identity tokens as a frozenset of strings.
         """
@@ -67,21 +68,9 @@ class DiscoveredDevice:
     discovery declaration.
     """
     @property
-    def probe_profile(self) -> typing.Optional[typing.Any]:
-        r"""
-        Profile data collected by probing the device after discovery;
-        attached by the embedding application's UI. Opaque here.
-        """
-    @probe_profile.setter
-    def probe_profile(self, value: typing.Optional[typing.Any]) -> None:
-        r"""
-        Profile data collected by probing the device after discovery;
-        attached by the embedding application's UI. Opaque here.
-        """
-    @property
     def driver_name(self) -> builtins.str: ...
     @property
-    def params(self) -> dict: ...
+    def params(self) -> dict[builtins.str, builtins.object]: ...
     @property
     def label(self) -> builtins.str: ...
     @property
@@ -98,18 +87,32 @@ class DiscoveredDevice:
         r"""
         The machine name the device itself reported, if any.
         """
-    def __new__(cls, driver_name: builtins.str, params: dict, label: builtins.str, detail: builtins.str, identity: typing.Optional[DeviceIdentity] = None, probe_profile: typing.Optional[typing.Any] = None) -> DiscoveredDevice: ...
-    def __eq__(self, other: typing.Any) -> typing.Any: ...
+    @property
+    def probe_profile(self) -> typing.Optional[builtins.object]:
+        r"""
+        Profile data collected by probing the device after discovery;
+        attached by the embedding application's UI. Opaque here: the
+        embedding application's profile object, not a core type.
+        """
+    @probe_profile.setter
+    def probe_profile(self, value: typing.Optional[builtins.object]) -> None:
+        r"""
+        Profile data collected by probing the device after discovery;
+        attached by the embedding application's UI. Opaque here: the
+        embedding application's profile object, not a core type.
+        """
+    def __new__(cls, driver_name: builtins.str, params: dict[builtins.str, builtins.object], label: builtins.str, detail: builtins.str, identity: typing.Optional[DeviceIdentity] = None, probe_profile: typing.Optional[builtins.object] = None) -> DiscoveredDevice: ...
+    def __eq__(self, other: builtins.object) -> builtins.bool: ...
     def __repr__(self) -> builtins.str: ...
 
-def device_key(driver_name: builtins.str, params: dict) -> builtins.str:
+def device_key(driver_name: builtins.str, params: dict[builtins.str, builtins.object]) -> builtins.str:
     r"""
     Stable identity for a device from its driver and connection
     parameters: serial ports by path, network devices by host and
     TCP port, remote devices by daemon endpoint plus device resource.
     """
 
-def find_subnet_devices(specs: typing.Sequence[dict], subnets: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.int]]] = None) -> typing.Any:
+def find_subnet_devices(specs: typing.Sequence[dict[builtins.str, builtins.object]], subnets: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.int]]] = None) -> collections.abc.Awaitable[builtins.list[DiscoveredDevice]]:
     r"""
     Scan the local subnets for declared TCP ports and confirm each
     reachable host with its spec's probe.
@@ -133,7 +136,7 @@ def local_subnets() -> builtins.list[tuple[builtins.str, builtins.int]]:
     pairs, for subnet scans.
     """
 
-def scan_mdns_services(service_types: typing.Sequence[builtins.str], browse_window: builtins.float = 2.0) -> typing.Any:
+def scan_mdns_services(service_types: typing.Sequence[builtins.str], browse_window: builtins.float = 2.0) -> collections.abc.Awaitable[builtins.list[dict[builtins.str, builtins.object]]]:
     r"""
     Browse mDNS for the given service types.
     
@@ -143,7 +146,7 @@ def scan_mdns_services(service_types: typing.Sequence[builtins.str], browse_wind
     ``browse_window`` is the listen time in seconds.
     """
 
-def scan_serial_ports(ports: typing.Sequence[builtins.str], baud_rates: typing.Optional[typing.Sequence[builtins.int]] = None, timeout: typing.Optional[builtins.float] = None) -> typing.Any:
+def scan_serial_ports(ports: typing.Sequence[builtins.str], baud_rates: typing.Optional[typing.Sequence[builtins.int]] = None, timeout: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[builtins.list[dict[builtins.str, builtins.object]]]:
     r"""
     Probe serial ports for device output.
     
@@ -154,7 +157,7 @@ def scan_serial_ports(ports: typing.Sequence[builtins.str], baud_rates: typing.O
     are still returned when it expires.
     """
 
-def scan_subnet(hosts: typing.Sequence[builtins.str], port: builtins.int, connect_timeout: builtins.float = 0.5, concurrency: builtins.int = 32) -> typing.Any:
+def scan_subnet(hosts: typing.Sequence[builtins.str], port: builtins.int, connect_timeout: builtins.float = 0.5, concurrency: builtins.int = 32) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
     r"""
     TCP-connect to *port* on every host and return the hosts that
     accept a connection, in input order.

@@ -30,6 +30,7 @@ pyo3 = { version = "0.28", features = ["abi3", "abi3-py311", "py-clone"], option
 pyo3-stub-gen = { version = "0.23.0", optional = true }
 regex = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = { version = "4.10", default-features = false }
 sha1 = { version = "0.10", default-features = false }

@@ -1,5 +1,6 @@
 //! Root PyO3 module.
 
+pub(crate) mod census;
 pub(crate) mod config;
 pub(crate) mod core;
 pub(crate) mod events;

@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "DiscoverySpec",
@@ -37,10 +38,10 @@ class MdnsRecognizer:
     @property
     def txt_map(self) -> dict: ...
     @property
-    def fingerprint(self) -> typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]]: ...
+    def fingerprint(self) -> typing.Optional[collections.abc.Callable[..., collections.abc.Awaitable[builtins.bool]]]: ...
     @property
     def fingerprint_services(self) -> tuple: ...
-    def __new__(cls, services: typing.Optional[typing.Tuple[builtins.str, ...]] = None, txt_map: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None, fingerprint: typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]] = None, fingerprint_services: typing.Optional[typing.Tuple[builtins.str, ...]] = None) -> MdnsRecognizer: ...
+    def __new__(cls, services: typing.Optional[typing.Tuple[builtins.str, ...]] = None, txt_map: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None, fingerprint: typing.Optional[collections.abc.Callable[..., collections.abc.Awaitable[builtins.bool]]] = None, fingerprint_services: typing.Optional[typing.Tuple[builtins.str, ...]] = None) -> MdnsRecognizer: ...
 
 @typing.final
 class SerialRecognizer:

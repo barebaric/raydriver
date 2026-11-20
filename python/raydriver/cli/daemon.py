@@ -188,6 +188,9 @@ async def _service_action(args: argparse.Namespace, path: Path) -> int:
             host = "127.0.0.1"
         try:
             welcome = await rins.welcome_probe(host, config.port)
+            if welcome is None:
+                print("daemon: not reachable")
+                return 0
             auth = (
                 "auth required" if welcome.get("auth_required") else "no auth"
             )

@@ -37,80 +37,80 @@ class SmoothieSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SmoothieConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> SmoothieSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SmoothieConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> SmoothieSession: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.SmoothieConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> SmoothieSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.SmoothieConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> SmoothieSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def connect(self) -> typing.Any:
+    def connect(self) -> collections.abc.Awaitable[None]:
         r"""
         Open the connection and start the background tasks.
         """
-    def disconnect(self) -> typing.Any:
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the transport.
         """
-    def probe_device(self) -> typing.Any:
+    def probe_device(self) -> collections.abc.Awaitable[probe.SmoothieDeviceInfo]:
         r"""
         Send a command and await its full response.
         Run the device census: query ``version`` and the
         ``config-get`` motion keys, and return the structured result
         as a dict.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any: ...
-    def execute_command(self, command: builtins.str) -> typing.Any:
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]: ...
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Queue a command and await its response (identical to
         `execute_interactive_command`).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[typing.Any] = None) -> typing.Any:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the ping-pong protocol.
         
         `op_line_map` maps G-code line indices to op indices for
         progress reporting.
         """
-    def run_raw(self, machine_code: builtins.str) -> typing.Any:
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Execute a raw G-code string line by line.
         """
-    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
         r"""
         Pause (feed hold) or resume the device.
         """
-    def cancel(self, emergency: builtins.bool = False) -> typing.Any:
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Abort the running job: Ctrl+C and safety shutdown.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> typing.Any:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes (e.g.
         `["X"]`).
         """
-    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> typing.Any:
+    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute position (mm) at `speed` (mm/min).
         """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> typing.Any:
+    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
         r"""
         Jog by relative deltas (mm) at `speed` (mm/min).
         """
-    def select_tool(self, tool_number: builtins.int) -> typing.Any: ...
-    def clear_alarm(self) -> typing.Any:
+    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]: ...
+    def clear_alarm(self) -> collections.abc.Awaitable[None]:
         r"""
         Clear an alarm state with the dialect's clear command.
         """
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power.  `power` is the absolute S value; `None`
         (or zero) turns the laser off.
         """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power for focus mode; `None` turns the laser off.
         """
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> typing.Any:
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]:
         r"""
         Set a WCS offset via the dialect's `set_wcs_offset` template.
         """

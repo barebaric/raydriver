@@ -127,7 +127,11 @@ impl MdnsRecognizer {
         #[gen_stub(override_type(type_repr = "typing.Optional[typing.Tuple[builtins.str, ...]]", imports = ("typing", "builtins")))]
         services: Option<Vec<String>>,
         txt_map: Option<HashMap<String, String>>,
-        #[gen_stub(override_type(type_repr = "typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]]", imports = ("typing",)))]
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[..., \
+                         collections.abc.Awaitable[builtins.bool]]]",
+            imports = ("typing", "collections.abc", "builtins"),
+        ))]
         fingerprint: Option<Py<PyAny>>,
         #[gen_stub(override_type(type_repr = "typing.Optional[typing.Tuple[builtins.str, ...]]", imports = ("typing", "builtins")))]
         fingerprint_services: Option<Vec<String>>,
@@ -156,7 +160,11 @@ impl MdnsRecognizer {
     }
 
     #[getter]
-    #[gen_stub(override_return_type(type_repr = "typing.Optional[typing.Callable[..., typing.Awaitable[typing.Any]]]", imports = ("typing",)))]
+    #[gen_stub(override_return_type(
+        type_repr = "typing.Optional[collections.abc.Callable[..., \
+                     collections.abc.Awaitable[builtins.bool]]]",
+        imports = ("typing", "collections.abc", "builtins"),
+    ))]
     fn fingerprint(&self, py: Python<'_>) -> Option<Py<PyAny>> {
         self.fingerprint.as_ref().map(|f| f.clone_ref(py))
     }

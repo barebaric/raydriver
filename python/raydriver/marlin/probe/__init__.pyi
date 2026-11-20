@@ -4,13 +4,38 @@
 import builtins
 import typing
 __all__ = [
+    "MarlinDeviceInfo",
     "describe",
 ]
 
-def describe(m115_lines: typing.Sequence[builtins.str], m211_lines: typing.Sequence[builtins.str], m503_lines: typing.Sequence[builtins.str], m149_lines: typing.Sequence[builtins.str], boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> typing.Any:
+@typing.final
+class MarlinDeviceInfo:
     r"""
-    Builds the census dict from the raw Marlin census-command
-    responses.
+    The structured result of probing a Marlin device: firmware
+    identity, software-endstop travel and motion limits.
+    """
+    @property
+    def name(self) -> builtins.str: ...
+    @property
+    def firmware_version(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def machine_type(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def max_travel(self) -> typing.Optional[tuple[builtins.float, builtins.float]]: ...
+    @property
+    def max_speed(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def acceleration(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def units(self) -> typing.Optional[builtins.str]: ...
+    def to_dict(self) -> dict:
+        r"""
+        The mapping form of the census (the daemon wire form).
+        """
+
+def describe(m115_lines: typing.Sequence[builtins.str], m211_lines: typing.Sequence[builtins.str], m503_lines: typing.Sequence[builtins.str], m149_lines: typing.Sequence[builtins.str], boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> MarlinDeviceInfo:
+    r"""
+    Builds the census from the raw Marlin census-command responses.
     
     Pure data transformation with no I/O; the caller is responsible
     for communicating with the device and passing the collected

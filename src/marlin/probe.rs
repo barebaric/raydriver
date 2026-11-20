@@ -6,6 +6,7 @@
 //! parser output — no I/O — so local sessions and remote daemon
 //! proxies are probed identically.
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::core::types::UnitSystem;
@@ -30,8 +31,32 @@ fn machine_type(info: &[(String, String)]) -> Option<String> {
         .map(|(_, value)| value.clone())
 }
 
-/// Builds the census dict from the raw Marlin census-command
-/// responses.
+/// The structured result of probing a Marlin device: firmware
+/// identity, software-endstop travel and motion limits.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarlinCensus {
+    pub name: String,
+    pub firmware_version: Option<String>,
+    pub machine_type: Option<String>,
+    pub max_travel: Option<(f64, f64)>,
+    pub max_speed: Option<i64>,
+    pub acceleration: Option<i64>,
+    pub units: Option<String>,
+}
+
+impl MarlinCensus {
+    /// The wire form served by the daemon protocol.
+    pub fn to_json(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| json!({}))
+    }
+
+    /// Rebuilds a census from its wire form.
+    pub fn from_json(value: Value) -> Result<Self, serde_json::Error> {
+        serde_json::from_value(value)
+    }
+}
+
+/// Builds the census from the raw Marlin census-command responses.
 ///
 /// Pure data transformation with no I/O; the caller is responsible
 /// for communicating with the device and passing the collected
@@ -44,7 +69,7 @@ pub fn describe(
     m503_lines: &[String],
     m149_lines: &[String],
     boot_lines: &[String],
-) -> Value {
+) -> MarlinCensus {
     let name = extract_marlin_device_name(m115_lines, boot_lines);
 
     let info = parse_m115_firmware_info(m115_lines);
@@ -57,8 +82,7 @@ pub fn describe(
     }
 
     let max_travel = parse_m211_endstops(m211_lines)
-        .filter(|(x_max, y_max)| *x_max > 0.0 && *y_max > 0.0)
-        .map(|(x_max, y_max)| json!([x_max, y_max]));
+        .filter(|(x_max, y_max)| *x_max > 0.0 && *y_max > 0.0);
 
     let m503 = parse_m503_settings(m503_lines);
     let setting = |key: &str| {
@@ -68,26 +92,26 @@ pub fn describe(
     };
     let max_speed = match (setting("max_feedrate_x"), setting("max_feedrate_y"))
     {
-        (Some(x), Some(y)) => json!((x.min(y) * 60.0) as i64),
-        _ => Value::Null,
+        (Some(x), Some(y)) => Some((x.min(y) * 60.0) as i64),
+        _ => None,
     };
     let acceleration = setting("acceleration").map(|value| value as i64);
 
     let units =
         detect_unit_system_from_m149(m149_lines).map(|unit| match unit {
-            UnitSystem::Metric => "metric",
-            UnitSystem::Imperial => "imperial",
+            UnitSystem::Metric => "metric".to_string(),
+            UnitSystem::Imperial => "imperial".to_string(),
         });
 
-    json!({
-        "name": name,
-        "firmware_version": firmware_version,
-        "machine_type": machine_type(&info),
-        "max_travel": max_travel,
-        "max_speed": max_speed,
-        "acceleration": acceleration,
-        "units": units,
-    })
+    MarlinCensus {
+        name,
+        firmware_version,
+        machine_type: machine_type(&info),
+        max_travel,
+        max_speed,
+        acceleration,
+        units,
+    }
 }
 
 /// Drops ``ok`` acknowledgements: the parsers match semantic lines

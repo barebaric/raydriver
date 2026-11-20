@@ -128,6 +128,7 @@ impl DiscoverySession {
         &mut self,
         py: Python<'_>,
         key: &str,
+        #[gen_stub(override_type(type_repr = "builtins.object", imports = ("builtins",)))]
         profile: Py<PyAny>,
     ) -> PyResult<Option<Py<DiscoveredDevice>>> {
         let Some(device) = self.find(key) else {

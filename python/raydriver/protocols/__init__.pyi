@@ -53,7 +53,7 @@ def protocols() -> dict[builtins.str, ProtocolInfo]:
     Every protocol's metadata, keyed by protocol name.
     """
 
-def protocols_payload() -> dict[builtins.str, typing.Any]:
+def protocols_payload() -> dict[builtins.str, builtins.object]:
     r"""
     The ``protocol/list`` payload: every protocol's metadata.
     """

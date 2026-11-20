@@ -2,6 +2,8 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
+from raydriver.core import discovery
 import typing
 __all__ = [
     "SUBNET_SCAN_TIMEOUT",
@@ -13,11 +15,11 @@ __all__ = [
 ]
 
 SUBNET_SCAN_TIMEOUT: builtins.float
-_rust_find_subnet_devices: typing.Any
-find_network_devices: typing.Any
-find_raydriver_devices: typing.Any
-find_serial_devices: typing.Any
-def find_all_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
+_rust_find_subnet_devices: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]]
+find_network_devices: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]]
+find_raydriver_devices: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]]
+find_serial_devices: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]]
+def find_all_devices(driver_classes: typing.Sequence[builtins.type], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]:
     r"""
     Runs every discovery channel concurrently and returns the merged,
     deduplicated results.
@@ -28,7 +30,7 @@ def find_all_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.
     from that channel only.
     """
 
-def find_subnet_devices(driver_classes: typing.Sequence[typing.Any]) -> typing.Any:
+def find_subnet_devices(driver_classes: typing.Sequence[builtins.type]) -> collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]:
     r"""
     Scans the local subnets for the TCP ports declared by drivers'
     `TcpRecognizer` and returns the devices the Rust core confirmed

@@ -781,7 +781,7 @@ def _telnet_service(host="192.168.1.80", port=23):
 
 def test_fingerprint_services_default_to_http():
     async def fingerprint(host, port):
-        return None
+        return False
 
     recognizer = MdnsRecognizer(
         services=("_esp3d._tcp.local.",),

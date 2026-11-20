@@ -38,50 +38,50 @@ Current snapshot of the machine state.
 ### `cancel()`
 
 ```python
-cancel() -> Any
+cancel() -> Awaitable[None]
 ```
 
 Cancel the current job.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `connect()`
 
 ```python
-connect() -> Any
+connect() -> Awaitable[None]
 ```
 
 Connect and start monitoring the M2.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `disconnect()`
 
 ```python
-disconnect() -> Any
+disconnect() -> Awaitable[None]
 ```
 
 Stop monitoring and close the connection.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `home()`
 
 ```python
-home() -> Any
+home() -> Awaitable[None]
 ```
 
 Home the laser head.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `jog()`
 
@@ -91,7 +91,7 @@ jog(
     dy: float = 0.0,
     dz: float = 0.0,
     speed: float = 18000.0,
-) -> Any
+) -> Awaitable[None]
 ```
 
 Move by relative XYZ deltas in millimeters.
@@ -102,12 +102,12 @@ Move by relative XYZ deltas in millimeters.
 | `dy`      | `float = 0.0`     |             |
 | `dz`      | `float = 0.0`     |             |
 | `speed`   | `float = 18000.0` |             |
-| _Returns_ | `Any`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `move_to()`
 
 ```python
-move_to(x: float, y: float, speed: float = 18000.0) -> Any
+move_to(x: float, y: float, speed: float = 18000.0) -> Awaitable[None]
 ```
 
 Move to an absolute XY coordinate in millimeters.
@@ -117,29 +117,29 @@ Move to an absolute XY coordinate in millimeters.
 | `x`       | `float`           |             |
 | `y`       | `float`           |             |
 | `speed`   | `float = 18000.0` |             |
-| _Returns_ | `Any`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `set_hold()`
 
 ```python
-set_hold(hold: bool = True) -> Any
+set_hold(hold: bool = True) -> Awaitable[None]
 ```
 
 Pause the current job, or resume it when `hold` is false.
 
-| Parameter | Type          | Description |
-| --------- | ------------- | ----------- |
-| `hold`    | `bool = True` |             |
-| _Returns_ | `Any`         |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `hold`    | `bool = True`     |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `start()`
 
 ```python
-start() -> Any
+start() -> Awaitable[None]
 ```
 
 Start a job already staged on the device.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |

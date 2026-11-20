@@ -3,6 +3,7 @@
 //! These mirror Rayforge's `machine.driver.driver` module so the
 //! Python bindings can convert losslessly.
 
+use std::collections::HashMap;
 use std::fmt;
 
 /// Machine state as reported in Grbl status reports.
@@ -175,6 +176,9 @@ pub enum UnitSystem {
 
 /// Millimeters per inch.
 pub const MM_PER_INCH: f64 = 25.4;
+
+/// WCS slot offsets in mm: slot name → (x, y, z).
+pub type WcsOffsets = HashMap<String, (f64, f64, f64)>;
 
 pub fn inches_to_mm(v: f64) -> f64 {
     v * MM_PER_INCH

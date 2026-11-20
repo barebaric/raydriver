@@ -44,7 +44,7 @@ class DiscoverySession:
         Returns the newly seen devices and the keys of devices that
         disappeared (excluding those on held ports).
         """
-    def apply_probe(self, key: builtins.str, profile: typing.Any) -> typing.Optional[discovery.DiscoveredDevice]:
+    def apply_probe(self, key: builtins.str, profile: builtins.object) -> typing.Optional[discovery.DiscoveredDevice]:
         r"""
         Attaches a probed profile to the device with *key* and
         returns the enriched device, or None when the key is unknown.

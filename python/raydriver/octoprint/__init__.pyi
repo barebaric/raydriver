@@ -36,116 +36,116 @@ class OctoPrintSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.OctoPrintConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> OctoPrintSession: ...
-    def probe_info(self) -> typing.Any:
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.OctoPrintConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> OctoPrintSession: ...
+    def probe_info(self) -> collections.abc.Awaitable[builtins.list[dict[builtins.str, builtins.object]]]:
         r"""
         Fetch the census payloads (the parsed ``/api/version`` and
         ``/api/printer`` responses) over the session, so local and
         remote probing use the same code path.
         """
-    def probe_device(self) -> typing.Any:
+    def probe_device(self) -> collections.abc.Awaitable[probe.OctoPrintDeviceInfo]:
         r"""
         Run the device census over the session: the parsed
         `/api/version` and `/api/printer` responses, interpreted
         into the structured census dict. Local and remote sessions
         probe identically.
         """
-    def connect(self) -> typing.Any:
+    def connect(self) -> collections.abc.Awaitable[None]:
         r"""
         Open the connection and start the background tasks.
         """
-    def disconnect(self) -> typing.Any:
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the connection.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any:
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Send a single command and await the server's HTTP
         acknowledgement.  The API exposes no per-line response text,
         so the result is always empty.
         """
-    def execute_command(self, command: builtins.str) -> typing.Any:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Send a single command without awaiting further state.
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[typing.Any] = None) -> typing.Any:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Upload a G-code string, start it and await the server's
         terminal print event.  Every op index in *op_line_map* is
         reported to *progress_callback* when the job starts (the
         protocol carries no per-op progress).
         """
-    def run_raw(self, machine_code: builtins.str) -> typing.Any:
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Send a raw G-code string as printer commands.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> typing.Any:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes.
         """
-    def move_to(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> typing.Any:
+    def move_to(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute position (mm); `speed` in mm/min.
         """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> typing.Any:
+    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
         r"""
         Jog by relative deltas (mm) at `speed` (mm/min).
         """
-    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
         r"""
         Pause (true) or resume (false) the running job.
         """
-    def cancel(self, emergency: builtins.bool = False) -> typing.Any:
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Cancel the running job.
         """
-    def select_tool(self, tool_number: builtins.int) -> typing.Any:
+    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]:
         r"""
         Select a tool by sending its tool-change command.
         """
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power.  `power` is the absolute S value; `None`
         (or zero) turns the laser off.
         """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power for focus mode; `None` turns the laser off.
         """
-    def clear_alarm(self) -> typing.Any:
+    def clear_alarm(self) -> collections.abc.Awaitable[None]:
         r"""
         Clear the printer's error state (M999) and reset locally.
         """
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> typing.Any:
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]:
         r"""
         Set a work coordinate offset via a G10 L2 command.  Raises
         `ValueError` for slots the server model does not know.
         """
-    def read_wcs_offsets(self) -> typing.Any:
+    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
         r"""
         Read the WCS offsets; always empty (the server API exposes
         none).
         """
-    def read_parser_state(self) -> typing.Any:
+    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         Read the G-code parser state; always `None` (the server API
         exposes none).
         """
-    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> typing.Any:
+    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         Run a probe cycle (G38.2); OctoPrint does not report probe
         results, so the result is always `None`.
         """
-    def read_settings(self) -> typing.Any:
+    def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
         r"""
         Read the firmware settings; always empty (the server API
         exposes none).
         """
-    def write_setting(self, key: builtins.str, value: builtins.str) -> typing.Any:
+    def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Raise: the server API cannot write firmware settings.
         """
-    def detect_unit_system(self) -> typing.Any:
+    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         The unit system the dialect works in; the server API exposes
         no unit configuration, so this is always `None`.

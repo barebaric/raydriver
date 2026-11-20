@@ -6,11 +6,33 @@ use pyo3::types::{PyDict, PyList};
 use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
+use pyo3_stub_gen::{PyStubType, TypeInfo};
 
 use crate::core::discovery::ports as core_ports;
 use crate::core::discovery::ports::SerialPortInfo as CorePortInfo;
 
 use super::helpers;
+
+/// A replaceable platform-enumeration callable: the listing
+/// functions resolve it from the module namespace at call time (see
+/// helpers), so the attribute is typed as a callable resolving to
+/// one port dict per port.
+pub(crate) struct ListSerialPortsFn;
+
+impl PyStubType for ListSerialPortsFn {
+    fn type_output() -> TypeInfo {
+        TypeInfo {
+            name: "collections.abc.Callable[[], \
+                   builtins.list[dict[builtins.str, builtins.object]]]"
+                .to_string(),
+            source_module: None,
+            import: ["collections.abc".into(), "builtins".into()]
+                .into_iter()
+                .collect(),
+            type_refs: Default::default(),
+        }
+    }
+}
 
 /// A serial port path together with optional metadata used to
 /// identify the underlying USB device.
@@ -357,5 +379,5 @@ pub fn register(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.ports",
     "list_serial_ports",
-    Py<PyAny>
+    ListSerialPortsFn
 );

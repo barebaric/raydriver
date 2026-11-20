@@ -2,7 +2,9 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
-import typing
+import collections.abc
+from raydriver.core import discovery
+from raydriver.core.discovery import mdns_scan
 __all__ = [
     "REMOTE_DRIVER",
     "SERVICE_TYPE",
@@ -12,8 +14,8 @@ __all__ = [
 
 REMOTE_DRIVER: builtins.str
 SERVICE_TYPE: builtins.str
-scan_mdns_services: typing.Any
-def find_raydriver_devices() -> typing.Any:
+scan_mdns_services: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[mdns_scan.MDNSService]]]
+def find_raydriver_devices() -> collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]:
     r"""
     Browse for raydriver daemons and list their sessions.
     

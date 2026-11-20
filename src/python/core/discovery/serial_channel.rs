@@ -17,11 +17,11 @@ use crate::core::discovery::tokens;
 use crate::core::discovery::types::{
     DiscoveredDevice as CoreDevice, ParamValue,
 };
-use crate::python::pyfuture::{await_py, spawn_future};
+use crate::python::pyfuture::{await_py, spawn_future, PyAwait};
 
 use super::helpers;
 use super::ports::SerialPortInfo;
-use super::serial_scan::PortObservation;
+use super::serial_scan::{PortObservation, ScanSerialFn};
 use super::spec::{DiscoverySpec, SerialRecognizer};
 use super::types::{DeviceIdentity, DiscoveredDevice};
 
@@ -41,6 +41,10 @@ const SERIAL_SCAN_TIMEOUT: f64 = 20.0;
 #[gen_stub(override_return_type(type_repr = "builtins.frozenset[builtins.str]", imports = ("builtins",)))]
 fn normalize_tokens(
     py: Python<'_>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[builtins.str]",
+        imports = ("typing", "builtins")
+    ))]
     texts: &Bound<'_, PyTuple>,
 ) -> PyResult<Py<PyAny>> {
     let texts: Vec<Option<String>> = texts.extract()?;
@@ -92,8 +96,14 @@ fn discovery_spec<'py>(
 /// serial recognizer with it.
 #[gen_stub_pyfunction(module = "raydriver.core.discovery.serial_channel")]
 #[pyfunction]
+#[gen_stub(override_return_type(
+    type_repr = "builtins.list[tuple[builtins.type, \
+                 spec.SerialRecognizer]]",
+    imports = ("builtins", "raydriver.core.discovery.spec"),
+))]
 fn collect_serial_recognizers<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyList>> {
     let out = PyList::empty(py);
@@ -119,6 +129,7 @@ fn collect_serial_recognizers<'py>(
 #[pyo3(signature = (driver_classes, ports=None, baud_rates=None, exclude_ports=None))]
 fn find_serial_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     ports: Option<Bound<'_, PyAny>>,
@@ -126,14 +137,12 @@ fn find_serial_devices<'py>(
     baud_rates: Option<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     exclude_ports: Option<Bound<'_, PyAny>>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<DiscoveredDevice>>> {
     let recognizers = collect_serial_recognizers(py, driver_classes)?;
     if recognizers.is_empty() {
         return spawn_future(py, async move {
-            Python::attach(|py| {
-                let empty: Vec<DiscoveredDevice> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
-            })
+            let empty: Vec<DiscoveredDevice> = Vec::new();
+            Ok(empty)
         });
     }
 
@@ -176,9 +185,7 @@ fn find_serial_devices<'py>(
                         &e,
                     );
                     let empty: Vec<DiscoveredDevice> = Vec::new();
-                    return empty
-                        .into_pyobject(py)
-                        .map(|o| o.unbind().into_any());
+                    return Ok(empty);
                 }
             };
             let observations: Vec<PyRef<'_, PortObservation>> =
@@ -187,7 +194,7 @@ fn find_serial_devices<'py>(
             for observation in observations {
                 devices.extend(evaluate(py, &observation, &owned)?);
             }
-            devices.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(devices)
         })
     })
 }
@@ -342,5 +349,5 @@ pyo3_stub_gen::module_variable!(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.serial_channel",
     "scan_serial_ports",
-    Py<PyAny>
+    ScanSerialFn
 );

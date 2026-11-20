@@ -6,9 +6,18 @@ use pyo3_stub_gen::derive::gen_stub_pyfunction;
 use serde_json::Value;
 
 use crate::core::remote::inspect as core;
-use crate::python::core::json::value_to_py;
-use crate::python::pyfuture::spawn_future;
+use crate::python::core::json::{value_to_dict, JsonDict};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::bridge::py_to_json;
+
+/// Converts a JSON object payload, mapping null to ``None`` (a
+/// daemon that sends a welcome without a payload).
+fn optional_dict(py: Python<'_>, value: &Value) -> PyResult<Option<JsonDict>> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(value_to_dict(py, value)?))
+}
 
 #[gen_stub_pyfunction(module = "raydriver.remote.inspect")]
 #[pyfunction]
@@ -18,8 +27,12 @@ pub(crate) fn daemon_rpc<'py>(
     port: u16,
     token: Option<String>,
     tls_ca: Option<String>,
+    #[gen_stub(override_type(
+        type_repr = "typing.Sequence[tuple[builtins.str, dict[builtins.str, builtins.object]]]",
+        imports = ("typing", "builtins")
+    ))]
     requests: Py<PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, (Option<JsonDict>, Vec<JsonDict>)>> {
     let requests: Vec<(String, Value)> = requests
         .bind(py)
         .try_iter()?
@@ -47,9 +60,12 @@ pub(crate) fn daemon_rpc<'py>(
         .await
         .map_err(pyo3::exceptions::PyConnectionError::new_err)?;
         Python::attach(|py| {
-            let welcome = value_to_py(py, &welcome)?;
-            let replies = value_to_py(py, &Value::Array(replies))?;
-            Ok(PyTuple::new(py, [welcome, replies])?.unbind().into_any())
+            let welcome = optional_dict(py, &welcome)?;
+            let replies = replies
+                .iter()
+                .map(|reply| value_to_dict(py, reply))
+                .collect::<PyResult<Vec<JsonDict>>>()?;
+            Ok((welcome, replies))
         })
     })
 }
@@ -60,12 +76,12 @@ pub(crate) fn welcome_probe<'py>(
     py: Python<'py>,
     host: String,
     port: u16,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Option<JsonDict>>> {
     spawn_future(py, async move {
         let welcome = core::welcome_probe(&host, port)
             .await
             .map_err(pyo3::exceptions::PyConnectionError::new_err)?;
-        Python::attach(|py| value_to_py(py, &welcome))
+        Python::attach(|py| optional_dict(py, &welcome))
     })
 }
 
@@ -78,12 +94,12 @@ pub(crate) fn snapshot<'py>(
     port: u16,
     token: Option<String>,
     tls_ca: Option<String>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, JsonDict>> {
     spawn_future(py, async move {
         let snapshot =
             core::snapshot(&host, port, token.as_deref(), tls_ca.as_deref())
                 .await
                 .map_err(pyo3::exceptions::PyConnectionError::new_err)?;
-        Python::attach(|py| value_to_py(py, &snapshot))
+        Python::attach(|py| value_to_dict(py, &snapshot))
     })
 }

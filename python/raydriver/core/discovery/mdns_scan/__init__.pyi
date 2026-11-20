@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "MDNSService",
@@ -50,7 +51,7 @@ def normalize_service_type(service_type: builtins.str) -> builtins.str:
     form: ``_octoprint._tcp.local.`` becomes ``_octoprint._tcp``.
     """
 
-def scan_mdns_services(service_types: typing.Iterable[builtins.str], browse_window: builtins.float = 2.0) -> typing.Any:
+def scan_mdns_services(service_types: typing.Iterable[builtins.str], browse_window: builtins.float = 2.0) -> collections.abc.Awaitable[builtins.list[MDNSService]]:
     r"""
     Browses *service_types* over mDNS for a short window and returns
     every service that could be resolved to an address. Failures

@@ -9,7 +9,7 @@ from conftest import DEFAULT_DIALECT
 from raydriver.core import SessionEvent
 from raydriver.smoothie import SmoothieSession
 from raydriver.smoothie.emulator import SmoothieEmulator
-from raydriver.smoothie.probe import describe
+from raydriver.smoothie.probe import SmoothieDeviceInfo, describe
 
 TIMINGS = {
     "handshake_timeout": 2.0,
@@ -64,35 +64,35 @@ class TestDescribe:
             ["600.000"],
             ["1000.000"],
         )
-        assert isinstance(info, dict)
-        assert info["firmware_version"] == "Smoothieware edge-1234abc1"
-        assert info["alpha_max"] == 200.0
-        assert info["beta_max"] == 300.0
-        assert info["max_travel"] == [200.0, 300.0]
-        assert info["max_speed"] == 30000
-        assert info["acceleration_steps"] == 1000
-        assert info["acceleration"] == 1000.0
+        assert isinstance(info, SmoothieDeviceInfo)
+        assert info.firmware_version == "Smoothieware edge-1234abc1"
+        assert info.alpha_max == 200.0
+        assert info.beta_max == 300.0
+        assert info.max_travel == (200.0, 300.0)
+        assert info.max_speed == 30000
+        assert info.acceleration_steps == 1000
+        assert info.acceleration == 1000.0
 
     def test_minimal_census(self):
         info = describe([], [], [], [], [], [])
-        assert info["firmware_version"] is None
-        assert info["alpha_max"] is None
-        assert info["beta_max"] is None
-        assert info["max_travel"] is None
-        assert info["max_speed"] is None
-        assert info["acceleration_steps"] is None
+        assert info.firmware_version is None
+        assert info.alpha_max is None
+        assert info.beta_max is None
+        assert info.max_travel is None
+        assert info.max_speed is None
+        assert info.acceleration_steps is None
 
     def test_different_rates_picks_lower(self):
         info = describe([], [], [], ["500.000"], ["300.000"], ["1000.000"])
-        assert info["max_speed"] == 18000
+        assert info.max_speed == 18000
 
     def test_non_positive_travel_yields_no_extents(self):
         info = describe(
             [], ["0.000"], ["300.000"], ["500.000"], ["500.000"], ["1000.000"]
         )
-        assert info["max_travel"] is None
-        assert info["alpha_max"] == 0.0
-        assert info["beta_max"] == 300.0
+        assert info.max_travel is None
+        assert info.alpha_max == 0.0
+        assert info.beta_max == 300.0
 
     def test_malformed_value_is_ignored(self):
         info = describe(
@@ -103,8 +103,8 @@ class TestDescribe:
             ["500.000"],
             ["1000.000"],
         )
-        assert info["alpha_max"] is None
-        assert info["max_travel"] is None
+        assert info.alpha_max is None
+        assert info.max_travel is None
 
     def test_status_reports_and_ok_are_dropped(self):
         info = describe(
@@ -115,9 +115,9 @@ class TestDescribe:
             ["ok"],
             ["ok"],
         )
-        assert info["firmware_version"] is None
-        assert info["alpha_max"] is None
-        assert info["beta_max"] == 200.0
+        assert info.firmware_version is None
+        assert info.alpha_max is None
+        assert info.beta_max == 200.0
 
 
 class TestProbeDevice:
@@ -126,9 +126,9 @@ class TestProbeDevice:
         info = await session.probe_device()
         # The emulator emits its version banner as one line.
         assert (
-            info["firmware_version"]
+            info.firmware_version
             == "Build version: edge-94de12c, Build date: 20240404"
         )
-        assert info["max_travel"] == [200.0, 200.0]
-        assert info["max_speed"] == 9000
-        assert info["acceleration_steps"] == 3000
+        assert info.max_travel == (200.0, 200.0)
+        assert info.max_speed == 9000
+        assert info.acceleration_steps == 3000

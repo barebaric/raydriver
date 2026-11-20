@@ -50,34 +50,34 @@ class GrblSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> GrblSession: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> GrblSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> GrblSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def probe_device(self) -> typing.Any:
+    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
         Run the device census: query `$I` and `$$`, and return the
         structured result as a dict.
         """
-    def connect(self) -> typing.Any: ...
-    def disconnect(self) -> typing.Any:
+    def connect(self) -> collections.abc.Awaitable[None]: ...
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the transport.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any:
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Send a command and synchronously await its full response,
         blocking any other command from interleaving.
         """
-    def execute_command(self, command: builtins.str) -> typing.Any:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Queue a command for asynchronous processing and await its
         response.
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[typing.Any] = None) -> typing.Any:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the character-counting
         protocol.
@@ -86,66 +86,66 @@ class GrblSession:
         progress reporting; `op_estimates` holds per-op estimated
         durations (seconds) used to scale per-line stall timeouts.
         """
-    def run_raw(self, machine_code: builtins.str) -> typing.Any:
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Execute a raw G-code string; GRBL realtime commands (?, ~, !)
         are sent via the control path instead of the stream.
         """
-    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
         r"""
         Pause (feed hold) or resume the device.
         """
-    def cancel(self, emergency: builtins.bool = False) -> typing.Any:
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Abort the running job: soft reset, queue cleanup and safety
         shutdown.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> typing.Any:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes (e.g.
         `["X"]`), then re-activate the active WCS via the toggle
         workaround.
         """
-    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> typing.Any:
+    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute position (mm) at `speed` (mm/min).
         """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> typing.Any:
+    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
         r"""
         Jog by relative deltas (mm) at `speed` (mm/min).
         """
-    def select_tool(self, tool_number: builtins.int) -> typing.Any: ...
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]: ...
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power.  `power` is the absolute S value; `None`
         (or zero) turns the laser off.
         """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power for focus mode; `None` waits for pending jogs
         to finish and turns the laser off.
         """
-    def read_settings(self) -> typing.Any:
+    def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
         r"""
         Read `$$` into `(key, raw_value)` pairs.
         """
-    def write_setting(self, key: builtins.str, value: builtins.str) -> typing.Any: ...
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> typing.Any: ...
-    def read_wcs_offsets(self) -> typing.Any:
+    def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]: ...
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]: ...
+    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
         r"""
         Read `$#` WCS offsets, converted to mm when the device
         reports inches.
         """
-    def read_parser_state(self) -> typing.Any:
+    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         Read the `$G` parser state to determine the active WCS.
         """
-    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> typing.Any:
+    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[tuple[builtins.float, builtins.float, builtins.float]]]:
         r"""
         Run a probe cycle (G38.2); returns the trigger position in mm
         or None on failure.
         """
-    def detect_unit_system(self) -> typing.Any:
+    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         Infer the device's unit system ("metric"/"imperial") from the
         `$13` setting.

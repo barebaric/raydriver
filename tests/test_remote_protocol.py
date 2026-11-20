@@ -61,9 +61,11 @@ async def test_write_frame_real_socket():
     async def handler(reader, writer):
         try:
             message = await protocol.read_frame(reader)
+            msg_id = message["id"]
+            assert isinstance(msg_id, int)
             await protocol.write_frame(
                 writer,
-                protocol.response(message["id"], {"echo": message["payload"]}),
+                protocol.response(msg_id, {"echo": message["payload"]}),
             )
         finally:
             writer.close()

@@ -27,7 +27,7 @@ sidebar_label: raydriver.core.discovery.serial_channel
 
 ### scan_serial_ports
 
-`Any`
+`Callable[..., Awaitable[list[serial_scan.PortObservation]]]`
 
 ## Functions
 
@@ -55,43 +55,45 @@ tokens.
 ### `collect_serial_recognizers()`
 
 ```python
-collect_serial_recognizers(driver_classes: Sequence[Any]) -> list
+collect_serial_recognizers(
+    driver_classes: Sequence[type],
+) -> list[tuple[type, spec.SerialRecognizer]]
 ```
 
 Pairs every driver whose `DISCOVERY` spec declares a valid serial recognizer with it.
 
-| Parameter        | Type            | Description |
-| ---------------- | --------------- | ----------- |
-| `driver_classes` | `Sequence[Any]` |             |
-| _Returns_        | `list`          |             |
+| Parameter        | Type                                       | Description |
+| ---------------- | ------------------------------------------ | ----------- |
+| `driver_classes` | `Sequence[type]`                           |             |
+| _Returns_        | `list[tuple[type, spec.SerialRecognizer]]` |             |
 
 ### `find_serial_devices()`
 
 ```python
 find_serial_devices(
-    driver_classes: Sequence[Any],
+    driver_classes: Sequence[type],
     ports: Optional[Iterable[str]] = None,
     baud_rates: Optional[Iterable[int]] = None,
     exclude_ports: Optional[Iterable[str]] = None,
-) -> Any
+) -> Awaitable[list[discovery.DiscoveredDevice]]
 ```
 
 Runs one serial scan and evaluates it against every declared serial recognizer. Like every channel,
 this never raises: failures are logged, and the scan is bounded by *SERIAL_SCAN_TIMEOUT*, so a slow
 or silent adapter can at most cost its own probe time.
 
-| Parameter        | Type                             | Description |
-| ---------------- | -------------------------------- | ----------- |
-| `driver_classes` | `Sequence[Any]`                  |             |
-| `ports`          | `Optional[Iterable[str]] = None` |             |
-| `baud_rates`     | `Optional[Iterable[int]] = None` |             |
-| `exclude_ports`  | `Optional[Iterable[str]] = None` |             |
-| _Returns_        | `Any`                            |             |
+| Parameter        | Type                                          | Description |
+| ---------------- | --------------------------------------------- | ----------- |
+| `driver_classes` | `Sequence[type]`                              |             |
+| `ports`          | `Optional[Iterable[str]] = None`              |             |
+| `baud_rates`     | `Optional[Iterable[int]] = None`              |             |
+| `exclude_ports`  | `Optional[Iterable[str]] = None`              |             |
+| _Returns_        | `Awaitable[list[discovery.DiscoveredDevice]]` |             |
 
 ### `normalize_tokens()`
 
 ```python
-normalize_tokens(*texts: Any) -> frozenset[str]
+normalize_tokens(*texts: Optional[str]) -> frozenset[str]
 ```
 
 Splits arbitrary identification strings (descriptions, by-id link names, manufacturer strings) into
@@ -99,5 +101,5 @@ lowercase word tokens suitable for containment checks.
 
 | Parameter | Type             | Description |
 | --------- | ---------------- | ----------- |
-| `*texts`  | `Any`            |             |
+| `*texts`  | `Optional[str]`  |             |
 | _Returns_ | `frozenset[str]` |             |
