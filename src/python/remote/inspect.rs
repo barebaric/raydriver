@@ -10,7 +10,7 @@ use crate::python::core::json::value_to_py;
 use crate::python::pyfuture::spawn_future;
 use crate::python::remote::bridge::py_to_json;
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.inspect")]
 #[pyfunction]
 pub(crate) fn daemon_rpc<'py>(
     py: Python<'py>,
@@ -54,7 +54,7 @@ pub(crate) fn daemon_rpc<'py>(
     })
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.inspect")]
 #[pyfunction]
 pub(crate) fn welcome_probe<'py>(
     py: Python<'py>,
@@ -69,7 +69,7 @@ pub(crate) fn welcome_probe<'py>(
     })
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.inspect")]
 #[pyfunction]
 #[pyo3(signature = (host, port, token = None, tls_ca = None))]
 pub(crate) fn snapshot<'py>(

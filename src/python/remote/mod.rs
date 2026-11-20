@@ -27,51 +27,73 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     remote.setattr("__doc__", MODULE_DOC)?;
     remote.add(
         "__all__",
-        vec![
-            "Announcer",
-            "ClientQueue",
-            "Daemon",
-            "DaemonConfig",
-            "RemoteSession",
-            "ServiceInfo",
-            "announce",
-            "browse_daemons",
-            "create_session",
-            "daemon_rpc",
-            "decode_event",
-            "decode_frame",
-            "decode_state",
-            "encode_event",
-            "encode_frame",
-            "encode_state",
-            "error_response",
-            "event_frame",
-            "list_devices",
-            "list_protocols",
-            "open_session",
-            "request",
-            "response",
-            "snapshot",
-            "welcome_payload",
-            "welcome_probe",
-        ],
+        vec!["client", "daemon", "inspect", "mdns", "protocol"],
     )?;
-    add_protocol_constants(&remote)?;
-    remote.add_function(wrap_pyfunction!(protocol::encode_frame, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::decode_frame, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::request, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::response, &remote)?)?;
-    remote
-        .add_function(wrap_pyfunction!(protocol::error_response, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::event_frame, &remote)?)?;
-    remote
-        .add_function(wrap_pyfunction!(protocol::welcome_payload, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::encode_state, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::decode_state, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::encode_event, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(protocol::decode_event, &remote)?)?;
 
-    remote.add(
+    let protocol = PyModule::new(py, "protocol")?;
+    protocol.setattr(
+        "__doc__",
+        "Wire framing, envelope, catalog and codecs (v1).",
+    )?;
+    add_protocol_constants(&protocol)?;
+    protocol.add_class::<protocol::LengthPrefix>()?;
+    protocol.add("ProtocolError", py.get_type::<protocol::ProtocolError>())?;
+    protocol.add("LENGTH_PREFIX", Py::new(py, protocol::LengthPrefix)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::encode_frame, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::decode_frame, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::read_frame, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::write_frame, &protocol)?)?;
+    protocol.add_function(wrap_pyfunction!(protocol::request, &protocol)?)?;
+    protocol.add_function(wrap_pyfunction!(protocol::response, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::error_response, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::event_frame, &protocol)?)?;
+    protocol.add_function(wrap_pyfunction!(
+        protocol::welcome_payload,
+        &protocol
+    )?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::encode_state, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::decode_state, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::encode_event, &protocol)?)?;
+    protocol
+        .add_function(wrap_pyfunction!(protocol::decode_event, &protocol)?)?;
+    remote.add_submodule(&protocol)?;
+
+    let daemon = PyModule::new(py, "daemon")?;
+    daemon.setattr("__doc__", "Session host and its configuration.")?;
+    daemon.add("DEFAULT_PORT", crate::core::remote::daemon::DEFAULT_PORT)?;
+    daemon.add(
+        "DEFAULT_RING_SIZE",
+        crate::core::remote::daemon::DEFAULT_RING_SIZE,
+    )?;
+    daemon.add(
+        "DEFAULT_LEASE_GRACE",
+        crate::core::remote::daemon::DEFAULT_LEASE_GRACE,
+    )?;
+    daemon.add(
+        "SEND_QUEUE_LIMIT",
+        crate::core::remote::daemon::SEND_QUEUE_LIMIT,
+    )?;
+    daemon.add_class::<daemon::DaemonConfig>()?;
+    daemon.add_class::<daemon::Daemon>()?;
+    daemon.add_class::<daemon::ClientQueue>()?;
+    remote.add_submodule(&daemon)?;
+
+    let client = PyModule::new(py, "client")?;
+    client.setattr(
+        "__doc__",
+        "Client-side remote session proxy and session factory.",
+    )?;
+    client.add("DEFAULT_PORT", crate::core::remote::daemon::DEFAULT_PORT)?;
+    client.add(
         "REMOTE_KEYS",
         (
             "remote_host",
@@ -82,41 +104,44 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "url",
         ),
     )?;
-    remote.add("DEFAULT_PORT", crate::core::remote::daemon::DEFAULT_PORT)?;
-    remote.add(
-        "DEFAULT_RING_SIZE",
-        crate::core::remote::daemon::DEFAULT_RING_SIZE,
-    )?;
-    remote.add(
-        "DEFAULT_LEASE_GRACE",
-        crate::core::remote::daemon::DEFAULT_LEASE_GRACE,
-    )?;
-    remote.add(
-        "SEND_QUEUE_LIMIT",
-        crate::core::remote::daemon::SEND_QUEUE_LIMIT,
-    )?;
-    remote.add_class::<daemon::DaemonConfig>()?;
-    remote.add_class::<daemon::Daemon>()?;
-    remote.add_class::<daemon::ClientQueue>()?;
+    client.add_class::<client::RemoteSession>()?;
+    client.add_function(wrap_pyfunction!(client::create_session, &client)?)?;
+    client.add_function(wrap_pyfunction!(client::open_session, &client)?)?;
+    client.add_function(wrap_pyfunction!(client::list_devices, &client)?)?;
+    client.add_function(wrap_pyfunction!(client::list_protocols, &client)?)?;
+    remote.add_submodule(&client)?;
 
-    remote.add_class::<client::RemoteSession>()?;
-    remote.add_function(wrap_pyfunction!(client::create_session, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(client::open_session, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(client::list_devices, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(client::list_protocols, &remote)?)?;
+    let mdns = PyModule::new(py, "mdns")?;
+    mdns.setattr("__doc__", "mDNS announce and browse.")?;
+    mdns.add("SERVICE_TYPE", crate::core::remote::mdns::SERVICE_TYPE)?;
+    mdns.add_class::<mdns::Announcer>()?;
+    mdns.add_class::<mdns::ServiceInfo>()?;
+    mdns.add_function(wrap_pyfunction!(mdns::announce, &mdns)?)?;
+    mdns.add_function(wrap_pyfunction!(mdns::browse_daemons, &mdns)?)?;
+    mdns.add_function(wrap_pyfunction!(mdns::_announce_address, &mdns)?)?;
+    mdns.add_function(wrap_pyfunction!(mdns::_service_name, &mdns)?)?;
+    mdns.add_function(wrap_pyfunction!(mdns::_service_name_for, &mdns)?)?;
+    remote.add_submodule(&mdns)?;
 
-    remote.add("SERVICE_TYPE", crate::core::remote::mdns::SERVICE_TYPE)?;
-    remote.add_class::<mdns::Announcer>()?;
-    remote.add_class::<mdns::ServiceInfo>()?;
-    remote.add_function(wrap_pyfunction!(mdns::announce, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(mdns::browse_daemons, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(mdns::_announce_address, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(mdns::_service_name, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(mdns::_service_name_for, &remote)?)?;
+    let inspect = PyModule::new(py, "inspect")?;
+    inspect.setattr("__doc__", "Read-only daemon inspection.")?;
+    inspect.add_function(wrap_pyfunction!(inspect::daemon_rpc, &inspect)?)?;
+    inspect
+        .add_function(wrap_pyfunction!(inspect::welcome_probe, &inspect)?)?;
+    inspect.add_function(wrap_pyfunction!(inspect::snapshot, &inspect)?)?;
+    remote.add_submodule(&inspect)?;
 
-    remote.add_function(wrap_pyfunction!(inspect::daemon_rpc, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(inspect::welcome_probe, &remote)?)?;
-    remote.add_function(wrap_pyfunction!(inspect::snapshot, &remote)?)?;
+    let sys = py.import("sys")?;
+    let modules = sys.getattr("modules")?;
+    for (name, module) in [
+        ("raydriver.remote.protocol", &protocol),
+        ("raydriver.remote.daemon", &daemon),
+        ("raydriver.remote.client", &client),
+        ("raydriver.remote.mdns", &mdns),
+        ("raydriver.remote.inspect", &inspect),
+    ] {
+        modules.set_item(name, module)?;
+    }
 
     m.add_submodule(&remote)?;
     Ok(())

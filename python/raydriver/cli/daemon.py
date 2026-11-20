@@ -32,7 +32,8 @@ from raydriver.core import list_serial_ports
 from raydriver.paths import default_config_path
 from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
-from raydriver.remote.daemon import SESSION_CLASSES, Daemon, DaemonConfig
+from raydriver.protocols import PROTOCOLS
+from raydriver.remote.daemon import Daemon, DaemonConfig
 
 DEFAULT_CONFIG_PATH = default_config_path()
 
@@ -95,10 +96,10 @@ def add_device(
 
     Creates the config with a generated token when none exists yet.
     """
-    if protocol_name not in SESSION_CLASSES:
+    if protocol_name not in PROTOCOLS:
         raise ValueError(
             f"unknown protocol {protocol_name!r}; "
-            f"choose from {', '.join(sorted(SESSION_CLASSES))}"
+            f"choose from {', '.join(sorted(PROTOCOLS))}"
         )
     lines = []
     if not path.exists():
@@ -267,7 +268,7 @@ def add_daemon_parser(subparsers) -> None:
     parser.add_argument(
         "--protocol",
         default="grbl",
-        choices=sorted(SESSION_CLASSES),
+        choices=sorted(PROTOCOLS),
         help="driver protocol for add (default: grbl)",
     )
     parser.add_argument(

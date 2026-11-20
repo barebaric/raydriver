@@ -19,7 +19,7 @@ use crate::python::remote::bridge::{py_to_json, running_loop};
 use crate::python::remote::session::PySessionFactory;
 
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.daemon")]
 pub struct DaemonConfig {
     pub(crate) inner: Arc<Mutex<CoreConfig>>,
 }
@@ -210,7 +210,7 @@ impl DaemonConfig {
 }
 
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.daemon")]
 pub struct Daemon {
     inner: Arc<CoreDaemon>,
     config: Arc<Mutex<CoreConfig>>,
@@ -279,7 +279,7 @@ fn core_error(err: DaemonError) -> PyErr {
     }
 }
 
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.daemon")]
 pub struct SocketInfo {
     addr: SocketAddr,
 }
@@ -291,7 +291,7 @@ impl SocketInfo {
     }
 }
 
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.daemon")]
 pub struct StartedServer {
     addr: SocketAddr,
 }
@@ -306,7 +306,7 @@ impl StartedServer {
 }
 
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.daemon")]
 pub struct ClientQueue {
     inner: Arc<CoreClientQueue>,
 }
@@ -338,3 +338,20 @@ impl ClientQueue {
         })
     }
 }
+
+pyo3_stub_gen::module_variable!("raydriver.remote.daemon", "DEFAULT_PORT", u16);
+pyo3_stub_gen::module_variable!(
+    "raydriver.remote.daemon",
+    "DEFAULT_RING_SIZE",
+    usize
+);
+pyo3_stub_gen::module_variable!(
+    "raydriver.remote.daemon",
+    "DEFAULT_LEASE_GRACE",
+    f64
+);
+pyo3_stub_gen::module_variable!(
+    "raydriver.remote.daemon",
+    "SEND_QUEUE_LIMIT",
+    usize
+);

@@ -110,7 +110,7 @@ impl RemoteEvents for PyRemoteEvents {
 
 /// The proxy with the union of the sessions' method surfaces.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.client")]
 pub struct RemoteSession {
     inner: Arc<CoreRemoteSession>,
     events: Arc<PyRemoteEvents>,
@@ -720,7 +720,7 @@ const REMOTE_KEYS: [&str; 6] = [
     "url",
 ];
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
 pub(crate) fn create_session(
     py: Python<'_>,
@@ -771,7 +771,7 @@ pub(crate) fn create_session(
     Ok(Py::new(py, RemoteSession { inner, events })?.into_any())
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
 #[pyo3(signature = (
     endpoint,
@@ -817,7 +817,7 @@ pub(crate) fn open_session(
     Ok(RemoteSession { inner, events })
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
 pub(crate) fn list_devices<'py>(
     py: Python<'py>,
@@ -831,7 +831,7 @@ pub(crate) fn list_devices<'py>(
     })
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
 pub(crate) fn list_protocols<'py>(
     py: Python<'py>,
@@ -844,3 +844,10 @@ pub(crate) fn list_protocols<'py>(
         Python::attach(|py| value_to_py(py, &Value::Array(protocols)))
     })
 }
+
+pyo3_stub_gen::module_variable!("raydriver.remote.client", "DEFAULT_PORT", u16);
+pyo3_stub_gen::module_variable!(
+    "raydriver.remote.client",
+    "REMOTE_KEYS",
+    Vec<&'static str>
+);

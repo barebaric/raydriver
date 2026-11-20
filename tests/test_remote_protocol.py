@@ -200,9 +200,8 @@ def test_wcs_offsets_restored_as_tuples():
     assert all(isinstance(value, tuple) for value in decoded.offsets.values())
 
 
-def test_protocol_error_payload():
-    err = protocol.ProtocolError(protocol.JOB_RUNNING, "busy")
-    assert err.payload() == {"code": "job_running", "message": "busy"}
+def test_protocol_error_message():
+    err = protocol.ProtocolError("busy")
     assert str(err) == "busy"
 
 

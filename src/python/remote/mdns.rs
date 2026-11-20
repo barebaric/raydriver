@@ -14,7 +14,7 @@ use crate::python::pyfuture::spawn_future;
 use crate::python::remote::daemon::DaemonConfig;
 
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.mdns")]
 pub struct ServiceInfo {
     #[pyo3(get)]
     port: u16,
@@ -39,7 +39,7 @@ impl ServiceInfo {
 }
 
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.remote")]
+#[pyclass(module = "raydriver.remote.mdns")]
 pub struct Announcer {
     inner: Mutex<Option<core::MdnsAnnouncer>>,
     #[pyo3(get)]
@@ -62,7 +62,7 @@ impl Announcer {
     }
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.mdns")]
 #[pyfunction]
 #[pyo3(signature = (timeout = 3.0))]
 pub(crate) fn browse_daemons<'py>(
@@ -76,26 +76,26 @@ pub(crate) fn browse_daemons<'py>(
     })
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.mdns")]
 #[pyfunction]
 pub(crate) fn _announce_address(config: PyRef<'_, DaemonConfig>) -> String {
     let host = config.inner.lock().unwrap().host.clone();
     core::announce_address(&host)
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.mdns")]
 #[pyfunction]
 pub(crate) fn _service_name() -> String {
     format!("{}.{}", core::service_name(), core::SERVICE_TYPE)
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.mdns")]
 #[pyfunction]
 pub(crate) fn _service_name_for(host: &str) -> String {
     format!("{}.{}", core::service_name_for(host), core::SERVICE_TYPE)
 }
 
-#[gen_stub_pyfunction(module = "raydriver.remote")]
+#[gen_stub_pyfunction(module = "raydriver.remote.mdns")]
 #[pyfunction]
 #[pyo3(signature = (config, port, name = None))]
 pub(crate) fn announce<'py>(
@@ -148,3 +148,10 @@ pub(crate) fn announce<'py>(
         })
     })
 }
+
+pyo3_stub_gen::module_variable!(
+    "raydriver.remote.mdns",
+    "SERVICE_TYPE",
+    &'static str,
+    core::SERVICE_TYPE
+);

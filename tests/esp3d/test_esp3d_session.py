@@ -118,17 +118,16 @@ class TestConnection:
         )
 
     async def test_daemon_factory_builds_esp3d_session(self, emulator, events):
-        from raydriver.remote.daemon import default_session_factory
+        from raydriver.esp3d import Esp3dSession
 
-        session = default_session_factory(
-            "esp3d",
-            {
+        session = Esp3dSession(
+            config={
                 **FAST_CONFIG,
                 "http_port": emulator.http_port,
                 "ws_port": emulator.ws_port,
             },
-            DIALECT,
-            events.callback,
+            dialect=DIALECT,
+            event_callback=events.callback,
         )
         await session.connect()
         await events.wait_for(

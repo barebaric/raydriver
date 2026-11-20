@@ -47,28 +47,42 @@ class DaemonClient:
         self.events = []
         self.welcome: dict[str, Any] | None = None
         self._id = 0
+        self._pending: dict[int, asyncio.Future] = {}
+        self._reader_task: asyncio.Task | None = None
 
-    async def _pump(self):
-        msg = await protocol.read_frame(self.reader)
-        type_ = msg.get("type")
-        if type_ == protocol.PING:
-            await protocol.write_frame(self.writer, {"type": protocol.PONG})
-            return None
-        if type_ == protocol.EVENT:
-            self.events.append(msg["payload"])
-            return None
-        return msg
+    def start(self):
+        self._reader_task = asyncio.ensure_future(self._read_loop())
+
+    async def _read_loop(self):
+        try:
+            while True:
+                msg = await protocol.read_frame(self.reader)
+                type_ = msg.get("type")
+                if type_ == protocol.PING:
+                    await protocol.write_frame(
+                        self.writer, {"type": protocol.PONG}
+                    )
+                elif type_ == protocol.EVENT:
+                    self.events.append(msg["payload"])
+                else:
+                    msg_id = msg.get("id")
+                    future = self._pending.pop(msg_id, None)
+                    if future is not None and not future.done():
+                        future.set_result(msg)
+        except (ConnectionError, OSError):
+            pass
 
     async def request(self, type_, payload=None):
         self._id += 1
+        msg_id = self._id
+        future = asyncio.get_running_loop().create_future()
+        self._pending[msg_id] = future
         await protocol.write_frame(
-            self.writer, protocol.request(self._id, type_, payload)
+            self.writer, protocol.request(msg_id, type_, payload)
         )
-        while True:
-            msg = await self._pump()
-            if msg is not None:
-                assert msg.get("id") == self._id, msg
-                return msg
+        msg = await future
+        assert msg.get("id") == msg_id, msg
+        return msg
 
     async def wait_for_event(self, kind, pred=None, timeout=10.0):
         deadline = time.monotonic() + timeout
@@ -77,29 +91,15 @@ class DaemonClient:
                 event = payload["event"]
                 if event.get("kind") == kind and (pred is None or pred(event)):
                     return payload
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
+            if time.monotonic() >= deadline:
                 kinds = [p["event"].get("kind") for p in self.events]
                 raise AssertionError(
                     f"event {kind!r} not observed; got {kinds}"
                 )
-            try:
-                await asyncio.wait_for(self._pump(), timeout=remaining)
-            except asyncio.TimeoutError:
-                kinds = [p["event"].get("kind") for p in self.events]
-                raise AssertionError(
-                    f"event {kind!r} timed out; got {kinds}"
-                ) from None
+            await asyncio.sleep(0.01)
 
     async def collect(self, duration):
-        deadline = time.monotonic() + duration
-        while time.monotonic() < deadline:
-            try:
-                await asyncio.wait_for(
-                    self._pump(), timeout=deadline - time.monotonic()
-                )
-            except asyncio.TimeoutError:
-                break
+        await asyncio.sleep(duration)
 
     async def open_session(self, role="control", force=False):
         reply = await self.request(
@@ -158,8 +158,12 @@ async def connect_client(port, token=None, ssl_context=None):
     assert welcome["type"] == protocol.WELCOME
     client.welcome = welcome["payload"]
     if welcome["payload"]["auth_required"]:
-        reply = await client.request(protocol.AUTH, {"token": token})
+        await protocol.write_frame(
+            writer, protocol.request(0, protocol.AUTH, {"token": token})
+        )
+        reply = await protocol.read_frame(reader)
         assert reply["ok"], reply
+    client.start()
     return client
 
 

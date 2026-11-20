@@ -1,15 +1,16 @@
 """Remote sessions: a device-host daemon and a client proxy.
 
-The implementation lives in Rust; the submodules here are thin
-delegates so ``raydriver.remote.protocol`` and friends keep their
-historical import paths.
+The public API is implemented in Rust and exposed through the
+compiled extension module; this package only re-exports its
+submodules for stable import paths.
 """
 
-import raydriver.raydriver as _raydriver
-from raydriver.remote import client, daemon, inspect, mdns, protocol
+import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]
+
+client = _raydriver.remote.client
+daemon = _raydriver.remote.daemon
+inspect = _raydriver.remote.inspect
+mdns = _raydriver.remote.mdns
+protocol = _raydriver.remote.protocol
 
 __all__ = ["client", "daemon", "inspect", "mdns", "protocol"]
-
-
-def __getattr__(name):
-    return getattr(_raydriver.remote, name)
