@@ -1,20 +1,32 @@
-//! Device listing from raydriver daemons.
+//! Device and camera listing from raydriver daemons.
 //!
 //! A daemon is an endpoint, not a firmware: the probe speaks the
-//! control protocol's welcome and lists the daemon's devices. The
-//! wire format is a 4-byte big-endian payload length followed by one
-//! UTF-8 JSON object, so the probe needs no firmware knowledge.
-//! Token-protected daemons cannot be enumerated without credentials;
-//! they surface as a single daemon row that seeds the endpoint vars.
+//! control protocol's welcome and lists the daemon's devices and
+//! cameras. The wire format is a 4-byte big-endian payload length
+//! followed by one UTF-8 JSON object, so the probe needs no firmware
+//! knowledge.
+//!
+//! Discovery probes run unauthenticated and therefore only enumerate
+//! daemons that expose an open listener. [`query_cameras`] additionally
+//! speaks the token handshake and TLS so a client can list the cameras
+//! of a protected daemon after the user supplies credentials.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::RootCertStore;
 use serde_json::{json, Value};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 
 /// One frame = 4-byte big-endian length + UTF-8 JSON payload.
 const MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
+
+/// The only control-protocol version this crate speaks.
+const PROTOCOL_VERSION: i64 = 1;
 
 /// Why a daemon could not be enumerated, for the daemon-level row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,6 +63,18 @@ pub struct DaemonReport {
     pub entries: Vec<DaemonEntry>,
 }
 
+/// A camera endpoint advertised by a daemon.
+///
+/// Video never crosses the control protocol: *uri* is opened by the
+/// client's own network-camera source, and *source_type* names the
+/// source kind (e.g. ``http_stream``).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DaemonCamera {
+    pub name: String,
+    pub uri: String,
+    pub source_type: String,
+}
+
 /// Connects to a daemon, reads its welcome and lists its devices.
 /// Never raises: an unreachable or protected endpoint yields a
 /// daemon row (or nothing when the peer does not speak the protocol).
@@ -74,6 +98,106 @@ pub async fn query_daemon(
     }
 }
 
+/// Lists the cameras a daemon advertises.
+///
+/// Unlike discovery, this can authenticate against a protected
+/// daemon: a token is sent only over TLS, except to loopback where
+/// the token never leaves the machine. TLS is enabled when *tls_ca*
+/// names a PEM certificate; *tls_hostname* overrides the name
+/// verified against that certificate when it differs from *host*.
+pub async fn query_cameras(
+    host: &str,
+    port: u16,
+    token: Option<&str>,
+    tls_ca: Option<&str>,
+    tls_hostname: Option<&str>,
+    timeout: Duration,
+) -> Result<Vec<DaemonCamera>, String> {
+    if token.is_some() && tls_ca.is_none() && !is_loopback(host) {
+        return Err("refusing to send a token without TLS".to_string());
+    }
+    let mut stream =
+        connect_stream(host, port, tls_ca, tls_hostname, timeout).await?;
+    let welcome = read_message(&mut stream, timeout).await?;
+    if welcome.get("type").and_then(Value::as_str) != Some("welcome") {
+        return Err("daemon did not send welcome".to_string());
+    }
+    let payload = welcome.get("payload").unwrap_or(&Value::Null);
+    if payload.get("protocol").and_then(Value::as_i64) != Some(PROTOCOL_VERSION)
+    {
+        return Err("unsupported daemon protocol version".to_string());
+    }
+    let auth_required = payload
+        .get("auth_required")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if auth_required {
+        let Some(token) = token else {
+            return Err("daemon requires authentication".to_string());
+        };
+        let auth = json!({
+            "id": 0,
+            "type": "auth",
+            "payload": {"token": token},
+        });
+        write_frame(&mut stream, &auth).await?;
+        let reply = read_message(&mut stream, timeout).await?;
+        if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+            return Err("daemon authentication failed".to_string());
+        }
+    }
+
+    let request = json!({"id": 1, "type": "device/list", "payload": {}});
+    write_frame(&mut stream, &request).await?;
+    let reply = read_message(&mut stream, timeout).await?;
+    if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        let message = reply
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("device/list failed");
+        return Err(message.to_string());
+    }
+    Ok(parse_cameras(
+        reply
+            .get("payload")
+            .and_then(|payload| payload.get("cameras")),
+    ))
+}
+
+fn parse_cameras(value: Option<&Value>) -> Vec<DaemonCamera> {
+    let Some(entries) = value.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut cameras = Vec::new();
+    for entry in entries {
+        let Some(uri) = entry.get("uri").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(source_type) = entry.get("type").and_then(Value::as_str)
+        else {
+            continue;
+        };
+        let uri = uri.trim();
+        let source_type = source_type.trim();
+        if uri.is_empty() || source_type.is_empty() {
+            continue;
+        }
+        let name = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .unwrap_or(uri);
+        cameras.push(DaemonCamera {
+            name: name.to_string(),
+            uri: uri.to_string(),
+            source_type: source_type.to_string(),
+        });
+    }
+    cameras
+}
+
 async fn query_inner(
     host: &str,
     port: u16,
@@ -85,7 +209,7 @@ async fn query_inner(
             .map_err(|_| ())?
             .map_err(|_| ())?;
 
-    let welcome = read_message(&mut stream, timeout).await?;
+    let welcome = read_message(&mut stream, timeout).await.map_err(|_| ())?;
     if welcome.get("type").and_then(Value::as_str) != Some("welcome") {
         return Ok(Vec::new());
     }
@@ -101,8 +225,8 @@ async fn query_inner(
     }
 
     let request = json!({"id": 1, "type": "device/list", "payload": {}});
-    write_frame(&mut stream, &request).await?;
-    let reply = read_message(&mut stream, timeout).await?;
+    write_frame(&mut stream, &request).await.map_err(|_| ())?;
+    let reply = read_message(&mut stream, timeout).await.map_err(|_| ())?;
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Ok(vec![DaemonEntry::Row {
             note: DaemonNote::TokenRequired,
@@ -146,11 +270,79 @@ async fn query_inner(
     Ok(entries)
 }
 
-/// Reads one frame, skipping keepalive pings.
-async fn read_message(
-    stream: &mut TcpStream,
+/// A control-protocol stream, plain TCP or TLS.
+trait ControlStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> ControlStream for T {}
+
+type BoxedStream = Box<dyn ControlStream>;
+
+async fn connect_stream(
+    host: &str,
+    port: u16,
+    tls_ca: Option<&str>,
+    tls_hostname: Option<&str>,
     timeout: Duration,
-) -> Result<Value, ()> {
+) -> Result<BoxedStream, String> {
+    let tcp = tokio::time::timeout(timeout, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| format!("connecting to {host}:{port} timed out"))?
+        .map_err(|err| format!("cannot connect to {host}:{port}: {err}"))?;
+    let Some(ca_path) = tls_ca else {
+        return Ok(Box::new(tcp));
+    };
+
+    let roots = load_roots(ca_path)?;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|err| format!("TLS configuration failed: {err}"))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let name = tls_hostname.unwrap_or(host);
+    let server_name = ServerName::try_from(name.to_string())
+        .map_err(|_| format!("invalid TLS server name {name:?}"))?;
+    let stream =
+        tokio::time::timeout(timeout, connector.connect(server_name, tcp))
+            .await
+            .map_err(|_| "TLS handshake timed out".to_string())?
+            .map_err(|err| format!("TLS handshake failed: {err}"))?;
+    Ok(Box::new(stream))
+}
+
+fn load_roots(path: &str) -> Result<RootCertStore, String> {
+    let certificates = CertificateDer::pem_file_iter(path)
+        .map_err(|err| format!("cannot read TLS CA {path}: {err}"))?;
+    let mut roots = RootCertStore::empty();
+    let mut added = 0;
+    for certificate in certificates {
+        let certificate = certificate
+            .map_err(|err| format!("invalid TLS CA {path}: {err}"))?;
+        roots
+            .add(certificate)
+            .map_err(|err| format!("invalid TLS CA {path}: {err}"))?;
+        added += 1;
+    }
+    if added == 0 {
+        return Err(format!("no certificates in TLS CA {path}"));
+    }
+    Ok(roots)
+}
+
+fn is_loopback(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Reads one frame, skipping keepalive pings.
+async fn read_message<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    timeout: Duration,
+) -> Result<Value, String> {
     loop {
         let msg = read_frame(stream, timeout).await?;
         if msg.get("type").and_then(Value::as_str) == Some("ping") {
@@ -160,34 +352,42 @@ async fn read_message(
     }
 }
 
-async fn read_frame(
-    stream: &mut TcpStream,
+async fn read_frame<S: AsyncRead + Unpin>(
+    stream: &mut S,
     timeout: Duration,
-) -> Result<Value, ()> {
+) -> Result<Value, String> {
     let mut prefix = [0u8; 4];
     tokio::time::timeout(timeout, stream.read_exact(&mut prefix))
         .await
-        .map_err(|_| ())?
-        .map_err(|_| ())?;
+        .map_err(|_| "timed out reading frame header".to_string())?
+        .map_err(|err| format!("failed reading frame header: {err}"))?;
     let size = u32::from_be_bytes(prefix);
     if size > MAX_FRAME_BYTES {
-        return Err(());
+        return Err(format!("frame of {size} bytes exceeds the limit"));
     }
     let mut payload = vec![0u8; size as usize];
     tokio::time::timeout(timeout, stream.read_exact(&mut payload))
         .await
-        .map_err(|_| ())?
-        .map_err(|_| ())?;
-    serde_json::from_slice(&payload).map_err(|_| ())
+        .map_err(|_| "timed out reading frame payload".to_string())?
+        .map_err(|err| format!("failed reading frame payload: {err}"))?;
+    serde_json::from_slice(&payload)
+        .map_err(|err| format!("frame is not valid JSON: {err}"))
 }
 
-async fn write_frame(
-    stream: &mut TcpStream,
+async fn write_frame<S: AsyncWrite + Unpin>(
+    stream: &mut S,
     message: &Value,
-) -> Result<(), ()> {
-    let payload = serde_json::to_vec(message).map_err(|_| ())?;
+) -> Result<(), String> {
+    let payload = serde_json::to_vec(message)
+        .map_err(|err| format!("cannot encode frame: {err}"))?;
     let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
     frame.extend_from_slice(&payload);
-    stream.write_all(&frame).await.map_err(|_| ())?;
-    stream.flush().await.map_err(|_| ())
+    stream
+        .write_all(&frame)
+        .await
+        .map_err(|err| format!("failed writing frame: {err}"))?;
+    stream
+        .flush()
+        .await
+        .map_err(|err| format!("failed flushing frame: {err}"))
 }
