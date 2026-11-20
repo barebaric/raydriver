@@ -7,3 +7,4 @@ dist/
 .venv/
 .ruff_cache/
 .pytest_cache/
+freeze-dump.txt

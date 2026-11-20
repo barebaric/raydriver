@@ -3,6 +3,7 @@ emulator (raydriver.grbl.emulator)."""
 
 import asyncio
 import faulthandler
+import os
 import time
 
 import pytest
@@ -14,14 +15,16 @@ from raydriver.grbl.emulator import GrblEmulator
 
 
 def _arm_freeze_watchdog():
-    """Dump all thread stacks periodically if the process stalls.
+    """Dump all thread stacks periodically when diagnosing a stall.
 
-    The dump runs on a C-level thread and works even when the GIL is
-    stuck (unlike Python timers, which need the GIL to wake).
-    Healthy runs finish in under a minute, so any dump indicates a
-    stall; a second dump 60s later confirms the stall is permanent.
+    Opt-in via ``RAYDRIVER_FREEZE_WATCHDOG=1``.  The dump runs on a
+    C-level thread; when it fires while tokio workers are marshaling
+    Python calls, it crashes the interpreter with an access violation
+    on Windows.  It must not be armed during normal test runs.
     """
 
+    if os.environ.get("RAYDRIVER_FREEZE_WATCHDOG") != "1":
+        return
     faulthandler.dump_traceback_later(
         60, repeat=True, file=open("freeze-dump.txt", "w")
     )
