@@ -7,6 +7,8 @@ and TLS, keepalive and slow-client protection.
 """
 
 import asyncio
+import json
+import struct
 import time
 from pathlib import Path
 from typing import Any
@@ -25,8 +27,25 @@ from raydriver.remote import protocol
 from raydriver.remote.daemon import ClientQueue, Daemon, DaemonConfig
 
 CERTS = Path(__file__).parent / "certs"
-CERT = CERTS / "analyzer-test-cert.pem"
-KEY = CERTS / "analyzer-test-key.pem"
+CLIENTS: list["DaemonClient"] = []
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_clients():
+    yield
+    for client in list(CLIENTS):
+        client.writer.transport.abort()
+    CLIENTS.clear()
+    current = asyncio.current_task()
+    for task in asyncio.all_tasks():
+        if task is not current:
+            task.cancel()
+    await asyncio.sleep(0)
+
+
+CA = CERTS / "daemon-test-ca.pem"
+CERT = CERTS / "daemon-test-cert.pem"
+KEY = CERTS / "daemon-test-key.pem"
 
 
 def job_gcode(lines):
@@ -35,6 +54,13 @@ def job_gcode(lines):
 
 def op_map(lines):
     return [[i, i] for i in range(lines)]
+
+
+async def read_frame(reader):
+    prefix = await reader.readexactly(4)
+    (size,) = struct.unpack(">I", prefix)
+    payload = await reader.readexactly(size)
+    return json.loads(payload)
 
 
 class DaemonClient:
@@ -48,7 +74,7 @@ class DaemonClient:
         self._id = 0
 
     async def _pump(self):
-        msg = await protocol.read_frame(self.reader)
+        msg = await read_frame(self.reader)
         type_ = msg.get("type")
         if type_ == protocol.PING:
             await protocol.write_frame(self.writer, {"type": protocol.PONG})
@@ -153,12 +179,16 @@ async def connect_client(port, token=None, ssl_context=None):
         server_hostname="localhost" if ssl_context else None,
     )
     client = DaemonClient(reader, writer)
-    welcome = await protocol.read_frame(reader)
+    welcome = await read_frame(reader)
     assert welcome["type"] == protocol.WELCOME
     client.welcome = welcome["payload"]
     if welcome["payload"]["auth_required"]:
-        reply = await client.request(protocol.AUTH, {"token": token})
+        await protocol.write_frame(
+            writer, protocol.request(0, protocol.AUTH, {"token": token})
+        )
+        reply = await read_frame(reader)
         assert reply["ok"], reply
+    CLIENTS.append(client)
     return client
 
 
@@ -281,6 +311,7 @@ async def test_reattach_replays_exact_events(rig):
     await client.connect_session(sid)
     await client.run_job(sid, 10)
     await client.wait_for_event("job_finished")
+    await client.collect(0.05)
     recorded = list(client.events)
     mid = recorded[len(recorded) // 2]["seq"]
 
@@ -293,7 +324,11 @@ async def test_reattach_replays_exact_events(rig):
     assert "replayed" in reply["payload"]
     expected = [p for p in recorded if p["seq"] > mid]
     got = [p for p in other.events if p["seq"] > mid]
-    assert got == expected
+    # The daemon keeps emitting status polls while the test runs, so
+    # the replayed ring can extend beyond what the first client read.
+    # The replay must still reproduce the recorded window exactly.
+    assert got[: len(expected)] == expected
+    assert [p["seq"] for p in got] == list(range(mid + 1, mid + 1 + len(got)))
 
 
 async def test_first_attach_gets_snapshot(rig):
@@ -504,12 +539,12 @@ async def test_wrong_token_closes_connection():
         reader, writer = await asyncio.open_connection(
             "127.0.0.1", server_port(server)
         )
-        welcome = await protocol.read_frame(reader)
+        welcome = await read_frame(reader)
         assert welcome["payload"]["auth_required"] is True
         await protocol.write_frame(
             writer, protocol.request(1, protocol.AUTH, {"token": "x"})
         )
-        reply = await protocol.read_frame(reader)
+        reply = await read_frame(reader)
         assert reply["error"]["code"] == protocol.AUTH_FAILED
         assert await asyncio.wait_for(reader.read(), 5.0) == b""
         writer.close()
@@ -531,7 +566,7 @@ async def test_tls_roundtrip():
         client = await connect_client(
             server_port(server),
             token="secret",
-            ssl_context=make_client_ssl_context(str(CERT)),
+            ssl_context=make_client_ssl_context(str(CA)),
         )
         reply = await client.request(protocol.DEVICE_LIST)
         assert reply["ok"]

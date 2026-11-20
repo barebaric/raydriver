@@ -4,6 +4,7 @@ emulator (raydriver.grbl.emulator)."""
 import asyncio
 import faulthandler
 import os
+import sys
 import time
 
 import pytest
@@ -29,6 +30,12 @@ def _arm_freeze_watchdog():
         60, repeat=True, file=open("freeze-dump.txt", "w")
     )
 
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 _arm_freeze_watchdog()
 

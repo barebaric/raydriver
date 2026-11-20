@@ -1,21 +1,16 @@
 """Remote sessions: a device-host daemon and a client proxy.
 
-Submodules
-----------
-- raydriver.remote.protocol — wire framing, envelope, catalog and
-  codecs (v1)
-- raydriver.remote.daemon — session host: listener, registry,
-  lease, event ring and fan-out
-- raydriver.remote.client — RemoteSession proxy, the protocol-agnostic
-  open_session / list_devices / list_protocols API, and the
-  create_session factory
-- raydriver.remote.mdns — optional _raydriver._tcp announce and
-  browse (extra: daemon)
-- raydriver.remote.inspect — read-only daemon inspection for the
-  debug CLI
-
-The protocol is the daemon's knowledge: a client opens a session by
-device reference (open_session) and learns the protocol and its
-capabilities from the daemon as info (raydriver.protocols), rather
-than naming a driver itself.
+The public API is implemented in Rust and exposed through the
+compiled extension module; this package only re-exports its
+submodules for stable import paths.
 """
+
+import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]
+
+client = _raydriver.remote.client
+daemon = _raydriver.remote.daemon
+inspect = _raydriver.remote.inspect
+mdns = _raydriver.remote.mdns
+protocol = _raydriver.remote.protocol
+
+__all__ = ["client", "daemon", "inspect", "mdns", "protocol"]

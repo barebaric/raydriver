@@ -7,7 +7,9 @@ survive client disconnects; reattaching clients resync progress
 exactly. The daemon hosts *sessions*, not machines: machine
 configs and dialects stay client-side.
 
-Everything here works on Linux, macOS and Windows.
+Everything here works on Linux, macOS and Windows. The daemon,
+client proxy, wire codec and mDNS helpers are implemented in Rust;
+the Python modules only adapt them to asyncio and PyO3.
 
 ## Install and first run
 
