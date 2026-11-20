@@ -299,8 +299,37 @@ async def test_mdns_announce_registers_service(monkeypatch):
         assert announcer.info.properties[b"requires_auth"] == b"true"
         assert announcer.info.properties[b"tls"] == b"false"
         assert announcer.info.properties[b"cameras"] == b"1"
+        assert announcer.info.properties[b"camera0_name"] == b"c"
+        assert announcer.info.properties[b"camera0_type"] == b"http_stream"
+        assert announcer.info.properties[b"camera0_uri"] == b"u"
     finally:
         await announcer.close()
+
+
+def test_mdns_camera_properties():
+    cameras = [
+        {
+            "name": "Enclosure",
+            "uri": "http://pi/stream",
+            "type": "http_stream",
+        },
+        {"name": "Bed", "uri": "http://pi/bed", "type": "http_snapshot"},
+        {"name": "Broken", "uri": "", "type": "http_stream"},
+        {
+            "name": "Too long",
+            "uri": "http://pi/" + "x" * 300,
+            "type": "http_stream",
+        },
+    ]
+    properties = mdns._camera_properties(cameras)
+    assert properties == {
+        "camera0_name": "Enclosure",
+        "camera0_type": "http_stream",
+        "camera0_uri": "http://pi/stream",
+        "camera1_name": "Bed",
+        "camera1_type": "http_snapshot",
+        "camera1_uri": "http://pi/bed",
+    }
 
 
 def test_mdns_announce_address_matches_bind(monkeypatch):

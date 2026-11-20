@@ -180,9 +180,11 @@ sources (`http_stream`, `http_snapshot`, `rtsp`) consume them.
 }
 ```
 
-The endpoints surface in `device/list`; the mDNS TXT records
-announce how many cameras the daemon has. Query the full list with
-the Rust-backed camera helper (token and TLS included):
+The endpoints surface in `device/list`. The mDNS TXT records carry
+`camera0_name`, `camera0_type`, `camera0_uri` (and so on) alongside
+the total count in `cameras`; values longer than the 255-byte DNS TXT
+limit are omitted. Query the authoritative full list with the
+Rust-backed camera helper (token and TLS included):
 
 ```python
 from raydriver.core.discovery import daemon as daemon_api

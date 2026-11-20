@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 
 SERVICE_TYPE = "_raydriver._tcp.local."
 
+#: One DNS TXT string is limited to 255 bytes.
+TXT_VALUE_MAX = 255
+
 
 def _local_ip() -> str:
     try:
@@ -70,6 +73,37 @@ class Announcer:
         self._zeroconf.close()
 
 
+def _camera_properties(cameras: list[dict[str, Any]]) -> dict[str, str]:
+    """Advertise camera endpoints as ``cameraN_*`` TXT fields.
+
+    Each field is a separate TXT string, so values longer than the
+    255-byte DNS limit cannot be represented. Such cameras are
+    skipped; the ``cameras`` count still reports them, and clients can
+    always query ``device/list`` for the complete list.
+    """
+    properties: dict[str, str] = {}
+    for index, camera in enumerate(cameras):
+        if not isinstance(camera, dict):
+            continue
+        uri = str(camera.get("uri") or "")
+        source_type = str(camera.get("type") or "")
+        if not uri or not source_type:
+            continue
+        name = str(camera.get("name") or uri)
+        values = {"name": name, "type": source_type, "uri": uri}
+        if any(
+            len(value.encode("utf-8")) > TXT_VALUE_MAX
+            for value in values.values()
+        ):
+            logger.warning(
+                "camera %d is too long for mDNS TXT; skipping", index
+            )
+            continue
+        for field, value in values.items():
+            properties[f"camera{index}_{field}"] = value
+    return properties
+
+
 async def announce(config: Any, port: int) -> Announcer | None:
     """Announce the daemon on the LAN so clients discover it.
 
@@ -88,6 +122,7 @@ async def announce(config: Any, port: int) -> Announcer | None:
                 "requires_auth": str(config.token is not None).lower(),
                 "tls": str(config.tls_cert is not None).lower(),
                 "cameras": str(len(config.cameras)),
+                **_camera_properties(config.cameras),
             },
         )
         await zeroconf.async_register_service(info)
