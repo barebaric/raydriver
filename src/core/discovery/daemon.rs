@@ -271,12 +271,12 @@ async fn query_inner(
 }
 
 /// A control-protocol stream, plain TCP or TLS.
-trait ControlStream: AsyncRead + AsyncWrite + Unpin + Send {}
+pub trait ControlStream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> ControlStream for T {}
 
-type BoxedStream = Box<dyn ControlStream>;
+pub type BoxedStream = Box<dyn ControlStream>;
 
-async fn connect_stream(
+pub async fn connect_stream(
     host: &str,
     port: u16,
     tls_ca: Option<&str>,
@@ -329,7 +329,7 @@ fn load_roots(path: &str) -> Result<RootCertStore, String> {
     Ok(roots)
 }
 
-fn is_loopback(host: &str) -> bool {
+pub fn is_loopback(host: &str) -> bool {
     if host.eq_ignore_ascii_case("localhost") {
         return true;
     }
@@ -339,7 +339,7 @@ fn is_loopback(host: &str) -> bool {
 }
 
 /// Reads one frame, skipping keepalive pings.
-async fn read_message<S: AsyncRead + Unpin>(
+pub async fn read_message<S: AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
 ) -> Result<Value, String> {
@@ -352,7 +352,7 @@ async fn read_message<S: AsyncRead + Unpin>(
     }
 }
 
-async fn read_frame<S: AsyncRead + Unpin>(
+pub async fn read_frame<S: AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
 ) -> Result<Value, String> {
@@ -374,7 +374,7 @@ async fn read_frame<S: AsyncRead + Unpin>(
         .map_err(|err| format!("frame is not valid JSON: {err}"))
 }
 
-async fn write_frame<S: AsyncWrite + Unpin>(
+pub async fn write_frame<S: AsyncWrite + Unpin>(
     stream: &mut S,
     message: &Value,
 ) -> Result<(), String> {

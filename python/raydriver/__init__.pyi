@@ -6,6 +6,7 @@ import typing
 from . import core
 from . import grbl
 from . import marlin
+from . import remote
 from . import smoothie
 from . import xtool
 __all__ = [
@@ -13,6 +14,7 @@ __all__ = [
     "grbl",
     "init_logging",
     "marlin",
+    "remote",
     "smoothie",
     "xtool",
 ]
