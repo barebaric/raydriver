@@ -14,13 +14,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
 use crate::core::http;
-use crate::core::session::{SessionError, SessionEvents};
+use crate::core::session::{CancelMode, Session, SessionError, SessionEvents};
 use crate::core::types::{
-    DeviceError, DeviceState, DeviceStatus, TransportStatus,
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 use crate::core::ws::WsClient;
 
@@ -986,4 +988,149 @@ fn sockjs_payloads(frame: &str) -> Vec<Value> {
             value => Some(value),
         })
         .collect()
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for OctoPrintCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        OctoPrintCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        OctoPrintCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::run(&self, gcode, op_map.clone(), Vec::new()).await
+    }
+
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+        // The OctoPrint API has no emergency variant.
+        OctoPrintCore::cancel(self, false).await
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        OctoPrintCore::execute_interactive_command(self, command).await
+    }
+
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::home(self, axes.as_deref()).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::move_to(self, x, y, z, Some(speed)).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::jog(self, Some(speed), deltas).await
+    }
+
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        OctoPrintCore::select_tool(self, tool_number).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        OctoPrintCore::set_power(self, power).await
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::set_focus_power(self, power).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        OctoPrintCore::set_hold(self, hold).await
+    }
+
+    async fn clear_alarm(&self) -> Result<(), SessionError> {
+        OctoPrintCore::clear_alarm(self).await
+    }
+
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+    }
+
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        OctoPrintCore::read_settings(self).await
+    }
+
+    async fn write_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), SessionError> {
+        OctoPrintCore::write_setting(self, key, value).await
+    }
+
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+        OctoPrintCore::read_wcs_offsets(self).await
+    }
+
+    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+        OctoPrintCore::read_parser_state(self).await
+    }
+
+    async fn run_probe_cycle(
+        &self,
+        axis_letter: &str,
+        max_travel: f64,
+        feed_rate: f64,
+    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+        // OctoPrint never reports a probe position; the native call
+        // emits the probe status events.
+        OctoPrintCore::run_probe_cycle(
+            self,
+            axis_letter,
+            max_travel,
+            feed_rate,
+        )
+        .await?;
+        Ok(None)
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        // OctoPrint exposes no unit configuration.
+        OctoPrintCore::detect_unit_system(self).await?;
+        Ok(None)
+    }
 }

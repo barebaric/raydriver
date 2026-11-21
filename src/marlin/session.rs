@@ -36,7 +36,9 @@ use crate::core::dialect::{format_template, Arg, Dialect};
 use crate::core::line_session::{
     cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
-use crate::core::session::{secs, AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    secs, AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::transport::TransportKind;
 use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
@@ -541,5 +543,102 @@ impl MarlinCore {
             "Serial transport not connected",
         )
         .await
+    }
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for MarlinCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        MarlinCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        MarlinCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        MarlinCore::run(&self, gcode, op_map.clone()).await;
+        Ok(())
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        MarlinCore::cancel(self, mode == CancelMode::Immediate).await
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        MarlinCore::execute_interactive_command(self, command.to_string()).await
+    }
+
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        MarlinCore::home(self, axes).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        MarlinCore::move_to(self, speed, x, y).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        MarlinCore::jog(self, speed, deltas).await
+    }
+
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        MarlinCore::select_tool(self, tool_number).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        MarlinCore::set_power(self, power).await
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        MarlinCore::set_focus_power(self, power).await
+    }
+
+    async fn clear_alarm(&self) -> Result<(), SessionError> {
+        MarlinCore::clear_alarm(self).await
+    }
+
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        MarlinCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        MarlinCore::detect_unit_system(self).await
     }
 }
