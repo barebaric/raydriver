@@ -9,7 +9,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::line_session::PingPongSession;
+use crate::core::session::{CancelMode, Session};
 use crate::core::transport::TransportKind;
 use crate::core::types::{UnitSystem, WcsOffsets};
 use crate::grbl::simple::{SimpleConfig, SimpleCore};
@@ -137,10 +137,8 @@ impl GrblSimpleSession {
     ) -> PyResult<PyAwait<'py, GrblDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let build_info =
-                core.execute_interactive_command("$I".to_string()).await?;
-            let settings_lines =
-                core.execute_interactive_command("$$".to_string()).await?;
+            let build_info = core.execute_interactive_command("$I").await?;
+            let settings_lines = core.execute_interactive_command("$$").await?;
             Ok(GrblDeviceInfo {
                 inner: crate::grbl::probe::describe(
                     &build_info,
@@ -154,7 +152,7 @@ impl GrblSimpleSession {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -178,7 +176,7 @@ impl GrblSimpleSession {
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
+            Ok(core.execute_interactive_command(&command).await?)
         })
     }
 
@@ -191,10 +189,9 @@ impl GrblSimpleSession {
         command: String,
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
-        spawn_future(
-            py,
-            async move { Ok(core.execute_command(command).await?) },
-        )
+        spawn_future(py, async move {
+            Ok(core.execute_interactive_command(&command).await?)
+        })
     }
 
     /// Stream a G-code program using the ping-pong protocol: one
@@ -219,7 +216,7 @@ impl GrblSimpleSession {
         let op_map = op_line_map.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map).await;
+            core.run(&gcode, &op_map, &[]).await?;
             Ok(())
         })
     }
@@ -233,7 +230,7 @@ impl GrblSimpleSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.run_raw(&machine_code).await;
+            core.run_raw(&machine_code).await?;
             Ok(())
         })
     }
@@ -262,7 +259,12 @@ impl GrblSimpleSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel(emergency).await?;
+            core.cancel(if emergency {
+                CancelMode::Immediate
+            } else {
+                CancelMode::Graceful
+            })
+            .await?;
             Ok(())
         })
     }
@@ -294,7 +296,7 @@ impl GrblSimpleSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(speed, x, y).await?;
+            core.move_to(speed, x, y, None).await?;
             Ok(())
         })
     }

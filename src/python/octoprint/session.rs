@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
+use crate::core::session::{CancelMode, Session};
 use crate::core::types::WcsOffsets;
 use crate::octoprint::session::{OctoPrintConfig, OctoPrintCore};
 use crate::python::core::json::{value_to_dict, JsonDict};
@@ -149,7 +150,7 @@ impl OctoPrintSession {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -215,7 +216,7 @@ impl OctoPrintSession {
         let estimates = op_estimates.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map, estimates).await?;
+            core.run(&gcode, &op_map, &estimates).await?;
             Ok(())
         })
     }
@@ -242,7 +243,7 @@ impl OctoPrintSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.home(axes.as_deref()).await?;
+            core.home(axes, "").await?;
             Ok(())
         })
     }
@@ -273,7 +274,7 @@ impl OctoPrintSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.jog(Some(speed), &deltas).await?;
+            core.jog(speed, &deltas).await?;
             Ok(())
         })
     }
@@ -302,7 +303,7 @@ impl OctoPrintSession {
         let _ = emergency;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel(false).await?;
+            core.cancel(CancelMode::Graceful).await?;
             Ok(())
         })
     }
@@ -406,9 +407,9 @@ impl OctoPrintSession {
     ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            Ok(core
-                .run_probe_cycle(&axis_letter, max_travel, feed_rate)
-                .await?)
+            core.run_probe_cycle(&axis_letter, max_travel, feed_rate)
+                .await?;
+            Ok(None)
         })
     }
 
@@ -443,7 +444,10 @@ impl OctoPrintSession {
         py: Python<'py>,
     ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move { Ok(core.detect_unit_system().await?) })
+        spawn_future(py, async move {
+            core.detect_unit_system().await?;
+            Ok(None)
+        })
     }
 
     /// Accept dialect command templates; commands are sent as

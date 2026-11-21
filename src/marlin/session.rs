@@ -32,15 +32,17 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::dialect::{format_template, Arg, Dialect};
+use crate::core::dialect::Dialect;
 use crate::core::line_session::{
-    cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
 use crate::core::session::{
     secs, AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
 };
 use crate::core::transport::TransportKind;
-use crate::core::types::{DeviceStatus, TransportStatus, UnitSystem};
+use crate::core::types::{
+    DeviceState, DeviceStatus, TransportStatus, UnitSystem,
+};
 
 use super::parser;
 
@@ -246,80 +248,6 @@ impl MarlinCore {
             .await_ack(command, secs(self.config.command_timeout))
             .await
     }
-
-    // ---------------------------------------------------------------
-    // Device operations
-    // ---------------------------------------------------------------
-
-    pub async fn home(
-        &self,
-        axes: Option<Vec<String>>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.base.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
-                }
-            }
-        }
-        self.base.clear_device_error();
-        Ok(())
-    }
-
-    pub async fn clear_alarm(&self) -> Result<(), SessionError> {
-        let dialect = self.base.dialect();
-        let response =
-            self.execute_command(dialect.clear_alarm.clone()).await?;
-        let has_error = response.iter().any(|line| parser::is_error(line));
-        if !has_error {
-            self.base.clear_device_error();
-        }
-        Ok(())
-    }
-
-    pub async fn set_wcs_offset(
-        &self,
-        wcs_slot: &str,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let p_num = crate::grbl::parser::gcode_to_p_number(wcs_slot)
-            .ok_or_else(|| {
-                SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-            })?;
-        let dialect = self.base.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn detect_unit_system(
-        &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines = match PingPongSession::execute_interactive_command(
-            self,
-            "M149".to_string(),
-        )
-        .await
-        {
-            Ok(lines) => lines,
-            Err(err) => {
-                log::warn!("Unit system detection failed: {err}");
-                return Ok(None);
-            }
-        };
-        Ok(parser::detect_unit_system_from_m149(&lines))
-    }
 }
 
 #[async_trait]
@@ -425,36 +353,51 @@ impl PingPongSession for MarlinCore {
     fn reconnect_delay(&self) -> Duration {
         secs(self.config.reconnect_delay)
     }
-}
 
-/// Abort a running job by sending `M410` (Quick Stop).
-impl MarlinCore {
-    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
-        cancel(
-            self,
-            emergency,
-            StopCommand {
-                bytes: b"M410\n",
-                log: "Sending M410 (Quick Stop) to device.",
-            },
-            "Serial transport not connected",
-        )
-        .await
+    fn stop_command(&self) -> StopCommand {
+        StopCommand {
+            bytes: b"M410\n",
+            log: "Sending M410 (Quick Stop) to device.",
+        }
+    }
+
+    fn not_connected_message(&self) -> &'static str {
+        "Serial transport not connected"
     }
 }
 
-/// The typed uniform session surface (see
-/// [`core::session::Session`]): adapts the protocol-native methods,
-/// which remain the behavior source.
+/// The Marlin [`Session`]: the shared ping-pong operations call the
+/// skeleton's free functions; the Marlin-specific operations carry
+/// their real bodies here.
 #[async_trait]
 impl Session for MarlinCore {
+    fn state(&self) -> DeviceState {
+        self.base.state()
+    }
+
+    fn is_job_running(&self) -> bool {
+        self.base.is_job_running()
+    }
+
+    fn resource_uri(&self) -> Option<String> {
+        self.base.resource_uri()
+    }
+
+    fn update_dialect(&self, dialect: Dialect) {
+        self.base.update_dialect(dialect);
+    }
+
+    fn abort_background_tasks_now(&self) {
+        self.base.abort_background_tasks_now();
+    }
+
     async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        PingPongSession::connect(self).await;
+        line_session::connect(&self).await;
         Ok(())
     }
 
     async fn cleanup(&self) {
-        PingPongSession::cleanup(self).await;
+        self.base.cleanup().await;
     }
 
     async fn run(
@@ -463,20 +406,27 @@ impl Session for MarlinCore {
         op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        PingPongSession::run(self.as_ref(), gcode, op_map.clone()).await;
+        line_session::stream_job(self.as_ref(), gcode, op_map).await;
+        Ok(())
+    }
+
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
+        line_session::run_raw(self.as_ref(), machine_code).await;
         Ok(())
     }
 
     async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        MarlinCore::cancel(self, mode == CancelMode::Immediate).await
+        line_session::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_interactive_command(self, command.to_string())
-            .await
+        line_session::execute_command(self, command).await
     }
 
     async fn home(
@@ -484,7 +434,7 @@ impl Session for MarlinCore {
         axes: Option<Vec<String>>,
         _active_wcs: &str,
     ) -> Result<(), SessionError> {
-        MarlinCore::home(self, axes).await
+        line_session::home(self, axes).await
     }
 
     async fn move_to(
@@ -494,7 +444,7 @@ impl Session for MarlinCore {
         y: f64,
         _z: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::move_to(self, speed, x, y).await
+        line_session::move_to(self, speed, x, y).await
     }
 
     async fn jog(
@@ -502,26 +452,33 @@ impl Session for MarlinCore {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
-        PingPongSession::jog(self, speed, deltas).await
+        line_session::jog(self, speed, deltas).await
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        PingPongSession::select_tool(self, tool_number).await
+        line_session::select_tool(self, tool_number).await
     }
 
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        PingPongSession::set_power(self, power).await
+        line_session::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::set_focus_power(self, power).await
+        line_session::set_focus_power(self, power).await
     }
 
     async fn clear_alarm(&self) -> Result<(), SessionError> {
-        MarlinCore::clear_alarm(self).await
+        let dialect = self.base.dialect();
+        let response =
+            line_session::execute_command(self, &dialect.clear_alarm).await?;
+        let has_error = response.iter().any(|line| parser::is_error(line));
+        if !has_error {
+            self.base.clear_device_error();
+        }
+        Ok(())
     }
 
     async fn set_wcs_offset(
@@ -531,12 +488,26 @@ impl Session for MarlinCore {
         y: f64,
         z: Option<f64>,
     ) -> Result<(), SessionError> {
-        MarlinCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+        let p_num = crate::grbl::parser::gcode_to_p_number(wcs_slot)
+            .ok_or_else(|| {
+                SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+            })?;
+        let dialect = self.base.dialect();
+        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        line_session::execute_command(self, &cmd).await?;
+        Ok(())
     }
 
     async fn detect_unit_system(
         &self,
     ) -> Result<Option<UnitSystem>, SessionError> {
-        MarlinCore::detect_unit_system(self).await
+        let lines = match line_session::execute_command(self, "M149").await {
+            Ok(lines) => lines,
+            Err(err) => {
+                log::warn!("Unit system detection failed: {err}");
+                return Ok(None);
+            }
+        };
+        Ok(parser::detect_unit_system_from_m149(&lines))
     }
 }

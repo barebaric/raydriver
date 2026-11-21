@@ -8,7 +8,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::line_session::PingPongSession;
+use crate::core::session::{CancelMode, Session};
 use crate::core::transport::TransportKind;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
@@ -119,7 +119,7 @@ impl SmoothieSession {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -147,10 +147,7 @@ impl SmoothieSession {
         spawn_future(py, async move {
             let mut replies: Vec<Vec<String>> = Vec::new();
             for command in crate::smoothie::probe::CENSUS_COMMANDS {
-                replies.push(
-                    core.execute_interactive_command(command.to_string())
-                        .await?,
-                );
+                replies.push(core.execute_interactive_command(command).await?);
             }
             Ok(SmoothieDeviceInfo {
                 inner: crate::smoothie::probe::describe(
@@ -172,7 +169,7 @@ impl SmoothieSession {
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
+            Ok(core.execute_interactive_command(&command).await?)
         })
     }
 
@@ -184,10 +181,9 @@ impl SmoothieSession {
         command: String,
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
-        spawn_future(
-            py,
-            async move { Ok(core.execute_command(command).await?) },
-        )
+        spawn_future(py, async move {
+            Ok(core.execute_interactive_command(&command).await?)
+        })
     }
 
     /// Stream a G-code program using the ping-pong protocol.
@@ -211,7 +207,7 @@ impl SmoothieSession {
         let op_map = op_line_map.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map).await;
+            core.run(&gcode, &op_map, &[]).await?;
             Ok(())
         })
     }
@@ -224,7 +220,7 @@ impl SmoothieSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.run_raw(&machine_code).await;
+            core.run_raw(&machine_code).await?;
             Ok(())
         })
     }
@@ -252,7 +248,12 @@ impl SmoothieSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel(emergency).await?;
+            core.cancel(if emergency {
+                CancelMode::Immediate
+            } else {
+                CancelMode::Graceful
+            })
+            .await?;
             Ok(())
         })
     }
@@ -267,7 +268,7 @@ impl SmoothieSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.home(axes).await?;
+            core.home(axes, "").await?;
             Ok(())
         })
     }
@@ -282,7 +283,7 @@ impl SmoothieSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(speed, x, y).await?;
+            core.move_to(speed, x, y, None).await?;
             Ok(())
         })
     }

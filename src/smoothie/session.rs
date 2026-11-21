@@ -20,22 +20,23 @@
 //! holds the Smoothie-specific dispatch and hooks.
 
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::dialect::{format_template, Arg, Dialect};
+use std::collections::HashMap;
+
+use crate::core::dialect::Dialect;
 use crate::core::line_session::{
-    cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
 use crate::core::session::{
     secs, CancelMode, Session, SessionError, SessionEvents,
 };
 use crate::core::transport::TransportKind;
-use crate::core::types::{DeviceStatus, TransportStatus};
+use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
 
 use crate::grbl::parser;
 
@@ -90,20 +91,6 @@ impl SmoothieCore {
             ),
             config,
         })
-    }
-
-    /// Abort a running job.  Smoothieware stops on Ctrl+C.
-    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
-        cancel(
-            self,
-            emergency,
-            StopCommand {
-                bytes: b"\x03",
-                log: "Sending Ctrl+C to device.",
-            },
-            "Transport not connected",
-        )
-        .await
     }
 
     // ---------------------------------------------------------------
@@ -216,96 +203,12 @@ impl SmoothieCore {
 
         self.base.emit_state_if_changed(state);
     }
-
-    // ---------------------------------------------------------------
-    // Hold / device operations
-    // ---------------------------------------------------------------
-
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        self.base.is_holding.store(hold, Ordering::SeqCst);
-        if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
-                "Transport not connected".to_string(),
-            ));
-        }
-        self.base
-            .transport
-            .write(if hold { b"!" } else { b"~" })
-            .await?;
-        let desired = if hold {
-            DeviceStatus::Hold
-        } else if self.base.is_job_running() {
-            DeviceStatus::Run
-        } else {
-            DeviceStatus::Idle
-        };
-        let snapshot = {
-            let mut state = self.base.state.lock().unwrap();
-            if state.status != desired {
-                state.status = desired;
-                Some(state.clone())
-            } else {
-                None
-            }
-        };
-        if let Some(snapshot) = snapshot {
-            self.base.events.state_changed(&snapshot);
-        }
-        Ok(())
-    }
-
-    pub async fn home(
-        &self,
-        axes: Option<Vec<String>>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.base.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
-                }
-            }
-        }
-        self.base.clear_device_error();
-        Ok(())
-    }
-
-    pub async fn clear_alarm(&self) -> Result<(), SessionError> {
-        let dialect = self.base.dialect();
-        let response =
-            self.execute_command(dialect.clear_alarm.clone()).await?;
-        let has_error = response.iter().any(|line| line.starts_with("error:"));
-        if !has_error {
-            self.base.clear_device_error();
-        }
-        Ok(())
-    }
-
-    pub async fn set_wcs_offset(
-        &self,
-        wcs_slot: &str,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-        })?;
-        let dialect = self.base.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
 }
 
+/// The Smoothie session contract: the protocol hooks, plus the
+/// [`Session`] operations Smoothieware supports, with their real
+/// bodies.  Everything shared streams through the
+/// [`PingPongSession`] supertrait.
 #[async_trait]
 impl PingPongSession for SmoothieCore {
     fn base(&self) -> &LineSessionBase {
@@ -385,20 +288,52 @@ impl PingPongSession for SmoothieCore {
     fn reconnect_delay(&self) -> Duration {
         secs(self.config.reconnect_delay)
     }
+
+    fn stop_command(&self) -> StopCommand {
+        // Smoothieware aborts the job on Ctrl+C.
+        StopCommand {
+            bytes: b"\x03",
+            log: "Sending Ctrl+C to device.",
+        }
+    }
+
+    fn not_connected_message(&self) -> &'static str {
+        "Transport not connected"
+    }
 }
 
-/// The typed uniform session surface (see
-/// [`core::session::Session`]): adapts the protocol-native methods,
-/// which remain the behavior source.
+/// The Smoothie [`Session`]: the shared ping-pong operations call
+/// the skeleton's free functions; the Smoothie-specific operations
+/// carry their real bodies here.
 #[async_trait]
 impl Session for SmoothieCore {
+    fn state(&self) -> DeviceState {
+        self.base.state()
+    }
+
+    fn is_job_running(&self) -> bool {
+        self.base.is_job_running()
+    }
+
+    fn resource_uri(&self) -> Option<String> {
+        self.base.resource_uri()
+    }
+
+    fn update_dialect(&self, dialect: Dialect) {
+        self.base.update_dialect(dialect);
+    }
+
+    fn abort_background_tasks_now(&self) {
+        self.base.abort_background_tasks_now();
+    }
+
     async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        PingPongSession::connect(self).await;
+        line_session::connect(&self).await;
         Ok(())
     }
 
     async fn cleanup(&self) {
-        PingPongSession::cleanup(self).await;
+        self.base.cleanup().await;
     }
 
     async fn run(
@@ -407,20 +342,27 @@ impl Session for SmoothieCore {
         op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        PingPongSession::run(self.as_ref(), gcode, op_map.clone()).await;
+        line_session::stream_job(self.as_ref(), gcode, op_map).await;
+        Ok(())
+    }
+
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
+        line_session::run_raw(self.as_ref(), machine_code).await;
         Ok(())
     }
 
     async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        SmoothieCore::cancel(self, mode == CancelMode::Immediate).await
+        line_session::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_interactive_command(self, command.to_string())
-            .await
+        line_session::execute_command(self, command).await
     }
 
     async fn home(
@@ -428,7 +370,7 @@ impl Session for SmoothieCore {
         axes: Option<Vec<String>>,
         _active_wcs: &str,
     ) -> Result<(), SessionError> {
-        SmoothieCore::home(self, axes).await
+        line_session::home(self, axes).await
     }
 
     async fn move_to(
@@ -438,7 +380,7 @@ impl Session for SmoothieCore {
         y: f64,
         _z: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::move_to(self, speed, x, y).await
+        line_session::move_to(self, speed, x, y).await
     }
 
     async fn jog(
@@ -446,30 +388,66 @@ impl Session for SmoothieCore {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
-        PingPongSession::jog(self, speed, deltas).await
+        line_session::jog(self, speed, deltas).await
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        PingPongSession::select_tool(self, tool_number).await
+        line_session::select_tool(self, tool_number).await
     }
 
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        PingPongSession::set_power(self, power).await
+        line_session::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::set_focus_power(self, power).await
+        line_session::set_focus_power(self, power).await
     }
 
     async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        SmoothieCore::set_hold(self, hold).await
+        self.base.is_holding.store(hold, Ordering::SeqCst);
+        if !self.base.transport.is_open() {
+            return Err(SessionError::Connection(
+                "Transport not connected".to_string(),
+            ));
+        }
+        self.base
+            .transport
+            .write(if hold { b"!" } else { b"~" })
+            .await?;
+        let desired = if hold {
+            DeviceStatus::Hold
+        } else if self.base.is_job_running() {
+            DeviceStatus::Run
+        } else {
+            DeviceStatus::Idle
+        };
+        let snapshot = {
+            let mut state = self.base.state.lock().unwrap();
+            if state.status != desired {
+                state.status = desired;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.base.events.state_changed(&snapshot);
+        }
+        Ok(())
     }
 
     async fn clear_alarm(&self) -> Result<(), SessionError> {
-        SmoothieCore::clear_alarm(self).await
+        let dialect = self.base.dialect();
+        let response =
+            line_session::execute_command(self, &dialect.clear_alarm).await?;
+        let has_error = response.iter().any(|line| line.starts_with("error:"));
+        if !has_error {
+            self.base.clear_device_error();
+        }
+        Ok(())
     }
 
     async fn set_wcs_offset(
@@ -479,6 +457,12 @@ impl Session for SmoothieCore {
         y: f64,
         z: Option<f64>,
     ) -> Result<(), SessionError> {
-        SmoothieCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
+            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+        })?;
+        let dialect = self.base.dialect();
+        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        line_session::execute_command(self, &cmd).await?;
+        Ok(())
     }
 }

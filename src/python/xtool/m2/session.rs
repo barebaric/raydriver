@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
+use crate::core::session::{CancelMode, Session};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
@@ -86,7 +87,7 @@ impl M2Session {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -96,7 +97,7 @@ impl M2Session {
         let core = self.core.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
-            core.disconnect().await;
+            core.cleanup().await;
             events.quiesce();
             Ok(())
         })
@@ -129,7 +130,7 @@ impl M2Session {
     fn cancel<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel().await?;
+            core.cancel(CancelMode::Graceful).await?;
             Ok(())
         })
     }
@@ -138,7 +139,7 @@ impl M2Session {
     fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.home().await?;
+            core.home(None, "").await?;
             Ok(())
         })
     }
@@ -154,7 +155,7 @@ impl M2Session {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(x, y, speed).await?;
+            core.move_to(speed, x, y, None).await?;
             Ok(())
         })
     }
@@ -171,7 +172,15 @@ impl M2Session {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.jog(dx, dy, dz, speed).await?;
+            core.jog(
+                speed,
+                &[
+                    ("x".to_string(), dx),
+                    ("y".to_string(), dy),
+                    ("z".to_string(), dz),
+                ],
+            )
+            .await?;
             Ok(())
         })
     }

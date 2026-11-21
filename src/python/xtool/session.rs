@@ -1,6 +1,7 @@
 //! The `XtoolSession` PyO3 wrapper: thin async methods delegating to
 //! the Rust session core.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
@@ -8,6 +9,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
+use crate::core::session::{CancelMode, Session};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 // The config/dialect dict helpers are shared across the protocol
@@ -15,7 +17,7 @@ use crate::python::events::PyEvents;
 // the smoothie and marlin bindings reuse them.
 use crate::python::grbl::session::{get_f64, get_i64, get_str, parse_dialect};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::session::{XtoolConfig, XtoolCore};
+use crate::xtool::session::{XtoolConfig, XtoolCore, DEFAULT_MOVE_SPEED};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
     let host = dict
@@ -107,7 +109,7 @@ impl XtoolSession {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -133,7 +135,7 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
+            Ok(core.execute_interactive_command(&command).await?)
         })
     }
 
@@ -173,7 +175,7 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.run(&gcode).await?;
+            core.run(&gcode, &HashMap::new(), &[]).await?;
             Ok(())
         })
     }
@@ -195,7 +197,7 @@ impl XtoolSession {
     fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.home().await?;
+            core.home(None, "").await?;
             Ok(())
         })
     }
@@ -212,7 +214,8 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(x, y, z, speed).await?;
+            core.move_to(speed.unwrap_or(DEFAULT_MOVE_SPEED), x, y, z)
+                .await?;
             Ok(())
         })
     }
@@ -227,7 +230,8 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.jog(speed, deltas.unwrap_or_default()).await?;
+            let deltas = deltas.unwrap_or_default();
+            core.jog(speed, &deltas).await?;
             Ok(())
         })
     }
@@ -255,7 +259,13 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel(emergency).await;
+            let _ = core
+                .cancel(if emergency {
+                    CancelMode::Immediate
+                } else {
+                    CancelMode::Graceful
+                })
+                .await;
             Ok(())
         })
     }
@@ -270,7 +280,7 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.set_power(power).await;
+            let _ = core.set_power(power).await;
             Ok(())
         })
     }
@@ -284,7 +294,7 @@ impl XtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.set_focus_power(power).await;
+            let _ = core.set_focus_power(power).await;
             Ok(())
         })
     }

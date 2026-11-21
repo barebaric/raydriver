@@ -13,7 +13,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::SessionError;
+use crate::core::session::{CancelMode, Session, SessionError};
 use crate::core::transport::TransportKind;
 use crate::core::types::{UnitSystem, WcsOffsets};
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport, ProtocolVariant};
@@ -294,10 +294,8 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, GrblDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let build_info =
-                core.execute_interactive_command("$I".to_string()).await?;
-            let settings_lines =
-                core.execute_interactive_command("$$".to_string()).await?;
+            let build_info = core.execute_interactive_command("$I").await?;
+            let settings_lines = core.execute_interactive_command("$$").await?;
             Ok(GrblDeviceInfo {
                 inner: crate::grbl::probe::describe(
                     &build_info,
@@ -311,7 +309,7 @@ impl GrblSession {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.connect().await;
+            core.connect().await?;
             Ok(())
         })
     }
@@ -336,7 +334,7 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
+            Ok(core.execute_interactive_command(&command).await?)
         })
     }
 
@@ -384,7 +382,7 @@ impl GrblSession {
             // Python driver keeps _on_command_done until its stream
             // finally-block too). The next run replaces it.
             events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map, estimates).await;
+            core.run(&gcode, &op_map, &estimates).await?;
             Ok(())
         })
     }
@@ -398,7 +396,7 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.run_raw(&machine_code).await;
+            core.run_raw(&machine_code).await?;
             Ok(())
         })
     }
@@ -427,7 +425,12 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.cancel(emergency).await?;
+            core.cancel(if emergency {
+                CancelMode::Immediate
+            } else {
+                CancelMode::Graceful
+            })
+            .await?;
             Ok(())
         })
     }
@@ -459,7 +462,7 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(speed, x, y).await?;
+            core.move_to(speed, x, y, None).await?;
             Ok(())
         })
     }

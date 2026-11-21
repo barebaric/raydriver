@@ -29,13 +29,15 @@ use async_trait::async_trait;
 use super::parser;
 use crate::core::dialect::{format_template, Arg, Dialect};
 use crate::core::line_session::{
-    cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
 use crate::core::session::{
     secs, CancelMode, Session, SessionError, SessionEvents,
 };
 use crate::core::transport::TransportKind;
-use crate::core::types::{DeviceStatus, TransportStatus, UnitSystem};
+use crate::core::types::{
+    DeviceState, DeviceStatus, TransportStatus, UnitSystem,
+};
 
 /// Configuration for the simple ping-pong session.
 #[derive(Clone)]
@@ -218,236 +220,6 @@ impl SimpleCore {
         self.base.transport.write(command.as_bytes()).await?;
         Ok(())
     }
-
-    // ---------------------------------------------------------------
-    // Hold / device operations
-    // ---------------------------------------------------------------
-
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        self.base.is_holding.store(hold, Ordering::SeqCst);
-        if !self.base.is_job_running() {
-            self.base.is_cancelled.store(false, Ordering::SeqCst);
-        }
-        self.send_realtime(if hold { "!" } else { "~" }).await?;
-        let desired = if hold {
-            DeviceStatus::Hold
-        } else if self.base.is_job_running() {
-            DeviceStatus::Run
-        } else {
-            DeviceStatus::Idle
-        };
-        let snapshot = {
-            let mut state = self.base.state.lock().unwrap();
-            if state.status != desired {
-                state.status = desired;
-                Some(state.clone())
-            } else {
-                None
-            }
-        };
-        if let Some(snapshot) = snapshot {
-            self.base.events.state_changed(&snapshot);
-        }
-        Ok(())
-    }
-
-    pub async fn home(
-        &self,
-        axes: Option<Vec<String>>,
-        active_wcs: &str,
-    ) -> Result<(), SessionError> {
-        let dialect = self.base.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
-                }
-            }
-        }
-
-        // Some Grbl versions forget the G54 offset after homing;
-        // toggling to another WCS and back re-activates it.
-        let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
-        self.execute_command("G4 P0.01".to_string()).await?;
-        self.execute_command(temp_wcs.to_string()).await?;
-        self.execute_command(active_wcs.to_string()).await?;
-        self.base.clear_device_error();
-        Ok(())
-    }
-
-    pub async fn read_settings(
-        &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
-        let lines = PingPongSession::execute_interactive_command(
-            self,
-            "$$".to_string(),
-        )
-        .await?;
-        self.report_in_inches
-            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
-        Ok(parser::parse_setting_pairs(&lines))
-    }
-
-    pub async fn write_setting(
-        &self,
-        key: &str,
-        value: &str,
-    ) -> Result<(), SessionError> {
-        self.execute_command(format!("${key}={value}")).await?;
-        Ok(())
-    }
-
-    pub async fn set_wcs_offset(
-        &self,
-        wcs_slot: &str,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-        })?;
-        let dialect = self.base.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn read_wcs_offsets(
-        &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
-        let lines = PingPongSession::execute_interactive_command(
-            self,
-            "$#".to_string(),
-        )
-        .await?;
-        let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
-        let mut offsets = HashMap::new();
-        for line in &lines {
-            if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
-                let pos = if report_in_inches {
-                    (
-                        crate::core::types::inches_to_mm(x),
-                        crate::core::types::inches_to_mm(y),
-                        crate::core::types::inches_to_mm(z),
-                    )
-                } else {
-                    (x, y, z)
-                };
-                offsets.insert(slot, pos);
-            }
-        }
-        self.base.events.wcs_updated(&offsets);
-        Ok(offsets)
-    }
-
-    pub async fn read_parser_state(
-        &self,
-    ) -> Result<Option<String>, SessionError> {
-        let lines = PingPongSession::execute_interactive_command(
-            self,
-            "$G".to_string(),
-        )
-        .await?;
-        Ok(parser::parse_grbl_parser_state(&lines))
-    }
-
-    pub async fn run_probe_cycle(
-        &self,
-        axis_letter: &str,
-        max_travel: f64,
-        feed_rate: f64,
-    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
-        let axis_letter = axis_letter.to_uppercase();
-        let dialect = self.base.dialect();
-        let cmd = format_template(
-            &dialect.probe_cycle,
-            &[
-                ("axis_letter", Arg::Str(axis_letter.clone())),
-                ("max_travel", Arg::Length(max_travel)),
-                ("feed_rate", Arg::Speed(feed_rate)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
-
-        self.base
-            .events
-            .probe_status(&format!("Probing {axis_letter}..."));
-        let lines =
-            match PingPongSession::execute_interactive_command(self, cmd).await
-            {
-                Ok(lines) => lines,
-                Err(_) => {
-                    self.base.events.probe_status("Probe failed: Timed out");
-                    return Ok(None);
-                }
-            };
-
-        for line in &lines {
-            if let Some(((x, y, z), success)) = parser::parse_probe_line(line) {
-                if success {
-                    let pos = if self.report_in_inches.load(Ordering::SeqCst) {
-                        (
-                            crate::core::types::inches_to_mm(x),
-                            crate::core::types::inches_to_mm(y),
-                            crate::core::types::inches_to_mm(z),
-                        )
-                    } else {
-                        (x, y, z)
-                    };
-                    self.base.events.probe_status(&format!(
-                        "Probe triggered at ({}, {}, {})",
-                        pos.0, pos.1, pos.2
-                    ));
-                    return Ok(Some(pos));
-                }
-            }
-        }
-        self.base.events.probe_status("Probe failed");
-        Ok(None)
-    }
-
-    pub async fn detect_unit_system(
-        &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines = match PingPongSession::execute_interactive_command(
-            self,
-            "$$".to_string(),
-        )
-        .await
-        {
-            Ok(lines) => lines,
-            Err(err) => {
-                log::warn!("Unit system detection failed: {err}");
-                return Ok(None);
-            }
-        };
-        self.report_in_inches
-            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
-        Ok(parser::detect_unit_system_from_settings(&lines))
-    }
-
-    /// Abort a running job by sending a soft reset (Ctrl-X).
-    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
-        cancel(
-            self,
-            emergency,
-            StopCommand {
-                bytes: b"\x18",
-                log: "Sending Soft Reset (Ctrl-X) to device.",
-            },
-            "Serial transport not connected",
-        )
-        .await
-    }
 }
 
 #[async_trait]
@@ -538,7 +310,66 @@ impl PingPongSession for SimpleCore {
         secs(self.config.reconnect_delay)
     }
 
-    async fn run_raw(&self, machine_code: &str) {
+    fn stop_command(&self) -> StopCommand {
+        StopCommand {
+            bytes: b"\x18",
+            log: "Sending Soft Reset (Ctrl-X) to device.",
+        }
+    }
+
+    fn not_connected_message(&self) -> &'static str {
+        "Serial transport not connected"
+    }
+}
+
+/// The simple session's [`Session`]: the shared ping-pong
+/// operations call the skeleton's free functions; the GRBL-specific
+/// operations carry their real bodies here.
+#[async_trait]
+impl Session for SimpleCore {
+    fn state(&self) -> DeviceState {
+        self.base.state()
+    }
+
+    fn is_job_running(&self) -> bool {
+        self.base.is_job_running()
+    }
+
+    fn resource_uri(&self) -> Option<String> {
+        self.base.resource_uri()
+    }
+
+    fn update_dialect(&self, dialect: Dialect) {
+        self.base.update_dialect(dialect);
+    }
+
+    fn abort_background_tasks_now(&self) {
+        self.base.abort_background_tasks_now();
+    }
+
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        line_session::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        self.base.cleanup().await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        line_session::stream_job(self.as_ref(), gcode, op_map).await;
+        Ok(())
+    }
+
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
         let lines: Vec<String> = machine_code
             .lines()
             .map(|l| l.trim().to_string())
@@ -548,50 +379,30 @@ impl PingPongSession for SimpleCore {
         for line in &realtime {
             if let Err(err) = self.send_realtime(line).await {
                 log::error!("Realtime command failed: {err}");
-                return;
+                return Ok(());
             }
         }
         if gcode.is_empty() {
-            return;
+            return Ok(());
         }
-        self.run(&gcode.join("\n"), HashMap::new()).await;
-    }
-}
-
-/// The typed uniform session surface (see
-/// [`core::session::Session`]): adapts the protocol-native methods,
-/// which remain the behavior source.
-#[async_trait]
-impl Session for SimpleCore {
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        PingPongSession::connect(self).await;
-        Ok(())
-    }
-
-    async fn cleanup(&self) {
-        PingPongSession::cleanup(self).await;
-    }
-
-    async fn run(
-        self: Arc<Self>,
-        gcode: &str,
-        op_map: &HashMap<usize, i64>,
-        _op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
-        PingPongSession::run(self.as_ref(), gcode, op_map.clone()).await;
+        line_session::stream_job(
+            self.as_ref(),
+            &gcode.join("\n"),
+            &HashMap::new(),
+        )
+        .await;
         Ok(())
     }
 
     async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        SimpleCore::cancel(self, mode == CancelMode::Immediate).await
+        line_session::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_interactive_command(self, command.to_string())
-            .await
+        line_session::execute_command(self, command).await
     }
 
     async fn home(
@@ -599,7 +410,31 @@ impl Session for SimpleCore {
         axes: Option<Vec<String>>,
         active_wcs: &str,
     ) -> Result<(), SessionError> {
-        SimpleCore::home(self, axes, active_wcs).await
+        let dialect = self.base.dialect();
+        match axes {
+            None => {
+                line_session::execute_command(self, &dialect.home_all).await?;
+            }
+            Some(axes) => {
+                for axis in axes {
+                    let cmd = format_template(
+                        &dialect.home_axis,
+                        &[("axis_letter", Arg::Str(axis))],
+                    )
+                    .map_err(SessionError::Other)?;
+                    line_session::execute_command(self, &cmd).await?;
+                }
+            }
+        }
+
+        // Some Grbl versions forget the G54 offset after homing;
+        // toggling to another WCS and back re-activates it.
+        let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
+        line_session::execute_command(self, "G4 P0.01").await?;
+        line_session::execute_command(self, temp_wcs).await?;
+        line_session::execute_command(self, active_wcs).await?;
+        self.base.clear_device_error();
+        Ok(())
     }
 
     async fn move_to(
@@ -609,7 +444,7 @@ impl Session for SimpleCore {
         y: f64,
         _z: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::move_to(self, speed, x, y).await
+        line_session::move_to(self, speed, x, y).await
     }
 
     async fn jog(
@@ -617,26 +452,50 @@ impl Session for SimpleCore {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
-        PingPongSession::jog(self, speed, deltas).await
+        line_session::jog(self, speed, deltas).await
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        PingPongSession::select_tool(self, tool_number).await
+        line_session::select_tool(self, tool_number).await
     }
 
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        PingPongSession::set_power(self, power).await
+        line_session::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
-        PingPongSession::set_focus_power(self, power).await
+        line_session::set_focus_power(self, power).await
     }
 
     async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        SimpleCore::set_hold(self, hold).await
+        self.base.is_holding.store(hold, Ordering::SeqCst);
+        if !self.base.is_job_running() {
+            self.base.is_cancelled.store(false, Ordering::SeqCst);
+        }
+        self.send_realtime(if hold { "!" } else { "~" }).await?;
+        let desired = if hold {
+            DeviceStatus::Hold
+        } else if self.base.is_job_running() {
+            DeviceStatus::Run
+        } else {
+            DeviceStatus::Idle
+        };
+        let snapshot = {
+            let mut state = self.base.state.lock().unwrap();
+            if state.status != desired {
+                state.status = desired;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.base.events.state_changed(&snapshot);
+        }
+        Ok(())
     }
 
     async fn set_wcs_offset(
@@ -646,13 +505,22 @@ impl Session for SimpleCore {
         y: f64,
         z: Option<f64>,
     ) -> Result<(), SessionError> {
-        SimpleCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
+            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+        })?;
+        let dialect = self.base.dialect();
+        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        line_session::execute_command(self, &cmd).await?;
+        Ok(())
     }
 
     async fn read_settings(
         &self,
     ) -> Result<Vec<(String, String)>, SessionError> {
-        SimpleCore::read_settings(self).await
+        let lines = line_session::execute_command(self, "$$").await?;
+        self.report_in_inches
+            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
+        Ok(parser::parse_setting_pairs(&lines))
     }
 
     async fn write_setting(
@@ -660,17 +528,37 @@ impl Session for SimpleCore {
         key: &str,
         value: &str,
     ) -> Result<(), SessionError> {
-        SimpleCore::write_setting(self, key, value).await
+        line_session::execute_command(self, &format!("${key}={value}")).await?;
+        Ok(())
     }
 
     async fn read_wcs_offsets(
         &self,
     ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
-        SimpleCore::read_wcs_offsets(self).await
+        let lines = line_session::execute_command(self, "$#").await?;
+        let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
+        let mut offsets = HashMap::new();
+        for line in &lines {
+            if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
+                let pos = if report_in_inches {
+                    (
+                        crate::core::types::inches_to_mm(x),
+                        crate::core::types::inches_to_mm(y),
+                        crate::core::types::inches_to_mm(z),
+                    )
+                } else {
+                    (x, y, z)
+                };
+                offsets.insert(slot, pos);
+            }
+        }
+        self.base.events.wcs_updated(&offsets);
+        Ok(offsets)
     }
 
     async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
-        SimpleCore::read_parser_state(self).await
+        let lines = line_session::execute_command(self, "$G").await?;
+        Ok(parser::parse_grbl_parser_state(&lines))
     }
 
     async fn run_probe_cycle(
@@ -679,13 +567,65 @@ impl Session for SimpleCore {
         max_travel: f64,
         feed_rate: f64,
     ) -> Result<Option<(f64, f64, f64)>, SessionError> {
-        SimpleCore::run_probe_cycle(self, axis_letter, max_travel, feed_rate)
-            .await
+        let axis_letter = axis_letter.to_uppercase();
+        let dialect = self.base.dialect();
+        let cmd = format_template(
+            &dialect.probe_cycle,
+            &[
+                ("axis_letter", Arg::Str(axis_letter.clone())),
+                ("max_travel", Arg::Length(max_travel)),
+                ("feed_rate", Arg::Speed(feed_rate)),
+            ],
+        )
+        .map_err(SessionError::Other)?;
+
+        self.base
+            .events
+            .probe_status(&format!("Probing {axis_letter}..."));
+        let lines = match line_session::execute_command(self, &cmd).await {
+            Ok(lines) => lines,
+            Err(_) => {
+                self.base.events.probe_status("Probe failed: Timed out");
+                return Ok(None);
+            }
+        };
+
+        for line in &lines {
+            if let Some(((x, y, z), success)) = parser::parse_probe_line(line) {
+                if success {
+                    let pos = if self.report_in_inches.load(Ordering::SeqCst) {
+                        (
+                            crate::core::types::inches_to_mm(x),
+                            crate::core::types::inches_to_mm(y),
+                            crate::core::types::inches_to_mm(z),
+                        )
+                    } else {
+                        (x, y, z)
+                    };
+                    self.base.events.probe_status(&format!(
+                        "Probe triggered at ({}, {}, {})",
+                        pos.0, pos.1, pos.2
+                    ));
+                    return Ok(Some(pos));
+                }
+            }
+        }
+        self.base.events.probe_status("Probe failed");
+        Ok(None)
     }
 
     async fn detect_unit_system(
         &self,
     ) -> Result<Option<UnitSystem>, SessionError> {
-        SimpleCore::detect_unit_system(self).await
+        let lines = match line_session::execute_command(self, "$$").await {
+            Ok(lines) => lines,
+            Err(err) => {
+                log::warn!("Unit system detection failed: {err}");
+                return Ok(None);
+            }
+        };
+        self.report_in_inches
+            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
+        Ok(parser::detect_unit_system_from_settings(&lines))
     }
 }

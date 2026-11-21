@@ -411,15 +411,6 @@ impl LineSessionBase {
         }
     }
 
-    /// Spawn the connection loop for *session*.
-    async fn connect<S: PingPongSession>(session: &Arc<S>) {
-        session.base().cleanup().await;
-        session.base().keep_running.store(true, Ordering::SeqCst);
-        let core = session.clone();
-        let task = tokio::spawn(async move { connection_loop(core).await });
-        *session.base().connection_task.lock().unwrap() = Some(task);
-    }
-
     /// Shared job prologue: reset cancellation and exception state,
     /// mark the job running and report `Run`.
     fn start_job(&self) {
@@ -449,6 +440,17 @@ impl LineSessionBase {
             }
         }
     }
+}
+
+/// Open the connection for *session*: clean up any previous run,
+/// spawn the connection loop until
+/// [`cleanup`](LineSessionBase::cleanup).
+pub async fn connect<S: PingPongSession>(session: &Arc<S>) {
+    session.base().cleanup().await;
+    session.base().keep_running.store(true, Ordering::SeqCst);
+    let core = session.clone();
+    let task = tokio::spawn(async move { connection_loop(core).await });
+    *session.base().connection_task.lock().unwrap() = Some(task);
 }
 
 /// The connection loop skeleton: open the transport, spawn the RX
@@ -505,57 +507,18 @@ pub struct StopCommand {
     pub log: &'static str,
 }
 
-/// The shared cancel sequence: mark the job cancelled, resolve the
-/// pending acknowledgements, write *stop* bytes, run the safety
-/// shutdown and report the job finished if one was running.
-/// *not_connected* is the error message used when the transport is
-/// down.
-pub async fn cancel<S: PingPongSession>(
-    session: &S,
-    emergency: bool,
-    stop: StopCommand,
-    not_connected: &str,
-) -> Result<(), SessionError> {
-    let base = session.base();
-    log::debug!("Cancel command initiated.");
-    let job_was_running = base.job_running.load(Ordering::SeqCst);
-    base.is_cancelled.store(true, Ordering::SeqCst);
-    base.job_running.store(false, Ordering::SeqCst);
-    base.is_holding.store(false, Ordering::SeqCst);
-
-    // Unblock a sender parked on a missing acknowledgement; the
-    // stream loop observes the cancellation and stops.
-    base.pending.resolve();
-    base.line_buffer.lock().unwrap().clear();
-
-    if !base.transport.is_open() {
-        return Err(SessionError::Connection(not_connected.to_string()));
-    }
-    log::info!("{}", stop.log);
-    base.transport.write(stop.bytes).await?;
-
-    session.safety_shutdown(emergency).await;
-
-    if job_was_running {
-        base.events.job_finished();
-    }
-    Ok(())
-}
-
-/// The ping-pong session contract.
+/// The ping-pong session hooks.
 ///
-/// Implement this trait to build a strict ping-pong line protocol on
-/// the shared skeleton: the struct embeds a [`LineSessionBase`],
+/// Implement this trait to plug a strict ping-pong line protocol
+/// into the shared skeleton: the struct embeds a [`LineSessionBase`],
 /// hands it back from [`PingPongSession::base`], and fills in the
-/// protocol hooks.  Everything else — the command exchange, job
-/// streaming with op progress, the dialect-formatted device
-/// operations, cancel and the lifecycle — is provided.
+/// protocol hooks.  The skeleton's operations — job streaming, the
+/// command exchange, cancel, the dialect-formatted device operations
+/// and the connection loop — are the free functions of this module;
+/// a session's [`Session`](crate::core::session::Session) impl calls
+/// them with its own signatures.
 #[async_trait]
 pub trait PingPongSession: Send + Sync + 'static {
-    // -------------------------------------------------------
-    // Protocol hooks (implement these)
-    // -------------------------------------------------------
-
     /// The session's shared state bundle.
     fn base(&self) -> &LineSessionBase;
 
@@ -614,49 +577,14 @@ pub trait PingPongSession: Send + Sync + 'static {
     /// How long to sleep between reconnect attempts.
     fn reconnect_delay(&self) -> Duration;
 
-    // -------------------------------------------------------
-    // Provided operations (call these)
-    // -------------------------------------------------------
+    /// The job-abort bytes and their log line, written raw by
+    /// [`cancel`] (no `raw_tx` event, exactly like the sessions
+    /// always did).
+    fn stop_command(&self) -> StopCommand;
 
-    /// The last reported device state.
-    fn state(&self) -> DeviceState {
-        self.base().state()
-    }
-
-    /// True while a job streams.
-    fn is_job_running(&self) -> bool {
-        self.base().is_job_running()
-    }
-
-    /// The transport's resource identifier (e.g. `serial:///dev/ttyUSB0`).
-    fn resource_uri(&self) -> Option<String> {
-        self.base().resource_uri()
-    }
-
-    /// Replace the command templates.
-    fn update_dialect(&self, dialect: Dialect) {
-        self.base().update_dialect(dialect);
-    }
-
-    /// Open the connection and run the connection loop until
-    /// [`cleanup`](Self::cleanup) or [`cancel`](Self::cancel).
-    async fn connect(self: Arc<Self>)
-    where
-        Self: Sized,
-    {
-        LineSessionBase::connect(&self).await;
-    }
-
-    /// Stop the session and report `Disconnected`.
-    async fn cleanup(&self) {
-        self.base().cleanup().await;
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop` where blocking is not allowed.
-    fn abort_background_tasks_now(&self) {
-        self.base().abort_background_tasks_now();
-    }
+    /// The connection-error message [`cancel`] returns when it finds
+    /// the transport down.
+    fn not_connected_message(&self) -> &'static str;
 
     /// Reassemble received bytes into lines and dispatch each one.
     fn handle_rx(&self, data: &[u8]) {
@@ -680,232 +608,296 @@ pub trait PingPongSession: Send + Sync + 'static {
             self.handle_line(&line);
         }
     }
+}
 
-    /// Send a command and await its full response.
-    async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        if !self.base().job_running.load(Ordering::SeqCst) {
-            self.base().is_cancelled.store(false, Ordering::SeqCst);
+/// The shared job streaming loop, strict ping-pong: prologue
+/// (`start_job` semantics), per-line preparation, op progress,
+/// alarm/cancel stop rules, exception handling and the tail
+/// (safety shutdown, `job_finished`).  Errors are reported through
+/// the event sink, mirroring the sessions' historical behavior.
+pub async fn stream_job<S: PingPongSession>(
+    session: &S,
+    gcode: &str,
+    op_map: &HashMap<usize, i64>,
+) {
+    let base = session.base();
+    base.start_job();
+    let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
+    let total = lines.len();
+    let mut sent = 0usize;
+    let mut interrupted = false;
+    log::debug!(
+        "Starting {} job with {total} lines.",
+        session.job_log_label()
+    );
+
+    for (line_idx, raw_line) in lines.iter().enumerate() {
+        if base.is_cancelled()
+            || (session.stop_job_on_alarm()
+                && base.state.lock().unwrap().status == DeviceStatus::Alarm)
+        {
+            if session.stop_job_on_alarm() {
+                log::info!("Job cancelled or alarm. Stopping.");
+            } else {
+                log::info!("Job cancelled. Stopping.");
+            }
+            break;
         }
-        self.ping_pong(&command).await
-    }
 
-    /// Send a command and await its full response, blocking any
-    /// other command from interleaving (identical to
-    /// [`PingPongSession::execute_command`] — the protocol has no
-    /// separate queue).
-    async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        self.execute_command(command).await
-    }
+        let line = session.prep_job_line(raw_line);
+        if line.is_empty() {
+            continue;
+        }
 
-    /// Stream a G-code job line by line, strict ping-pong.
-    async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
-        let base = self.base();
-        base.start_job();
-        let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
-        let total = lines.len();
-        let mut sent = 0usize;
-        let mut interrupted = false;
-        log::debug!(
-            "Starting {} job with {total} lines.",
-            self.job_log_label()
-        );
+        base.fire_op_progress(op_map, line_idx);
 
-        for (line_idx, raw_line) in lines.iter().enumerate() {
-            if base.is_cancelled()
-                || (self.stop_job_on_alarm()
-                    && base.state.lock().unwrap().status == DeviceStatus::Alarm)
-            {
-                if self.stop_job_on_alarm() {
-                    log::info!("Job cancelled or alarm. Stopping.");
-                } else {
-                    log::info!("Job cancelled. Stopping.");
-                }
-                break;
-            }
-
-            let line = self.prep_job_line(raw_line);
-            if line.is_empty() {
-                continue;
-            }
-
-            base.fire_op_progress(&op_map, line_idx);
-
-            match self.ping_pong(&line).await {
-                Ok(_) => {
-                    if base.job_exception.lock().unwrap().is_some() {
-                        break;
-                    }
-                    sent += 1;
-                }
-                Err(err) => {
-                    log::warn!("Job interrupted: {err:?}");
-                    interrupted = true;
+        match session.ping_pong(&line).await {
+            Ok(_) => {
+                if base.job_exception.lock().unwrap().is_some() {
                     break;
                 }
+                sent += 1;
             }
-            tokio::task::yield_now().await;
-        }
-
-        let had_exception = base.job_exception.lock().unwrap().take().is_some();
-        let was_cancelled = base.is_cancelled();
-        base.job_running.store(false, Ordering::SeqCst);
-        base.is_holding.store(false, Ordering::SeqCst);
-
-        if had_exception || interrupted {
-            self.safety_shutdown(true).await;
-        }
-        if !was_cancelled {
-            base.events.job_finished();
-        }
-        log::debug!(
-            "{} streaming finished ({sent}/{total} lines).",
-            self.job_log_label()
-        );
-    }
-
-    /// Stream pre-rendered machine code: trim, drop empties, run.
-    async fn run_raw(&self, machine_code: &str) {
-        let lines: Vec<String> = machine_code
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-        if lines.is_empty() {
-            return;
-        }
-        self.run(&lines.join("\n"), HashMap::new()).await;
-    }
-
-    /// Best-effort transmission of the dialect's tool-off commands
-    /// so a cancelled or aborted job cannot leave persistent PWM
-    /// outputs energized.  Fire-and-forget: responses are ignored.
-    async fn safety_shutdown(&self, emergency: bool) {
-        let base = self.base();
-        let dialect = base.dialect();
-        let mut commands = dialect.safety_off_commands.clone();
-        if emergency {
-            if let Some(cmd) = dialect.emergency_stop.clone() {
-                commands.push(cmd);
-            }
-        }
-        if commands.is_empty() || !base.transport.is_open() {
-            return;
-        }
-        if let Some(delay) = self.safety_shutdown_delay() {
-            tokio::time::sleep(delay).await;
-        }
-        for command in commands {
-            if !base.transport.is_open() {
+            Err(err) => {
+                log::warn!("Job interrupted: {err:?}");
+                interrupted = true;
                 break;
             }
-            if let Err(err) = base
-                .transport
-                .write(format!("{command}\n").as_bytes())
-                .await
-            {
-                log::warn!("Safety command '{command}' failed: {err}");
-            }
+        }
+        tokio::task::yield_now().await;
+    }
+
+    let had_exception = base.job_exception.lock().unwrap().take().is_some();
+    let was_cancelled = base.is_cancelled();
+    base.job_running.store(false, Ordering::SeqCst);
+    base.is_holding.store(false, Ordering::SeqCst);
+
+    if had_exception || interrupted {
+        safety_shutdown(session, true).await;
+    }
+    if !was_cancelled {
+        base.events.job_finished();
+    }
+    log::debug!(
+        "{} streaming finished ({sent}/{total} lines).",
+        session.job_log_label()
+    );
+}
+
+/// Stream pre-rendered machine code: trim, drop empties, stream.
+pub async fn run_raw<S: PingPongSession>(session: &S, machine_code: &str) {
+    let lines: Vec<String> = machine_code
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.is_empty() {
+        return;
+    }
+    stream_job(session, &lines.join("\n"), &HashMap::new()).await;
+}
+
+/// The shared command path: clear a finished job's cancellation
+/// flag, send the line, await its acknowledgement.
+pub async fn execute_command<S: PingPongSession>(
+    session: &S,
+    command: &str,
+) -> Result<Vec<String>, SessionError> {
+    if !session.base().job_running.load(Ordering::SeqCst) {
+        session.base().is_cancelled.store(false, Ordering::SeqCst);
+    }
+    session.ping_pong(command).await
+}
+
+/// The shared cancel sequence: mark the job cancelled, resolve the
+/// pending acknowledgements, write the protocol's stop bytes, run
+/// the safety shutdown and report the job finished if one was
+/// running.
+pub async fn cancel<S: PingPongSession>(
+    session: &S,
+    emergency: bool,
+) -> Result<(), SessionError> {
+    let base = session.base();
+    let stop = session.stop_command();
+    log::debug!("Cancel command initiated.");
+    let job_was_running = base.job_running.load(Ordering::SeqCst);
+    base.is_cancelled.store(true, Ordering::SeqCst);
+    base.job_running.store(false, Ordering::SeqCst);
+    base.is_holding.store(false, Ordering::SeqCst);
+
+    // Unblock a sender parked on a missing acknowledgement; the
+    // stream loop observes the cancellation and stops.
+    base.pending.resolve();
+    base.line_buffer.lock().unwrap().clear();
+
+    if !base.transport.is_open() {
+        return Err(SessionError::Connection(
+            session.not_connected_message().to_string(),
+        ));
+    }
+    log::info!("{}", stop.log);
+    base.transport.write(stop.bytes).await?;
+
+    safety_shutdown(session, emergency).await;
+
+    if job_was_running {
+        base.events.job_finished();
+    }
+    Ok(())
+}
+
+/// Best-effort transmission of the dialect's tool-off commands so a
+/// cancelled or aborted job cannot leave persistent PWM outputs
+/// energized.  Fire-and-forget: responses are ignored.
+async fn safety_shutdown<S: PingPongSession>(session: &S, emergency: bool) {
+    let base = session.base();
+    let dialect = base.dialect();
+    let mut commands = dialect.safety_off_commands.clone();
+    if emergency {
+        if let Some(cmd) = dialect.emergency_stop.clone() {
+            commands.push(cmd);
         }
     }
-
-    // -------------------------------------------------------
-    // Dialect-formatted device operations
-    // -------------------------------------------------------
-
-    /// Absolute move in the machine's current coordinate frame.
-    async fn move_to(
-        &self,
-        speed: f64,
-        pos_x: f64,
-        pos_y: f64,
-    ) -> Result<(), SessionError> {
-        let dialect = self.base().dialect();
-        let cmd = format_template(
-            &dialect.move_to,
-            &[
-                ("speed", Arg::Speed(speed)),
-                ("x", Arg::Length(pos_x)),
-                ("y", Arg::Length(pos_y)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
-        Ok(())
+    if commands.is_empty() || !base.transport.is_open() {
+        return;
     }
+    if let Some(delay) = session.safety_shutdown_delay() {
+        tokio::time::sleep(delay).await;
+    }
+    for command in commands {
+        if !base.transport.is_open() {
+            break;
+        }
+        if let Err(err) = base
+            .transport
+            .write(format!("{command}\n").as_bytes())
+            .await
+        {
+            log::warn!("Safety command '{command}' failed: {err}");
+        }
+    }
+}
 
-    /// Relative jog by per-axis distances.
-    async fn jog(
-        &self,
-        speed: f64,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        let dialect = self.base().dialect();
-        let head =
-            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
+/// Home all axes or *axes*; *active_wcs* is irrelevant for the
+/// generic path (protocols with a re-assertion step implement their
+/// own homing).
+pub async fn home<S: PingPongSession>(
+    session: &S,
+    axes: Option<Vec<String>>,
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    match axes {
+        None => {
+            execute_command(session, &dialect.home_all).await?;
+        }
+        Some(axes) => {
+            for axis in axes {
+                let cmd = format_template(
+                    &dialect.home_axis,
+                    &[("axis_letter", Arg::Str(axis))],
+                )
                 .map_err(SessionError::Other)?;
-        let mut cmd_parts = vec![head];
-        for (axis_name, distance) in deltas {
-            cmd_parts.push(format!(
-                "{}{}",
-                axis_name.to_uppercase(),
-                crate::core::dialect::python_float_repr(*distance)
-            ));
-        }
-        if cmd_parts.len() == 1 {
-            return Ok(());
-        }
-        let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    /// Switch to *tool_number*.
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        let dialect = self.base().dialect();
-        let cmd = format_template(
-            &dialect.tool_change,
-            &[("tool_number", Arg::Int(tool_number))],
-        )
-        .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    /// Laser/spindle power; `None` disables the tool.
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        let dialect = self.base().dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => {
-                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
+                execute_command(session, &cmd).await?;
             }
-            _ => dialect.laser_off.clone(),
-        };
-        self.execute_command(cmd).await?;
-        Ok(())
+        }
     }
+    session.base().clear_device_error();
+    Ok(())
+}
 
-    /// Laser power used while focusing; `None` disables it.
-    async fn set_focus_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.base().dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => format_template(
-                &dialect.focus_laser_on,
-                &[("power", Arg::Length(p))],
-            )
-            .map_err(SessionError::Other)?,
-            _ => dialect.laser_off.clone(),
-        };
-        self.execute_command(cmd).await?;
-        Ok(())
+/// Absolute move in the machine's current coordinate frame.  *z* is
+/// ignored: the GRBL-family `move_to` templates carry no Z word.
+pub async fn move_to<S: PingPongSession>(
+    session: &S,
+    speed: f64,
+    pos_x: f64,
+    pos_y: f64,
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    let cmd = format_template(
+        &dialect.move_to,
+        &[
+            ("speed", Arg::Speed(speed)),
+            ("x", Arg::Length(pos_x)),
+            ("y", Arg::Length(pos_y)),
+        ],
+    )
+    .map_err(SessionError::Other)?;
+    execute_command(session, &cmd).await?;
+    Ok(())
+}
+
+/// Relative jog by per-axis distances.
+pub async fn jog<S: PingPongSession>(
+    session: &S,
+    speed: f64,
+    deltas: &[(String, f64)],
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    let head = format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
+        .map_err(SessionError::Other)?;
+    let mut cmd_parts = vec![head];
+    for (axis_name, distance) in deltas {
+        cmd_parts.push(format!(
+            "{}{}",
+            axis_name.to_uppercase(),
+            crate::core::dialect::python_float_repr(*distance)
+        ));
     }
+    if cmd_parts.len() == 1 {
+        return Ok(());
+    }
+    let cmd = cmd_parts.join(" ");
+    execute_command(session, &cmd).await?;
+    Ok(())
+}
+
+/// Switch to *tool_number*.
+pub async fn select_tool<S: PingPongSession>(
+    session: &S,
+    tool_number: i64,
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    let cmd = format_template(
+        &dialect.tool_change,
+        &[("tool_number", Arg::Int(tool_number))],
+    )
+    .map_err(SessionError::Other)?;
+    execute_command(session, &cmd).await?;
+    Ok(())
+}
+
+/// Laser/spindle power; `None` disables the tool.
+pub async fn set_power<S: PingPongSession>(
+    session: &S,
+    power: Option<f64>,
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    let cmd = match power {
+        Some(p) if p > 0.0 => {
+            format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
+                .map_err(SessionError::Other)?
+        }
+        _ => dialect.laser_off.clone(),
+    };
+    execute_command(session, &cmd).await?;
+    Ok(())
+}
+
+/// Laser power used while focusing; `None` disables it.
+pub async fn set_focus_power<S: PingPongSession>(
+    session: &S,
+    power: Option<f64>,
+) -> Result<(), SessionError> {
+    let dialect = session.base().dialect();
+    let cmd = match power {
+        Some(p) if p > 0.0 => format_template(
+            &dialect.focus_laser_on,
+            &[("power", Arg::Length(p))],
+        )
+        .map_err(SessionError::Other)?,
+        _ => dialect.laser_off.clone(),
+    };
+    execute_command(session, &cmd).await?;
+    Ok(())
 }

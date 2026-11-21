@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+use crate::core::dialect::Dialect;
 use crate::core::transport::TransportError;
 use crate::core::types::{DeviceState, TransportStatus, UnitSystem};
 
@@ -121,6 +122,36 @@ pub trait Session: Send + Sync {
 
     /// Close the connection and stop all background tasks.
     async fn cleanup(&self);
+
+    /// The last reported device state.
+    fn state(&self) -> DeviceState;
+
+    /// True while a job streams.
+    fn is_job_running(&self) -> bool;
+
+    /// The transport's resource identifier (e.g. `serial:///dev/ttyUSB0`).
+    fn resource_uri(&self) -> Option<String>;
+
+    /// Replace the command templates (a no-op for protocols that
+    /// take no template data).
+    fn update_dialect(&self, dialect: Dialect) {
+        let _ = dialect;
+    }
+
+    /// Abort every background task without awaiting, for use from
+    /// `Drop` where blocking is not allowed.
+    fn abort_background_tasks_now(&self);
+
+    /// Execute pre-rendered machine code (no comment stripping, no
+    /// op mapping).  Protocols without such a path return
+    /// [`SessionError::Unsupported`].
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
+        let _ = machine_code;
+        Err(unsupported("run_raw"))
+    }
 
     /// Stream (or upload) a complete G-code job and wait for it to
     /// finish.  *op_map* maps zero-based G-code line indices to op
