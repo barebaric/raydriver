@@ -184,25 +184,11 @@ fn reader_loop(
     tx: mpsc::UnboundedSender<Vec<u8>>,
     open: Arc<AtomicBool>,
 ) {
-    let mut buf = [0u8; 1024];
-    loop {
-        let read =
-            unsafe { recv(socket.0, buf.as_mut_ptr(), buf.len() as i32, 0) };
-        if read > 0 {
-            if tx.send(buf[..read as usize].to_vec()).is_err() {
-                break;
-            }
-        } else if read == 0 {
-            break;
-        } else {
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::Interrupted {
-                log::debug!("Bluetooth RFCOMM read error: {err}");
-                break;
-            }
-        }
-    }
-    open.store(false, Ordering::SeqCst);
+    super::rfcomm_reader_loop(
+        |buf| unsafe { recv(socket.0, buf.as_mut_ptr(), buf.len() as i32, 0) },
+        &tx,
+        &open,
+    );
 }
 
 pub(crate) fn list_paired_devices() -> io::Result<Vec<BluetoothDeviceInfo>> {
