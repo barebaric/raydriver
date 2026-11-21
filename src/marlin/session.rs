@@ -40,9 +40,7 @@ use crate::core::session::{
     secs, AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
 };
 use crate::core::transport::TransportKind;
-use crate::core::types::{
-    DeviceState, DeviceStatus, TransportStatus, UnitSystem,
-};
+use crate::core::types::{DeviceStatus, TransportStatus, UnitSystem};
 
 use super::parser;
 
@@ -104,111 +102,6 @@ impl MarlinCore {
             config,
             connected: AsyncEvent::new(),
         })
-    }
-
-    // ---------------------------------------------------------------
-    // Accessors
-    // ---------------------------------------------------------------
-
-    pub fn state(&self) -> DeviceState {
-        self.base.state()
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        self.base.is_job_running()
-    }
-
-    pub fn resource_uri(&self) -> Option<String> {
-        self.base.resource_uri()
-    }
-
-    pub fn update_dialect(&self, dialect: Dialect) {
-        self.base.update_dialect(dialect);
-    }
-
-    // ---------------------------------------------------------------
-    // Shared ping-pong surface (delegates to the trait mechanics)
-    // ---------------------------------------------------------------
-
-    pub async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_command(self, command).await
-    }
-
-    pub async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_interactive_command(self, command).await
-    }
-
-    pub async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
-        PingPongSession::run(self, gcode, op_map).await;
-    }
-
-    pub async fn run_raw(&self, machine_code: &str) {
-        PingPongSession::run_raw(self, machine_code).await;
-    }
-
-    pub async fn move_to(
-        &self,
-        speed: f64,
-        pos_x: f64,
-        pos_y: f64,
-    ) -> Result<(), SessionError> {
-        PingPongSession::move_to(self, speed, pos_x, pos_y).await
-    }
-
-    pub async fn jog(
-        &self,
-        speed: f64,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        PingPongSession::jog(self, speed, deltas).await
-    }
-
-    pub async fn select_tool(
-        &self,
-        tool_number: i64,
-    ) -> Result<(), SessionError> {
-        PingPongSession::select_tool(self, tool_number).await
-    }
-
-    pub async fn set_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        PingPongSession::set_power(self, power).await
-    }
-
-    pub async fn set_focus_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        PingPongSession::set_focus_power(self, power).await
-    }
-
-    // ---------------------------------------------------------------
-    // Connect / disconnect
-    // ---------------------------------------------------------------
-
-    pub async fn connect(self: &Arc<Self>) {
-        LineSessionBase::connect(self).await;
-    }
-
-    pub async fn cleanup(&self) {
-        self.base.cleanup().await;
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop`.  A session dropped without `disconnect()` must not
-    /// leave its tasks running on the shared runtime: the orphans
-    /// keep marshaling events onto an event loop that may already be
-    /// closed (access violations on Windows).
-    pub fn abort_background_tasks_now(&self) {
-        self.base.abort_background_tasks_now();
     }
 
     // ---------------------------------------------------------------
@@ -413,14 +306,18 @@ impl MarlinCore {
     pub async fn detect_unit_system(
         &self,
     ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines =
-            match self.execute_interactive_command("M149".to_string()).await {
-                Ok(lines) => lines,
-                Err(err) => {
-                    log::warn!("Unit system detection failed: {err}");
-                    return Ok(None);
-                }
-            };
+        let lines = match PingPongSession::execute_interactive_command(
+            self,
+            "M149".to_string(),
+        )
+        .await
+        {
+            Ok(lines) => lines,
+            Err(err) => {
+                log::warn!("Unit system detection failed: {err}");
+                return Ok(None);
+            }
+        };
         Ok(parser::detect_unit_system_from_m149(&lines))
     }
 }
@@ -552,12 +449,12 @@ impl MarlinCore {
 #[async_trait]
 impl Session for MarlinCore {
     async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        MarlinCore::connect(&self).await;
+        PingPongSession::connect(self).await;
         Ok(())
     }
 
     async fn cleanup(&self) {
-        MarlinCore::cleanup(self).await;
+        PingPongSession::cleanup(self).await;
     }
 
     async fn run(
@@ -566,7 +463,7 @@ impl Session for MarlinCore {
         op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        MarlinCore::run(&self, gcode, op_map.clone()).await;
+        PingPongSession::run(self.as_ref(), gcode, op_map.clone()).await;
         Ok(())
     }
 
@@ -578,7 +475,8 @@ impl Session for MarlinCore {
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        MarlinCore::execute_interactive_command(self, command.to_string()).await
+        PingPongSession::execute_interactive_command(self, command.to_string())
+            .await
     }
 
     async fn home(
@@ -596,7 +494,7 @@ impl Session for MarlinCore {
         y: f64,
         _z: Option<f64>,
     ) -> Result<(), SessionError> {
-        MarlinCore::move_to(self, speed, x, y).await
+        PingPongSession::move_to(self, speed, x, y).await
     }
 
     async fn jog(
@@ -604,22 +502,22 @@ impl Session for MarlinCore {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
-        MarlinCore::jog(self, speed, deltas).await
+        PingPongSession::jog(self, speed, deltas).await
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        MarlinCore::select_tool(self, tool_number).await
+        PingPongSession::select_tool(self, tool_number).await
     }
 
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        MarlinCore::set_power(self, power).await
+        PingPongSession::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
-        MarlinCore::set_focus_power(self, power).await
+        PingPongSession::set_focus_power(self, power).await
     }
 
     async fn clear_alarm(&self) -> Result<(), SessionError> {

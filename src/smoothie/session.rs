@@ -35,7 +35,7 @@ use crate::core::session::{
     secs, CancelMode, Session, SessionError, SessionEvents,
 };
 use crate::core::transport::TransportKind;
-use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
+use crate::core::types::{DeviceStatus, TransportStatus};
 
 use crate::grbl::parser;
 
@@ -91,116 +91,6 @@ impl SmoothieCore {
             config,
         })
     }
-
-    // ---------------------------------------------------------------
-    // Accessors
-    // ---------------------------------------------------------------
-
-    pub fn state(&self) -> DeviceState {
-        self.base.state()
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        self.base.is_job_running()
-    }
-
-    pub fn resource_uri(&self) -> Option<String> {
-        self.base.resource_uri()
-    }
-
-    pub fn update_dialect(&self, dialect: Dialect) {
-        self.base.update_dialect(dialect);
-    }
-
-    // ---------------------------------------------------------------
-    // Shared ping-pong surface (delegates to the trait mechanics)
-    // ---------------------------------------------------------------
-
-    pub async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_command(self, command).await
-    }
-
-    pub async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        PingPongSession::execute_interactive_command(self, command).await
-    }
-
-    pub async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
-        PingPongSession::run(self, gcode, op_map).await;
-    }
-
-    pub async fn run_raw(&self, machine_code: &str) {
-        PingPongSession::run_raw(self, machine_code).await;
-    }
-
-    pub async fn move_to(
-        &self,
-        speed: f64,
-        pos_x: f64,
-        pos_y: f64,
-    ) -> Result<(), SessionError> {
-        PingPongSession::move_to(self, speed, pos_x, pos_y).await
-    }
-
-    pub async fn jog(
-        &self,
-        speed: f64,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        PingPongSession::jog(self, speed, deltas).await
-    }
-
-    pub async fn select_tool(
-        &self,
-        tool_number: i64,
-    ) -> Result<(), SessionError> {
-        PingPongSession::select_tool(self, tool_number).await
-    }
-
-    pub async fn set_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        PingPongSession::set_power(self, power).await
-    }
-
-    pub async fn set_focus_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        PingPongSession::set_focus_power(self, power).await
-    }
-
-    // ---------------------------------------------------------------
-    // Connect / disconnect
-    // ---------------------------------------------------------------
-
-    pub async fn connect(self: &Arc<Self>) {
-        LineSessionBase::connect(self).await;
-    }
-
-    pub async fn cleanup(&self) {
-        self.base.cleanup().await;
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop` where blocking is not allowed.  A session dropped
-    /// without `disconnect()` must not leave its connection, polling
-    /// and reader tasks running on the shared runtime: such orphans
-    /// accumulate across sessions and starve the worker threads
-    /// (hangs on Linux, access violations on Windows).
-    pub fn abort_background_tasks_now(&self) {
-        self.base.abort_background_tasks_now();
-    }
-
-    // ---------------------------------------------------------------
-    // Cancel
-    // ---------------------------------------------------------------
 
     /// Abort a running job.  Smoothieware stops on Ctrl+C.
     pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
@@ -503,12 +393,12 @@ impl PingPongSession for SmoothieCore {
 #[async_trait]
 impl Session for SmoothieCore {
     async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        SmoothieCore::connect(&self).await;
+        PingPongSession::connect(self).await;
         Ok(())
     }
 
     async fn cleanup(&self) {
-        SmoothieCore::cleanup(self).await;
+        PingPongSession::cleanup(self).await;
     }
 
     async fn run(
@@ -517,7 +407,7 @@ impl Session for SmoothieCore {
         op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        SmoothieCore::run(&self, gcode, op_map.clone()).await;
+        PingPongSession::run(self.as_ref(), gcode, op_map.clone()).await;
         Ok(())
     }
 
@@ -529,7 +419,7 @@ impl Session for SmoothieCore {
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        SmoothieCore::execute_interactive_command(self, command.to_string())
+        PingPongSession::execute_interactive_command(self, command.to_string())
             .await
     }
 
@@ -548,7 +438,7 @@ impl Session for SmoothieCore {
         y: f64,
         _z: Option<f64>,
     ) -> Result<(), SessionError> {
-        SmoothieCore::move_to(self, speed, x, y).await
+        PingPongSession::move_to(self, speed, x, y).await
     }
 
     async fn jog(
@@ -556,22 +446,22 @@ impl Session for SmoothieCore {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
-        SmoothieCore::jog(self, speed, deltas).await
+        PingPongSession::jog(self, speed, deltas).await
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        SmoothieCore::select_tool(self, tool_number).await
+        PingPongSession::select_tool(self, tool_number).await
     }
 
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        SmoothieCore::set_power(self, power).await
+        PingPongSession::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
-        SmoothieCore::set_focus_power(self, power).await
+        PingPongSession::set_focus_power(self, power).await
     }
 
     async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {

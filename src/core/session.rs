@@ -265,35 +265,43 @@ pub trait Session: Send + Sync {
     }
 }
 
-/// An asyncio.Event-style latch built on tokio primitives.
-pub(crate) struct AsyncEvent {
+/// An asyncio.Event-style latch built on tokio primitives: the
+/// `handshake` latch of the line sessions and generally useful for
+/// session implementations.
+pub struct AsyncEvent {
     set: Mutex<bool>,
     notify: tokio::sync::Notify,
 }
 
+impl Default for AsyncEvent {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AsyncEvent {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             set: Mutex::new(false),
             notify: tokio::sync::Notify::new(),
         }
     }
 
-    pub(crate) fn set(&self) {
+    pub fn set(&self) {
         *self.set.lock().unwrap() = true;
         self.notify.notify_waiters();
         self.notify.notify_one();
     }
 
-    pub(crate) fn clear(&self) {
+    pub fn clear(&self) {
         *self.set.lock().unwrap() = false;
     }
 
-    pub(crate) fn is_set(&self) -> bool {
+    pub fn is_set(&self) -> bool {
         *self.set.lock().unwrap()
     }
 
-    pub(crate) async fn wait(&self) {
+    pub async fn wait(&self) {
         loop {
             if self.is_set() {
                 return;

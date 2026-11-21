@@ -18,7 +18,7 @@ pub mod connector;
 pub mod dialect;
 pub mod discovery;
 pub mod http;
-pub(crate) mod line_session;
+pub mod line_session;
 #[cfg(any(feature = "net", feature = "mdns"))]
 pub mod remote;
 pub mod session;

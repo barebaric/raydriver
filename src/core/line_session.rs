@@ -2,18 +2,22 @@
 //! minimal GRBL session, Smoothie and Marlin): send one line, wait
 //! for its `ok`/`error:` acknowledgement, then send the next.
 //!
-//! The protocol sessions keep their byte-for-byte behavior and their
-//! public surface; this module owns the mechanics they used to
-//! duplicate — the pending-acknowledgement bookkeeping, RX line
-//! reassembly, the connection loop skeleton, job streaming, cancel
-//! and the safety shutdown — so the quirks (late-ack suppression,
-//! wire-ordered FIFO for Marlin, event-outside-the-lock emission)
-//! exist exactly once.
+//! This module owns the mechanics such sessions used to duplicate —
+//! the pending-acknowledgement bookkeeping, RX line reassembly, the
+//! connection loop skeleton, job streaming, cancel and the safety
+//! shutdown — so the quirks (late-ack suppression, wire-ordered FIFO
+//! for Marlin, event-outside-the-lock emission) exist exactly once.
 //!
-//! A session implements [`PingPongSession`]: a handful of protocol
-//! hooks (line dispatch, handshake style, poll loop) plus the shared
-//! state bundle ([`LineSessionBase`]) it returns from
-//! [`PingPongSession::base`].
+//! A session is a struct that embeds a [`LineSessionBase`] and
+//! implements [`PingPongSession`]: the trait's *hooks* carry
+//! everything protocol-specific (line dispatch, handshake style,
+//! poll loop, cancel bytes), while its *operations* — command
+//! exchange, job streaming, the dialect-formatted device operations
+//! and the lifecycle — are provided once, here.  Implementing the
+//! trait is the supported way to add a new strict ping-pong protocol;
+//! callers use the session's own API (the trait is in scope in this
+//! crate's bindings) or the protocol-agnostic
+//! [`crate::core::session::Session`] surface.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -33,13 +37,13 @@ use crate::core::types::{
 };
 
 /// One sent command awaiting its acknowledgement.
-pub(crate) struct PendingCmd {
+struct PendingCmd {
     lines: Mutex<Vec<String>>,
     finished: AsyncEvent,
 }
 
 impl PendingCmd {
-    pub(crate) fn new() -> Self {
+    fn new() -> Self {
         Self {
             lines: Mutex::new(Vec::new()),
             finished: AsyncEvent::new(),
@@ -69,34 +73,52 @@ impl PendingCmd {
 /// Smoothie); the FIFO queue matches the device's wire-ordered
 /// responses when a status poll may be in flight while a user
 /// command waits (Marlin).
-pub(crate) enum PendingStore {
+enum PendingInner {
     Slot(Mutex<Option<Arc<PendingCmd>>>),
     Queue(Mutex<VecDeque<Arc<PendingCmd>>>),
 }
 
+/// The pending-acknowledgement bookkeeping of a line session.
+/// Construct with [`PendingStore::slot`] or [`PendingStore::queue`].
+pub struct PendingStore {
+    inner: PendingInner,
+}
+
 impl PendingStore {
-    pub(crate) fn slot() -> Self {
-        Self::Slot(Mutex::new(None))
+    /// One command in flight at a time.
+    pub fn slot() -> Self {
+        Self {
+            inner: PendingInner::Slot(Mutex::new(None)),
+        }
     }
 
-    pub(crate) fn queue() -> Self {
-        Self::Queue(Mutex::new(VecDeque::new()))
+    /// Wire-ordered FIFO of in-flight commands.
+    pub fn queue() -> Self {
+        Self {
+            inner: PendingInner::Queue(Mutex::new(VecDeque::new())),
+        }
     }
 
-    /// Register a newly sent command.
+    /// Register a newly sent command (used by [`LineSessionBase::await_ack`]).
     fn enqueue(&self, pending: Arc<PendingCmd>) {
-        match self {
-            Self::Slot(slot) => *slot.lock().unwrap() = Some(pending),
-            Self::Queue(queue) => queue.lock().unwrap().push_back(pending),
+        match &self.inner {
+            PendingInner::Slot(slot) => {
+                *slot.lock().unwrap() = Some(pending);
+            }
+            PendingInner::Queue(queue) => {
+                queue.lock().unwrap().push_back(pending);
+            }
         }
     }
 
     /// Feed an unsolicited response line to the oldest outstanding
     /// command (unless it already finished).
-    pub(crate) fn collect(&self, line: &str) {
-        let pending = match self {
-            Self::Slot(slot) => slot.lock().unwrap().clone(),
-            Self::Queue(queue) => queue.lock().unwrap().front().cloned(),
+    pub fn collect(&self, line: &str) {
+        let pending = match &self.inner {
+            PendingInner::Slot(slot) => slot.lock().unwrap().clone(),
+            PendingInner::Queue(queue) => {
+                queue.lock().unwrap().front().cloned()
+            }
         };
         if let Some(pending) = pending {
             if !pending.is_finished() {
@@ -108,10 +130,12 @@ impl PendingStore {
     /// Finish the oldest outstanding command, optionally collecting
     /// one final response line first (the `error:`/`ALARM:` text).
     /// The entry stays owned by the waiting ping-pong.
-    pub(crate) fn finish_next(&self, last_line: Option<&str>) {
-        let pending = match self {
-            Self::Slot(slot) => slot.lock().unwrap().clone(),
-            Self::Queue(queue) => queue.lock().unwrap().front().cloned(),
+    pub fn finish_next(&self, last_line: Option<&str>) {
+        let pending = match &self.inner {
+            PendingInner::Slot(slot) => slot.lock().unwrap().clone(),
+            PendingInner::Queue(queue) => {
+                queue.lock().unwrap().front().cloned()
+            }
         };
         if let Some(pending) = pending {
             if !pending.is_finished() {
@@ -124,30 +148,29 @@ impl PendingStore {
     }
 
     /// Drop one entry on every path: a late acknowledgement for a
-    /// timed out command must not resolve a later one.  For the slot
-    /// this is the same as [`PendingStore::resolve`].
+    /// timed out command must not resolve a later one.
     fn remove(&self, pending: &Arc<PendingCmd>) {
-        match self {
-            Self::Slot(slot) => {
+        match &self.inner {
+            PendingInner::Slot(slot) => {
                 if let Some(pending) = slot.lock().unwrap().take() {
                     pending.finish();
                 }
             }
-            Self::Queue(queue) => {
+            PendingInner::Queue(queue) => {
                 queue.lock().unwrap().retain(|p| !Arc::ptr_eq(p, pending));
             }
         }
     }
 
     /// Finish and drop every outstanding entry (cancel, cleanup).
-    pub(crate) fn resolve(&self) {
-        match self {
-            Self::Slot(slot) => {
+    pub fn resolve(&self) {
+        match &self.inner {
+            PendingInner::Slot(slot) => {
                 if let Some(pending) = slot.lock().unwrap().take() {
                     pending.finish();
                 }
             }
-            Self::Queue(queue) => {
+            PendingInner::Queue(queue) => {
                 for pending in queue.lock().unwrap().drain(..) {
                     pending.finish();
                 }
@@ -156,29 +179,49 @@ impl PendingStore {
     }
 }
 
-/// The state bundle shared by every ping-pong session.  Sessions
-/// embed this and route their shared operations through it.
-pub(crate) struct LineSessionBase {
-    pub(crate) dialect: RwLock<Dialect>,
-    pub(crate) events: Arc<dyn SessionEvents>,
-    pub(crate) transport: Arc<dyn Transport>,
-    pub(crate) state: Mutex<DeviceState>,
-    pub(crate) keep_running: AtomicBool,
-    pub(crate) job_running: AtomicBool,
-    pub(crate) is_cancelled: AtomicBool,
-    pub(crate) is_holding: AtomicBool,
-    pub(crate) handshake_received: AsyncEvent,
-    pub(crate) line_buffer: Mutex<Vec<u8>>,
-    pub(crate) pending: PendingStore,
-    pub(crate) job_exception: Mutex<Option<SessionError>>,
-    pub(crate) last_reported_op_index: Mutex<i64>,
-    pub(crate) cmd_lock: tokio::sync::Mutex<()>,
+/// The state bundle shared by every ping-pong session.  A session
+/// struct embeds one and hands a reference to it back from
+/// [`PingPongSession::base`]; the bundle's methods carry everything
+/// the hooks and provided operations have in common.
+pub struct LineSessionBase {
+    /// The command templates (owned data; see [`Dialect`]).
+    pub dialect: RwLock<Dialect>,
+    /// The event sink (implemented by the Python bindings or by the
+    /// embedding application).
+    pub events: Arc<dyn SessionEvents>,
+    /// The byte transport to the device.
+    pub transport: Arc<dyn Transport>,
+    /// The last reported device state.
+    pub state: Mutex<DeviceState>,
+    /// Drives the connection loop; true while the session wants to
+    /// stay (re)connected.
+    pub keep_running: AtomicBool,
+    /// True while a job streams.
+    pub job_running: AtomicBool,
+    /// Set by [`cancel`]; observed by the job loop.
+    pub is_cancelled: AtomicBool,
+    /// Set by hold requests; observed by the status handlers.
+    pub is_holding: AtomicBool,
+    /// Set by the handshake hooks when the device announces itself.
+    pub handshake_received: AsyncEvent,
+    /// Partial bytes between complete `\n`-terminated lines.
+    pub line_buffer: Mutex<Vec<u8>>,
+    /// The pending-acknowledgement bookkeeping.
+    pub pending: PendingStore,
+    /// The error that aborted the current job, if any.
+    pub job_exception: Mutex<Option<SessionError>>,
+    /// Serializes user commands for slot-style sessions.
+    pub cmd_lock: tokio::sync::Mutex<()>,
+    /// The last op index reported via `command_done`.
+    last_reported_op_index: Mutex<i64>,
     connection_task: Mutex<Option<JoinHandle<()>>>,
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl LineSessionBase {
-    pub(crate) fn new(
+    /// Build the bundle for a transport already chosen by the
+    /// session's constructor.
+    pub fn new(
         dialect: Dialect,
         events: Arc<dyn SessionEvents>,
         transport: Arc<dyn Transport>,
@@ -204,50 +247,51 @@ impl LineSessionBase {
         }
     }
 
-    // -----------------------------------------------------------
-    // Accessors
-    // -----------------------------------------------------------
-
-    pub(crate) fn state(&self) -> DeviceState {
+    /// The last reported device state.
+    pub fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
 
-    pub(crate) fn is_job_running(&self) -> bool {
+    /// True while a job streams.
+    pub fn is_job_running(&self) -> bool {
         self.job_running.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
+    /// True after [`cancel`] was called (observed by the job loop).
+    pub fn is_cancelled(&self) -> bool {
         self.is_cancelled.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn resource_uri(&self) -> Option<String> {
+    /// The transport's resource identifier (e.g. `serial:///dev/ttyUSB0`).
+    pub fn resource_uri(&self) -> Option<String> {
         self.transport.resource_uri()
     }
 
-    pub(crate) fn dialect(&self) -> Dialect {
+    /// The current command templates.
+    pub fn dialect(&self) -> Dialect {
         self.dialect.read().unwrap().clone()
     }
 
-    pub(crate) fn update_dialect(&self, dialect: Dialect) {
+    /// Replace the command templates.
+    pub fn update_dialect(&self, dialect: Dialect) {
         *self.dialect.write().unwrap() = dialect;
     }
 
-    // -----------------------------------------------------------
-    // Event emission
-    // -----------------------------------------------------------
-
-    pub(crate) fn connection_status(
-        &self,
-        status: TransportStatus,
-        message: Option<&str>,
-    ) {
-        self.events.connection_status(status, message);
+    /// Clear any reported device error and emit the state (used
+    /// after successful homing or alarm clearing).
+    pub fn clear_device_error(&self) {
+        let state = {
+            let mut state = self.state.lock().unwrap();
+            state.error = None;
+            state.clone()
+        };
+        self.events.state_changed(&state);
     }
 
     /// Store *state* and emit it, unless it is identical to the
     /// currently reported state.  The callback runs outside the lock
     /// (the callback attaches to Python).
-    pub(crate) fn emit_state_if_changed(&self, state: DeviceState) {
+    pub fn emit_state_if_changed(&self, state: DeviceState) {
         let snapshot = {
             let mut current = self.state.lock().unwrap();
             if *current == state {
@@ -264,7 +308,7 @@ impl LineSessionBase {
 
     /// Record a device error if none is reported yet, emitting the
     /// state when it changed.
-    pub(crate) fn set_device_error(&self, error: DeviceError) {
+    pub fn set_device_error(&self, error: DeviceError) {
         let snapshot = {
             let mut state = self.state.lock().unwrap();
             if state.error.is_none() {
@@ -279,84 +323,21 @@ impl LineSessionBase {
         }
     }
 
-    /// Clear any reported device error and emit the state (used
-    /// after successful homing or alarm clearing).
-    pub(crate) fn clear_device_error(&self) {
-        let state = {
-            let mut state = self.state.lock().unwrap();
-            state.error = None;
-            state.clone()
-        };
-        self.events.state_changed(&state);
+    /// Emit a connection-status event.
+    pub fn connection_status(
+        &self,
+        status: TransportStatus,
+        message: Option<&str>,
+    ) {
+        self.events.connection_status(status, message);
     }
-
-    // -----------------------------------------------------------
-    // Lifecycle
-    // -----------------------------------------------------------
-
-    pub(crate) async fn cleanup(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        self.pending.resolve();
-        self.abort_background_tasks().await;
-        self.transport.close().await;
-        self.connection_status(TransportStatus::Disconnected, None);
-    }
-
-    pub(crate) async fn abort_background_tasks(&self) {
-        let connection = self.connection_task.lock().unwrap().take();
-        if let Some(task) = connection {
-            task.abort();
-            let _ = task.await;
-        }
-        let tasks: Vec<_> =
-            self.background_tasks.lock().unwrap().drain(..).collect();
-        for task in tasks {
-            task.abort();
-            let _ = task.await;
-        }
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop` where blocking is not allowed.  A session dropped
-    /// without `disconnect()` must not leave its connection, polling
-    /// and reader tasks running on the shared runtime.
-    pub(crate) fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        if let Some(task) = self.connection_task.lock().unwrap().take() {
-            task.abort();
-        }
-        for task in self.background_tasks.lock().unwrap().drain(..) {
-            task.abort();
-        }
-    }
-
-    pub(crate) async fn abort_readers(&self) {
-        let tasks: Vec<_> =
-            self.background_tasks.lock().unwrap().drain(..).collect();
-        for task in tasks {
-            task.abort();
-            let _ = task.await;
-        }
-    }
-
-    /// Spawn the connection loop for *session*.
-    pub(crate) async fn connect<S: PingPongSession>(session: &Arc<S>) {
-        session.base().cleanup().await;
-        session.base().keep_running.store(true, Ordering::SeqCst);
-        let core = session.clone();
-        let task = tokio::spawn(async move { connection_loop(core).await });
-        *session.base().connection_task.lock().unwrap() = Some(task);
-    }
-
-    // -----------------------------------------------------------
-    // Command exchange
-    // -----------------------------------------------------------
 
     /// The shared tail of every ping-pong: enqueue the pending
     /// acknowledgement, write the command, await its acknowledgement
-    /// under *timeout*, then drop the entry.
-    pub(crate) async fn await_ack(
+    /// under *timeout*, then drop the entry.  A session's
+    /// [`PingPongSession::ping_pong`] wraps this with its protocol
+    /// specifics (serialization, handshake gates).
+    pub async fn await_ack(
         &self,
         command: &str,
         timeout: Duration,
@@ -381,13 +362,67 @@ impl LineSessionBase {
         }
     }
 
-    // -----------------------------------------------------------
-    // Job streaming
-    // -----------------------------------------------------------
+    /// Stop the session: shut the keep-running flag off, resolve the
+    /// pending acknowledgements, abort the background tasks, close
+    /// the transport and report `Disconnected`.
+    pub async fn cleanup(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        self.job_running.store(false, Ordering::SeqCst);
+        self.pending.resolve();
+        self.abort_background_tasks().await;
+        self.transport.close().await;
+        self.connection_status(TransportStatus::Disconnected, None);
+    }
+
+    /// Abort every background task without awaiting, for use from
+    /// `Drop` where blocking is not allowed.  A session dropped
+    /// without disconnecting must not leave its connection, polling
+    /// and reader tasks running on the shared runtime.
+    pub fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Some(task) = self.connection_task.lock().unwrap().take() {
+            task.abort();
+        }
+        for task in self.background_tasks.lock().unwrap().drain(..) {
+            task.abort();
+        }
+    }
+
+    async fn abort_background_tasks(&self) {
+        let connection = self.connection_task.lock().unwrap().take();
+        if let Some(task) = connection {
+            task.abort();
+            let _ = task.await;
+        }
+        let tasks: Vec<_> =
+            self.background_tasks.lock().unwrap().drain(..).collect();
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    async fn abort_readers(&self) {
+        let tasks: Vec<_> =
+            self.background_tasks.lock().unwrap().drain(..).collect();
+        for task in tasks {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    /// Spawn the connection loop for *session*.
+    async fn connect<S: PingPongSession>(session: &Arc<S>) {
+        session.base().cleanup().await;
+        session.base().keep_running.store(true, Ordering::SeqCst);
+        let core = session.clone();
+        let task = tokio::spawn(async move { connection_loop(core).await });
+        *session.base().connection_task.lock().unwrap() = Some(task);
+    }
 
     /// Shared job prologue: reset cancellation and exception state,
     /// mark the job running and report `Run`.
-    pub(crate) fn start_job(&self) {
+    fn start_job(&self) {
         self.is_cancelled.store(false, Ordering::SeqCst);
         self.job_running.store(true, Ordering::SeqCst);
         self.is_holding.store(false, Ordering::SeqCst);
@@ -460,11 +495,22 @@ async fn connection_loop<S: PingPongSession>(session: Arc<S>) {
     }
 }
 
-/// The shared cancel sequence.  *stop* is the protocol's job-abort
-/// bytes (sent raw, without a `raw_tx` event, exactly like the
-/// sessions always did); *not_connected* is the error message used
-/// when the transport is down.
-pub(crate) async fn cancel<S: PingPongSession>(
+/// The protocol-specific cancel payload: the job-abort bytes (sent
+/// raw, without a `raw_tx` event, exactly like the sessions always
+/// did) and the log line describing them.
+pub struct StopCommand {
+    /// The bytes to write.
+    pub bytes: &'static [u8],
+    /// The `log::info` message describing the stop.
+    pub log: &'static str,
+}
+
+/// The shared cancel sequence: mark the job cancelled, resolve the
+/// pending acknowledgements, write *stop* bytes, run the safety
+/// shutdown and report the job finished if one was running.
+/// *not_connected* is the error message used when the transport is
+/// down.
+pub async fn cancel<S: PingPongSession>(
     session: &S,
     emergency: bool,
     stop: StopCommand,
@@ -496,22 +542,22 @@ pub(crate) async fn cancel<S: PingPongSession>(
     Ok(())
 }
 
-/// The protocol-specific cancel payload.
-pub(crate) struct StopCommand {
-    pub(crate) bytes: &'static [u8],
-    pub(crate) log: &'static str,
-}
-
-/// The ping-pong session contract: the shared mechanics live here as
-/// provided methods; a protocol fills in the hooks.
+/// The ping-pong session contract.
+///
+/// Implement this trait to build a strict ping-pong line protocol on
+/// the shared skeleton: the struct embeds a [`LineSessionBase`],
+/// hands it back from [`PingPongSession::base`], and fills in the
+/// protocol hooks.  Everything else — the command exchange, job
+/// streaming with op progress, the dialect-formatted device
+/// operations, cancel and the lifecycle — is provided.
 #[async_trait]
-pub(crate) trait PingPongSession: Send + Sync + 'static {
-    /// The shared state bundle.
-    fn base(&self) -> &LineSessionBase;
+pub trait PingPongSession: Send + Sync + 'static {
+    // -------------------------------------------------------
+    // Protocol hooks (implement these)
+    // -------------------------------------------------------
 
-    // -------------------------------------------------------
-    // Protocol hooks
-    // -------------------------------------------------------
+    /// The session's shared state bundle.
+    fn base(&self) -> &LineSessionBase;
 
     /// Dispatch one complete RX line (status reports, acks, alarms,
     /// protocol-specific lines).
@@ -569,8 +615,48 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
     fn reconnect_delay(&self) -> Duration;
 
     // -------------------------------------------------------
-    // Provided mechanics
+    // Provided operations (call these)
     // -------------------------------------------------------
+
+    /// The last reported device state.
+    fn state(&self) -> DeviceState {
+        self.base().state()
+    }
+
+    /// True while a job streams.
+    fn is_job_running(&self) -> bool {
+        self.base().is_job_running()
+    }
+
+    /// The transport's resource identifier (e.g. `serial:///dev/ttyUSB0`).
+    fn resource_uri(&self) -> Option<String> {
+        self.base().resource_uri()
+    }
+
+    /// Replace the command templates.
+    fn update_dialect(&self, dialect: Dialect) {
+        self.base().update_dialect(dialect);
+    }
+
+    /// Open the connection and run the connection loop until
+    /// [`cleanup`](Self::cleanup) or [`cancel`](Self::cancel).
+    async fn connect(self: Arc<Self>)
+    where
+        Self: Sized,
+    {
+        LineSessionBase::connect(&self).await;
+    }
+
+    /// Stop the session and report `Disconnected`.
+    async fn cleanup(&self) {
+        self.base().cleanup().await;
+    }
+
+    /// Abort every background task without awaiting, for use from
+    /// `Drop` where blocking is not allowed.
+    fn abort_background_tasks_now(&self) {
+        self.base().abort_background_tasks_now();
+    }
 
     /// Reassemble received bytes into lines and dispatch each one.
     fn handle_rx(&self, data: &[u8]) {
@@ -732,6 +818,7 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
     // Dialect-formatted device operations
     // -------------------------------------------------------
 
+    /// Absolute move in the machine's current coordinate frame.
     async fn move_to(
         &self,
         speed: f64,
@@ -752,6 +839,7 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Relative jog by per-axis distances.
     async fn jog(
         &self,
         speed: f64,
@@ -777,6 +865,7 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Switch to *tool_number*.
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
         let dialect = self.base().dialect();
         let cmd = format_template(
@@ -788,6 +877,7 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Laser/spindle power; `None` disables the tool.
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
         let dialect = self.base().dialect();
         let cmd = match power {
@@ -801,6 +891,7 @@ pub(crate) trait PingPongSession: Send + Sync + 'static {
         Ok(())
     }
 
+    /// Laser power used while focusing; `None` disables it.
     async fn set_focus_power(
         &self,
         power: Option<f64>,
