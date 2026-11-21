@@ -1,16 +1,21 @@
 //! Minimal HTTP/1.1 client for device APIs.
 //!
-//! Hand-rolled over a tokio `TcpStream` so the crate stays free of
-//! an HTTP client dependency: the APIs this module serves are small
-//! and fixed (short GET/POST replies and a multipart upload
-//! endpoint).  Requests are always sent with `Connection: close` and
-//! the response is read to EOF, which keeps the parser simple; both
-//! `Content-Length` and `Transfer-Encoding: chunked` bodies are
-//! decoded.
+//! Hand-rolled so the crate stays free of an HTTP client dependency:
+//! the APIs this module serves are small and fixed (short GET/POST
+//! replies and a multipart upload endpoint).  Requests are always
+//! sent with `Connection: close` and the response is read to EOF,
+//! which keeps the parser simple; both `Content-Length` and
+//! `Transfer-Encoding: chunked` bodies are decoded.
+//!
+//! The exchange is generic over the byte stream
+//! ([`request_on_stream`]); the host/port helpers dial a plain TCP
+//! connection first.  An embedder on a platform without TCP sockets
+//! (e.g. wasm) can run the same exchange over any
+//! `AsyncRead + AsyncWrite` stream it provides.
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::core::session::SessionError;
@@ -180,25 +185,50 @@ async fn request(
         let stream = TcpStream::connect((host, port))
             .await
             .map_err(|e| SessionError::Connection(e.to_string()))?;
-        exchange(stream, host, port, method, path, body, extra_headers)
-            .await
-            .map_err(|e| SessionError::Connection(e.to_string()))
+        exchange(
+            stream,
+            &format!("{host}:{port}"),
+            method,
+            path,
+            body,
+            extra_headers,
+        )
+        .await
+        .map_err(|e| SessionError::Connection(e.to_string()))
     })
     .await
     .map_err(|_| SessionError::Timeout)?
 }
 
-async fn exchange(
-    mut stream: TcpStream,
+/// Run a single HTTP exchange over an existing byte stream.
+///
+/// *host* is used verbatim as the `Host` header (append `:port` if
+/// the endpoint is not on the default port).  The request is written
+/// with `Connection: close` semantics and the response is read to
+/// EOF, so the stream is consumed afterwards.
+pub async fn request_on_stream<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
     host: &str,
-    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<(&str, &[u8])>,
+    extra_headers: &[(&str, &str)],
+) -> Result<HttpResponse, SessionError> {
+    exchange(stream, host, method, path, body, extra_headers)
+        .await
+        .map_err(|e| SessionError::Connection(e.to_string()))
+}
+
+async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    host_header: &str,
     method: &str,
     path: &str,
     body: Option<(&str, &[u8])>,
     extra_headers: &[(&str, &str)],
 ) -> Result<HttpResponse, std::io::Error> {
     let mut req = format!("{method} {path} HTTP/1.1\r\n");
-    req.push_str(&format!("Host: {host}:{port}\r\n"));
+    req.push_str(&format!("Host: {host_header}\r\n"));
     req.push_str("Accept: */*\r\n");
     req.push_str("Connection: close\r\n");
     for (name, value) in extra_headers {

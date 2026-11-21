@@ -7,53 +7,87 @@ license = "MIT"
 repository = "https://github.com/barebaric/raydriver"
 
 [features]
-# No defaults: embedding applications consume the pure Rust core with
-# `default-features = false`. The Python build enables `python` (see
-# [tool.maturin] in pyproject.toml).
-default = []
+# No defaults for embedding: pure-Rust consumers pick the pieces they
+# need (`default-features = false`) — a wasm32-unknown-unknown build
+# runs with no features at all, compiling only the protocol-neutral
+# core, the mock/custom transports and the line-based protocol
+# sessions.  Native desktop consumers get the full feature set via
+# `default`; the Python build enables `python` (see [tool.maturin] in
+# pyproject.toml).
+default = ["net", "mdns", "serial", "remote-daemon"]
 python = [
     "dep:pyo3",
     "dep:pyo3-stub-gen",
     "dep:env_filter",
+    # The Python bindings run a multi-threaded tokio runtime; wasm
+    # builds never enable this feature (tokio forbids rt-multi-thread
+    # and net on wasm).
+    "tokio/rt-multi-thread",
+    "net",
+    "mdns",
+    "serial",
+    "remote-daemon",
 ]
+# TCP/IP client networking: the HTTP and WebSocket clients, the
+# telnet transport, network discovery (probes, subnet scan, control
+# streams), the remote client, and the network-native protocol
+# sessions (esp3d, octoprint, xtool).
+net = [
+    "dep:base64",
+    "dep:futures-util",
+    "dep:if-addrs",
+    "dep:rustls",
+    "dep:sha1",
+    "dep:tokio-rustls",
+    "dep:tokio-tungstenite",
+    "dep:uuid",
+    "tokio/net",
+]
+# mDNS announcement and browsing (host-side; no UDP sockets on wasm).
+mdns = ["dep:if-addrs", "dep:mdns-sd", "dep:sha1"]
+# OS serial ports (tokio-serial).  Port *enumeration* via the
+# `serialport` crate stays available without this feature.
+serial = ["dep:tokio-serial"]
+# The remote session-host daemon: a host-side TCP/TLS server.
+# Not meaningful on wasm.
+remote-daemon = ["net", "dep:uuid"]
 
 [dependencies]
 
 async-trait = "0.1"
-base64 = { version = "0.22", default-features = false, features = ["std"] }
+base64 = { version = "0.22", default-features = false, features = ["std"], optional = true }
 env_filter = { version = "0.1", optional = true }
-futures-util = { version = "0.3", features = ["sink"] }
-if-addrs = "0.15"
+futures-util = { version = "0.3", features = ["sink"], optional = true }
+if-addrs = { version = "0.15", optional = true }
 log = "0.4"
-mdns-sd = "0.21.7"
+mdns-sd = { version = "0.21.7", optional = true }
 pyo3 = { version = "0.28", features = ["abi3", "abi3-py311", "py-clone"], optional = true }
 pyo3-stub-gen = { version = "0.23.0", optional = true }
 regex = "1"
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = { version = "4.10", default-features = false }
-sha1 = { version = "0.10", default-features = false }
+sha1 = { version = "0.10", default-features = false, optional = true }
 thiserror = "2"
 tokio-rustls = { version = "0.26", default-features = false, features = [
     "ring",
     "tls12",
-] }
-tokio = { version = "1", features = [
-    "rt-multi-thread",
+], optional = true }
+tokio = { version = "1", default-features = false, features = [
+    "rt",
     "macros",
     "time",
     "sync",
-    "net",
     "io-util",
 ] }
-tokio-serial = "5.4"
+tokio-serial = { version = "5.4", optional = true }
 tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "connect",
     "handshake",
     "rustls-tls-webpki-roots",
-] }
-uuid = { version = "1", features = ["v4"] }
+], optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
 
 [lib]
 name = "raydriver"
