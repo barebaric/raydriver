@@ -73,7 +73,7 @@ where
 /// The Bluetooth SIG Serial Port Profile service UUID.
 pub const SPP_UUID: &str = "00001101-0000-1000-8000-00805f9b34fb";
 
-/// A paired device that can be offered for a Bluetooth GRBL connection.
+/// A paired device that can be offered for a Bluetooth SPP connection.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BluetoothDeviceInfo {
     pub address: String,

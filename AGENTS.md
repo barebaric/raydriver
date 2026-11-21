@@ -59,19 +59,26 @@ The crate is split into layers that depend only downward:
 
 ```
 core (transports, value types, dialects, session primitives)
-  →  grbl | smoothie | marlin (protocol sessions)
+  →  grbl | smoothie | marlin | esp3d | octoprint | xtool  (protocol sessions)
   →  python (PyO3 bindings)
 ```
 
 - `src/core/` is protocol-neutral and pure Rust: byte transports,
-  device value types, dialect command-template formatting, and the
-  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives.
-- `src/grbl/`, `src/smoothie/`, `src/marlin/` hold the protocol
+  device value types, dialect command-template formatting, the
+  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives,
+  the shared ping-pong line-session skeleton (`core::line_session`),
+  and the transport-level discovery scanners. Protocol knowledge
+  does not live here: the remote daemon's protocol table and device
+  fingerprints are supplied by the embedder (`core::remote::registry::Registry`).
+- `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
+  `src/octoprint/`, `src/xtool/` (with `m2`) hold the protocol
   sessions; they must not depend on PyO3 or any Python types. They
   may use `src/core/` freely. Cross-protocol imports between
   protocol modules need an explicit justification in the importing
-  module's docs (e.g. the Smoothie session reuses the GRBL status
-  parser because Smoothie emits Grbl-style reports).
+  module's `mod.rs` docs (e.g. the Smoothie session reuses the GRBL
+  parser and error tables because Smoothie emits Grbl-style
+  reports; esp3d is a transport that the Python binding wires to the
+  GRBL session).
 - `src/python/` contains all PyO3 bindings and may use `src/core/`
   and the protocol modules freely, never the other way around.
 
@@ -96,9 +103,18 @@ def __getattr__(name):
     return getattr(_raydriver.grbl, name)
 ```
 
-Rust submodules registered with `add_submodule` are intentionally NOT
+Sanctioned exceptions: `python/raydriver/esp3d/__init__.py` re-exports
+the GRBL session as `Esp3dSession` (ESP3D is a transport, not a
+separate protocol), and `python/raydriver/remote/__init__.py` binds
+its submodule attributes eagerly.
+
+Rust *parent* modules (`grbl`, `core`, ...) are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
-name is the package.
+name is the package. Rust *leaf* submodules (`grbl.probe`,
+`protocols`, `core.discovery.*`, ...) ARE registered via
+`attach_submodule`, so imports like
+`from raydriver.grbl.probe import describe` resolve to the compiled
+module and must not be shadowed by a same-named Python file.
 
 ## Python/Rust Boundary Rules
 
