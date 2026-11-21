@@ -18,19 +18,25 @@
 //! Positions are reported in device units, unconverted; unit
 //! conversion stays with the caller (see
 //! [`parser::detect_unit_system_from_m149`]).
+//!
+//! The ping-pong mechanics (pending acknowledgements, connection
+//! loop, job streaming, cancel, safety shutdown) are shared with the
+//! other line sessions via [`core::line_session`]; this module only
+//! holds the Marlin-specific dispatch, the wire-ordered FIFO
+//! pending queue and the M114 position polling.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 use std::time::Duration;
 
-use std::collections::VecDeque;
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
+use async_trait::async_trait;
 
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
-use crate::core::transport::{Transport, TransportKind};
+use crate::core::line_session::{
+    cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+};
+use crate::core::session::{secs, AsyncEvent, SessionError, SessionEvents};
+use crate::core::transport::TransportKind;
 use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
@@ -65,59 +71,17 @@ impl MarlinConfig {
             connect_settle: 1.0,
         }
     }
-
-    fn secs(v: f64) -> Duration {
-        Duration::from_secs_f64(v.max(0.0))
-    }
-}
-
-/// One sent command awaiting its acknowledgement.
-struct PendingCmd {
-    lines: Mutex<Vec<String>>,
-    finished: AsyncEvent,
-}
-
-impl PendingCmd {
-    fn new() -> Self {
-        Self {
-            lines: Mutex::new(Vec::new()),
-            finished: AsyncEvent::new(),
-        }
-    }
-
-    fn add_line(&self, line: &str) {
-        self.lines.lock().unwrap().push(line.to_string());
-    }
-
-    fn finish(&self) {
-        self.finished.set();
-    }
-
-    fn lines(&self) -> Vec<String> {
-        self.lines.lock().unwrap().clone()
-    }
 }
 
 /// The Marlin session: connection lifecycle, M114 position polling
 /// and ping-pong command exchange.
 pub struct MarlinCore {
+    base: LineSessionBase,
     config: MarlinConfig,
-    dialect: RwLock<Dialect>,
-    events: Arc<dyn SessionEvents>,
-    transport: Arc<dyn Transport>,
-    state: Mutex<DeviceState>,
-    keep_running: AtomicBool,
-    job_running: AtomicBool,
-    is_cancelled: AtomicBool,
-    handshake_received: AsyncEvent,
+    /// Set once the device announced itself; commands must not be
+    /// sent before that: the boot banner's trailing ok would
+    /// otherwise resolve a pending command.
     connected: AsyncEvent,
-    line_buffer: Mutex<Vec<u8>>,
-    pending_queue: Mutex<VecDeque<Arc<PendingCmd>>>,
-    job_exception: Mutex<Option<SessionError>>,
-    last_reported_op_index: Mutex<i64>,
-    cmd_lock: tokio::sync::Mutex<()>,
-    connection_task: Mutex<Option<JoinHandle<()>>>,
-    background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl MarlinCore {
@@ -128,23 +92,14 @@ impl MarlinCore {
     ) -> Arc<Self> {
         let transport = config.transport.build();
         Arc::new(Self {
+            base: LineSessionBase::new(
+                dialect,
+                events,
+                transport,
+                PendingStore::queue(),
+            ),
             config,
-            dialect: RwLock::new(dialect),
-            events,
-            transport,
-            state: Mutex::new(DeviceState::default()),
-            keep_running: AtomicBool::new(false),
-            job_running: AtomicBool::new(false),
-            is_cancelled: AtomicBool::new(false),
-            handshake_received: AsyncEvent::new(),
             connected: AsyncEvent::new(),
-            line_buffer: Mutex::new(Vec::new()),
-            pending_queue: Mutex::new(VecDeque::new()),
-            job_exception: Mutex::new(None),
-            last_reported_op_index: Mutex::new(-1),
-            cmd_lock: tokio::sync::Mutex::new(()),
-            connection_task: Mutex::new(None),
-            background_tasks: Mutex::new(Vec::new()),
         })
     }
 
@@ -153,27 +108,19 @@ impl MarlinCore {
     // ---------------------------------------------------------------
 
     pub fn state(&self) -> DeviceState {
-        self.state.lock().unwrap().clone()
+        self.base.state()
     }
 
     pub fn is_job_running(&self) -> bool {
-        self.job_running.load(Ordering::SeqCst)
+        self.base.is_job_running()
     }
 
     pub fn resource_uri(&self) -> Option<String> {
-        self.transport.resource_uri()
+        self.base.resource_uri()
     }
 
     pub fn update_dialect(&self, dialect: Dialect) {
-        *self.dialect.write().unwrap() = dialect;
-    }
-
-    fn dialect(&self) -> Dialect {
-        self.dialect.read().unwrap().clone()
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.is_cancelled.load(Ordering::SeqCst)
+        self.base.update_dialect(dialect);
     }
 
     // ---------------------------------------------------------------
@@ -181,34 +128,11 @@ impl MarlinCore {
     // ---------------------------------------------------------------
 
     pub async fn connect(self: &Arc<Self>) {
-        self.cleanup().await;
-        self.keep_running.store(true, Ordering::SeqCst);
-        let core = self.clone();
-        let task = tokio::spawn(async move { core.connection_loop().await });
-        *self.connection_task.lock().unwrap() = Some(task);
+        LineSessionBase::connect(self).await;
     }
 
     pub async fn cleanup(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        self.resolve_pending();
-        self.abort_background_tasks().await;
-        self.transport.close().await;
-        self.update_connection_status(TransportStatus::Disconnected, None);
-    }
-
-    async fn abort_background_tasks(&self) {
-        let connection = self.connection_task.lock().unwrap().take();
-        if let Some(task) = connection {
-            task.abort();
-            let _ = task.await;
-        }
-        let tasks: Vec<_> =
-            self.background_tasks.lock().unwrap().drain(..).collect();
-        for task in tasks {
-            task.abort();
-            let _ = task.await;
-        }
+        self.base.cleanup().await;
     }
 
     /// Abort every background task without awaiting, for use from
@@ -217,100 +141,21 @@ impl MarlinCore {
     /// keep marshaling events onto an event loop that may already be
     /// closed (access violations on Windows).
     pub fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        if let Some(task) = self.connection_task.lock().unwrap().take() {
-            task.abort();
-        }
-        for task in self.background_tasks.lock().unwrap().drain(..) {
-            task.abort();
-        }
+        self.base.abort_background_tasks_now();
     }
 
-    async fn abort_readers(&self) {
-        let tasks: Vec<_> =
-            self.background_tasks.lock().unwrap().drain(..).collect();
-        for task in tasks {
-            task.abort();
-            let _ = task.await;
-        }
-    }
-
-    fn update_connection_status(
-        &self,
-        status: TransportStatus,
-        message: Option<&str>,
-    ) {
-        self.events.connection_status(status, message);
-    }
-
-    async fn connection_loop(self: Arc<Self>) {
-        while self.keep_running.load(Ordering::SeqCst) {
-            self.handshake_received.clear();
-            let (tx, mut rx) = mpsc::unbounded_channel();
-            if let Err(err) = self.transport.open(tx).await {
-                log::error!("Connection error: {err}");
-                self.update_connection_status(
-                    TransportStatus::Error,
-                    Some(&err.to_string()),
-                );
-            } else {
-                let core = self.clone();
-                let reader = tokio::spawn(async move {
-                    while let Some(data) = rx.recv().await {
-                        core.handle_rx(&data);
-                    }
-                });
-                self.background_tasks.lock().unwrap().push(reader);
-
-                if self.await_handshake().await {
-                    // The device needs a moment after announcing
-                    // itself.
-                    tokio::time::sleep(MarlinConfig::secs(
-                        self.config.connect_settle,
-                    ))
-                    .await;
-                    // Commands must not be sent before the device
-                    // announced itself: the boot banner's trailing ok
-                    // would otherwise resolve a pending command.
-                    self.connected.set();
-                    self.update_connection_status(
-                        TransportStatus::Connected,
-                        None,
-                    );
-                    self.position_poll_loop().await;
-                } else {
-                    log::warn!(
-                        "Device sent no output. Port may be a phantom \
-                         COM port without a connected device."
-                    );
-                    self.update_connection_status(
-                        TransportStatus::Error,
-                        Some("No response from device"),
-                    );
-                }
-
-                self.abort_readers().await;
-                self.transport.close().await;
-                self.line_buffer.lock().unwrap().clear();
-            }
-
-            if !self.keep_running.load(Ordering::SeqCst) {
-                break;
-            }
-            self.update_connection_status(TransportStatus::Sleeping, None);
-            tokio::time::sleep(MarlinConfig::secs(self.config.reconnect_delay))
-                .await;
-        }
-    }
+    // ---------------------------------------------------------------
+    // Handshake / polling
+    // ---------------------------------------------------------------
 
     /// Wait for the device to announce itself.  Booting devices
     /// speak unprompted — with `start`, a banner or an ack — so
     /// this simply waits for the first output line.
     async fn await_handshake(&self) -> bool {
-        let deadline = tokio::time::Instant::now()
-            + MarlinConfig::secs(self.config.handshake_timeout);
+        let deadline =
+            tokio::time::Instant::now() + secs(self.config.handshake_timeout);
         tokio::select! {
-            _ = self.handshake_received.wait() => true,
+            _ = self.base.handshake_received.wait() => true,
             _ = tokio::time::sleep_until(deadline) => false,
         }
     }
@@ -320,17 +165,14 @@ impl MarlinCore {
             // Poll on an interval, counting from the connection: a
             // freshly booted device gets a moment before the first
             // M114.
-            tokio::time::sleep(MarlinConfig::secs(
-                self.config.status_poll_interval,
-            ))
-            .await;
-            if !self.transport.is_open()
-                || !self.keep_running.load(Ordering::SeqCst)
+            tokio::time::sleep(secs(self.config.status_poll_interval)).await;
+            if !self.base.transport.is_open()
+                || !self.base.keep_running.load(Ordering::SeqCst)
             {
                 break;
             }
             if self.config.poll_status_while_running
-                || !self.job_running.load(Ordering::SeqCst)
+                || !self.base.job_running.load(Ordering::SeqCst)
             {
                 // A tracked exchange, not fire-and-forget: M114's ok
                 // must not resolve a later command's pending
@@ -349,49 +191,6 @@ impl MarlinCore {
     // RX handling
     // ---------------------------------------------------------------
 
-    fn handle_rx(&self, data: &[u8]) {
-        let mut new_lines = Vec::new();
-        {
-            let mut buffer = self.line_buffer.lock().unwrap();
-            buffer.extend_from_slice(data);
-            while let Some(nl) = buffer.iter().position(|b| *b == b'\n') {
-                let line_bytes: Vec<u8> = buffer.drain(..=nl).collect();
-                if let Ok(text) = String::from_utf8(line_bytes) {
-                    for line in text.trim().lines() {
-                        if !line.is_empty() {
-                            new_lines.push(line.to_string());
-                        }
-                    }
-                }
-            }
-        }
-        for line in new_lines {
-            self.handle_line(&line);
-        }
-    }
-
-    fn handle_line(&self, line: &str) {
-        self.maybe_announce_handshake(line);
-        if parser::is_ok(line) {
-            self.events.raw_rx(line);
-            self.finish_pending(Some(line));
-            return;
-        }
-        if parser::is_error(line) {
-            self.events.raw_rx(line);
-            self.handle_error_line(line);
-            return;
-        }
-        if parser::is_m114_position(line) {
-            self.events.raw_rx(line);
-            self.handle_position_report(line);
-            self.collect_for_pending(line);
-            return;
-        }
-        self.events.raw_rx(line);
-        self.collect_for_pending(line);
-    }
-
     /// Accepts the first device output as the handshake.  The
     /// session transmits nothing until the handshake resolves, so
     /// any complete line here is unprompted device output: proof of
@@ -400,53 +199,19 @@ impl MarlinCore {
     /// with bare `ok`; requiring the exact line locked those out.
     /// Only a fully silent port is a phantom.
     fn maybe_announce_handshake(&self, line: &str) {
-        if self.handshake_received.is_set() {
+        if self.base.handshake_received.is_set() {
             return;
         }
         if line.trim() != "start" {
             log::debug!("Handshake satisfied by unsolicited output: {line:?}");
         }
-        self.handshake_received.set();
-    }
-
-    fn collect_for_pending(&self, line: &str) {
-        let front = self.pending_queue.lock().unwrap().front().cloned();
-        if let Some(pending) = front {
-            if !pending.finished.is_set() {
-                pending.add_line(line);
-            }
-        }
-    }
-
-    /// Finish the front pending command (responses are wire-ordered,
-    /// so the oldest outstanding command owns the next
-    /// acknowledgement), optionally collecting one final response
-    /// line first.  The waiter holds its own `Arc` and reads the
-    /// lines from it.
-    fn finish_pending(&self, last_line: Option<&str>) {
-        let front = self.pending_queue.lock().unwrap().front().cloned();
-        if let Some(pending) = front {
-            if !pending.finished.is_set() {
-                if let Some(line) = last_line {
-                    pending.add_line(line);
-                }
-                pending.finish();
-            }
-        }
-    }
-
-    fn resolve_pending(&self) {
-        let queued: Vec<_> =
-            self.pending_queue.lock().unwrap().drain(..).collect();
-        for pending in queued {
-            pending.finish();
-        }
+        self.base.handshake_received.set();
     }
 
     fn handle_error_line(&self, line: &str) {
         let message = parser::parse_error_message(line);
         let snapshot = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.base.state.lock().unwrap();
             if state.error.is_none() {
                 state.error = Some(crate::core::types::DeviceError::new(
                     -1,
@@ -459,13 +224,13 @@ impl MarlinCore {
             }
         };
         if let Some(snapshot) = snapshot {
-            self.events.state_changed(&snapshot);
+            self.base.events.state_changed(&snapshot);
         }
-        self.finish_pending(Some(line));
+        self.base.pending.finish_next(Some(line));
 
-        if self.job_running.load(Ordering::SeqCst) {
+        if self.base.is_job_running() {
             log::error!("Device error during job: {line}. Halting stream.");
-            *self.job_exception.lock().unwrap() =
+            *self.base.job_exception.lock().unwrap() =
                 Some(SessionError::Device(format!("Device error: {line}")));
         }
     }
@@ -475,7 +240,7 @@ impl MarlinCore {
             return;
         };
         let snapshot = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.base.state.lock().unwrap();
             state.machine_pos = vec![Some(x), Some(y), Some(z)];
             state.work_pos = vec![Some(x), Some(y), Some(z)];
             if state.status == DeviceStatus::Unknown {
@@ -484,46 +249,13 @@ impl MarlinCore {
             Some(state.clone())
         };
         if let Some(snapshot) = snapshot {
-            self.events.state_changed(&snapshot);
+            self.base.events.state_changed(&snapshot);
         }
     }
 
     // ---------------------------------------------------------------
     // Command exchange
     // ---------------------------------------------------------------
-
-    /// Send one command and wait for its `ok`/`error:`
-    /// acknowledgement.  Returns the collected response lines; an
-    /// `error:` response is the last line.
-    async fn ping_pong(
-        &self,
-        command: &str,
-    ) -> Result<Vec<String>, SessionError> {
-        if !self.connected.is_set() {
-            // Wait out the handshake: sending earlier would let the
-            // boot banner's trailing ok resolve this command.
-            let wait_deadline = tokio::time::Instant::now()
-                + MarlinConfig::secs(
-                    self.config.handshake_timeout
-                        + self.config.connect_settle
-                        + 2.0,
-                );
-            if tokio::time::timeout_at(wait_deadline, self.connected.wait())
-                .await
-                .is_err()
-            {
-                return Err(SessionError::Connection(
-                    "device did not announce itself".to_string(),
-                ));
-            }
-        }
-        if !self.transport.is_open() {
-            return Err(SessionError::Connection(
-                "Serial transport not connected".to_string(),
-            ));
-        }
-        self.enqueue_and_wait(command, true).await
-    }
 
     /// Enqueue *command* and await its acknowledgement.  Outstanding
     /// commands form a FIFO queue matching the device's wire-ordered
@@ -541,211 +273,18 @@ impl MarlinCore {
         serialize: bool,
     ) -> Result<Vec<String>, SessionError> {
         let _guard = if serialize {
-            Some(self.cmd_lock.lock().await)
+            Some(self.base.cmd_lock.lock().await)
         } else {
             None
         };
-        if !self.transport.is_open() {
+        if !self.base.transport.is_open() {
             return Err(SessionError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
-        let pending = Arc::new(PendingCmd::new());
-        self.pending_queue
-            .lock()
-            .unwrap()
-            .push_back(pending.clone());
-        self.events.raw_tx(command);
-        let result = async {
-            self.transport
-                .write(format!("{command}\n").as_bytes())
-                .await?;
-            match tokio::time::timeout(
-                MarlinConfig::secs(self.config.command_timeout),
-                pending.finished.wait(),
-            )
+        self.base
+            .await_ack(command, secs(self.config.command_timeout))
             .await
-            {
-                Ok(()) => Ok(()),
-                Err(_) => Err(SessionError::Timeout),
-            }
-        }
-        .await;
-        // Drop the entry on every path: a late acknowledgement for a
-        // timed out command must not resolve a later one.
-        self.pending_queue
-            .lock()
-            .unwrap()
-            .retain(|p| !Arc::ptr_eq(p, &pending));
-        match result {
-            Ok(()) => Ok(pending.lines()),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Send a command and await its full response.
-    pub async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        if !self.job_running.load(Ordering::SeqCst) {
-            self.is_cancelled.store(false, Ordering::SeqCst);
-        }
-        self.ping_pong(&command).await
-    }
-
-    /// Send a command and await its full response, blocking any
-    /// other command from interleaving (identical to
-    /// [`MarlinCore::execute_command`] — the protocol has no
-    /// separate queue).
-    pub async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        self.execute_command(command).await
-    }
-
-    // ---------------------------------------------------------------
-    // Job streaming
-    // ---------------------------------------------------------------
-
-    fn start_job(&self) {
-        self.is_cancelled.store(false, Ordering::SeqCst);
-        self.job_running.store(true, Ordering::SeqCst);
-        *self.last_reported_op_index.lock().unwrap() = -1;
-        *self.job_exception.lock().unwrap() = None;
-        let state = {
-            let mut state = self.state.lock().unwrap();
-            state.status = DeviceStatus::Run;
-            state.clone()
-        };
-        self.events.state_changed(&state);
-    }
-
-    pub async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
-        self.start_job();
-        let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
-        let total = lines.len();
-        let mut sent = 0usize;
-        let mut interrupted = false;
-        log::debug!("Starting Marlin job with {total} lines.");
-
-        for (line_idx, raw_line) in lines.iter().enumerate() {
-            if self.is_cancelled() {
-                log::info!("Job cancelled. Stopping.");
-                break;
-            }
-
-            let line = raw_line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // Op progress fires when the op index changes, before
-            // the op's first line is sent.
-            if let Some(op_index) = op_map.get(&line_idx).copied() {
-                let mut last = self.last_reported_op_index.lock().unwrap();
-                if op_index != *last {
-                    *last = op_index;
-                    drop(last);
-                    log::debug!("Firing command_done for op {op_index}");
-                    self.events.command_done(op_index);
-                }
-            }
-
-            match self.ping_pong(line).await {
-                Ok(_) => {
-                    if self.job_exception.lock().unwrap().is_some() {
-                        break;
-                    }
-                    sent += 1;
-                }
-                Err(err) => {
-                    log::warn!("Job interrupted: {err:?}");
-                    interrupted = true;
-                    break;
-                }
-            }
-            tokio::task::yield_now().await;
-        }
-
-        let had_exception = self.job_exception.lock().unwrap().take().is_some();
-        let was_cancelled = self.is_cancelled();
-        self.job_running.store(false, Ordering::SeqCst);
-
-        if had_exception || interrupted {
-            self.send_safety_shutdown(true).await;
-        }
-        if !was_cancelled {
-            self.events.job_finished();
-        }
-        log::debug!("Marlin streaming finished ({sent}/{total} lines).");
-    }
-
-    pub async fn run_raw(&self, machine_code: &str) {
-        let lines: Vec<String> = machine_code
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-        if lines.is_empty() {
-            return;
-        }
-        self.run(&lines.join("\n"), HashMap::new()).await;
-    }
-
-    // ---------------------------------------------------------------
-    // Cancel
-    // ---------------------------------------------------------------
-
-    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
-        log::debug!("Cancel command initiated.");
-        let job_was_running = self.job_running.load(Ordering::SeqCst);
-        self.is_cancelled.store(true, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-
-        self.resolve_pending();
-        self.line_buffer.lock().unwrap().clear();
-
-        if !self.transport.is_open() {
-            return Err(SessionError::Connection(
-                "Serial transport not connected".to_string(),
-            ));
-        }
-        log::info!("Sending M410 (Quick Stop) to device.");
-        self.transport.write(b"M410\n").await?;
-
-        self.send_safety_shutdown(emergency).await;
-
-        if job_was_running {
-            self.events.job_finished();
-        }
-        Ok(())
-    }
-
-    /// Best-effort transmission of the dialect's tool-off commands
-    /// so a cancelled or aborted job cannot leave persistent PWM
-    /// outputs energized.  Fire-and-forget: responses are ignored.
-    async fn send_safety_shutdown(&self, emergency: bool) {
-        let dialect = self.dialect();
-        let mut commands = dialect.safety_off_commands.clone();
-        if emergency {
-            if let Some(cmd) = dialect.emergency_stop.clone() {
-                commands.push(cmd);
-            }
-        }
-        for command in commands {
-            if !self.transport.is_open() {
-                break;
-            }
-            if let Err(err) = self
-                .transport
-                .write(format!("{command}\n").as_bytes())
-                .await
-            {
-                log::warn!("Safety command '{command}' failed: {err}");
-            }
-        }
     }
 
     // ---------------------------------------------------------------
@@ -756,7 +295,7 @@ impl MarlinCore {
         &self,
         axes: Option<Vec<String>>,
     ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
+        let dialect = self.base.dialect();
         match axes {
             None => {
                 self.execute_command(dialect.home_all.clone()).await?;
@@ -772,120 +311,18 @@ impl MarlinCore {
                 }
             }
         }
-        let snapshot = {
-            let mut state = self.state.lock().unwrap();
-            state.error = None;
-            state.clone()
-        };
-        self.events.state_changed(&snapshot);
-        Ok(())
-    }
-
-    pub async fn move_to(
-        &self,
-        speed: f64,
-        pos_x: f64,
-        pos_y: f64,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.move_to,
-            &[
-                ("speed", Arg::Speed(speed)),
-                ("x", Arg::Length(pos_x)),
-                ("y", Arg::Length(pos_y)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn jog(
-        &self,
-        speed: f64,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let head =
-            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-                .map_err(SessionError::Other)?;
-        let mut cmd_parts = vec![head];
-        for (axis_name, distance) in deltas {
-            cmd_parts.push(format!(
-                "{}{}",
-                axis_name.to_uppercase(),
-                crate::core::dialect::python_float_repr(*distance)
-            ));
-        }
-        if cmd_parts.len() == 1 {
-            return Ok(());
-        }
-        let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn select_tool(
-        &self,
-        tool_number: i64,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.tool_change,
-            &[("tool_number", Arg::Int(tool_number))],
-        )
-        .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
+        self.base.clear_device_error();
         Ok(())
     }
 
     pub async fn clear_alarm(&self) -> Result<(), SessionError> {
-        let dialect = self.dialect();
+        let dialect = self.base.dialect();
         let response =
             self.execute_command(dialect.clear_alarm.clone()).await?;
         let has_error = response.iter().any(|line| parser::is_error(line));
         if !has_error {
-            let snapshot = {
-                let mut state = self.state.lock().unwrap();
-                state.error = None;
-                state.clone()
-            };
-            self.events.state_changed(&snapshot);
+            self.base.clear_device_error();
         }
-        Ok(())
-    }
-
-    pub async fn set_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => {
-                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
-            }
-            _ => dialect.laser_off.clone(),
-        };
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn set_focus_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => format_template(
-                &dialect.focus_laser_on,
-                &[("power", Arg::Length(p))],
-            )
-            .map_err(SessionError::Other)?,
-            _ => dialect.laser_off.clone(),
-        };
-        self.execute_command(cmd).await?;
         Ok(())
     }
 
@@ -900,7 +337,7 @@ impl MarlinCore {
             .ok_or_else(|| {
                 SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
             })?;
-        let dialect = self.dialect();
+        let dialect = self.base.dialect();
         let cmd = dialect.format_wcs_offset(p_num, x, y, z);
         self.execute_command(cmd).await?;
         Ok(())
@@ -918,5 +355,126 @@ impl MarlinCore {
                 }
             };
         Ok(parser::detect_unit_system_from_m149(&lines))
+    }
+}
+
+#[async_trait]
+impl PingPongSession for MarlinCore {
+    fn base(&self) -> &LineSessionBase {
+        &self.base
+    }
+
+    fn handle_line(&self, line: &str) {
+        self.maybe_announce_handshake(line);
+        if parser::is_ok(line) {
+            self.base.events.raw_rx(line);
+            self.base.pending.finish_next(Some(line));
+            return;
+        }
+        if parser::is_error(line) {
+            self.base.events.raw_rx(line);
+            self.handle_error_line(line);
+            return;
+        }
+        if parser::is_m114_position(line) {
+            self.base.events.raw_rx(line);
+            self.handle_position_report(line);
+            self.base.pending.collect(line);
+            return;
+        }
+        self.base.events.raw_rx(line);
+        self.base.pending.collect(line);
+    }
+
+    async fn handshake(&self) -> bool {
+        self.await_handshake().await
+    }
+
+    async fn on_established(&self) {
+        // The device needs a moment after announcing itself.
+        tokio::time::sleep(secs(self.config.connect_settle)).await;
+        // Commands must not be sent before the device announced
+        // itself: the boot banner's trailing ok would otherwise
+        // resolve a pending command.
+        self.connected.set();
+        self.base
+            .connection_status(TransportStatus::Connected, None);
+    }
+
+    fn on_handshake_failed(&self) {
+        log::warn!(
+            "Device sent no output. Port may be a phantom COM port \
+             without a connected device."
+        );
+        self.base.connection_status(
+            TransportStatus::Error,
+            Some("No response from device"),
+        );
+    }
+
+    async fn poll_loop(&self) {
+        self.position_poll_loop().await;
+    }
+
+    async fn ping_pong(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        if !self.connected.is_set() {
+            // Wait out the handshake: sending earlier would let the
+            // boot banner's trailing ok resolve this command.
+            let wait_deadline = tokio::time::Instant::now()
+                + secs(
+                    self.config.handshake_timeout
+                        + self.config.connect_settle
+                        + 2.0,
+                );
+            if tokio::time::timeout_at(wait_deadline, self.connected.wait())
+                .await
+                .is_err()
+            {
+                return Err(SessionError::Connection(
+                    "device did not announce itself".to_string(),
+                ));
+            }
+        }
+        if !self.base.transport.is_open() {
+            return Err(SessionError::Connection(
+                "Serial transport not connected".to_string(),
+            ));
+        }
+        self.enqueue_and_wait(command, true).await
+    }
+
+    fn job_log_label(&self) -> &'static str {
+        "Marlin"
+    }
+
+    fn stop_job_on_alarm(&self) -> bool {
+        false
+    }
+
+    fn safety_shutdown_delay(&self) -> Option<Duration> {
+        None
+    }
+
+    fn reconnect_delay(&self) -> Duration {
+        secs(self.config.reconnect_delay)
+    }
+}
+
+/// Abort a running job by sending `M410` (Quick Stop).
+impl MarlinCore {
+    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
+        cancel(
+            self,
+            emergency,
+            StopCommand {
+                bytes: b"M410\n",
+                log: "Sending M410 (Quick Stop) to device.",
+            },
+            "Serial transport not connected",
+        )
+        .await
     }
 }
