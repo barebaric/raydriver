@@ -9,9 +9,10 @@
 //! are one-way notification channels.
 //!
 //! The codec is generic over the byte stream ([`WsStream`]); the
-//! plain-TCP instantiation is [`WsClient`].  An embedder on a
-//! platform without TCP sockets (e.g. wasm) can drive the same codec
-//! over any `AsyncRead + AsyncWrite` stream it provides.
+//! dialing goes through [`crate::core::connector::dial`], so the
+//! client ([`WsClient`]) and every session built on it compile and
+//! run on all targets, including wasm — native hosts dial plain TCP,
+//! embedders without TCP sockets install a connector.
 
 use std::time::Duration;
 
@@ -19,8 +20,8 @@ use tokio::io::{
     AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf,
     WriteHalf,
 };
-use tokio::net::TcpStream;
 
+use crate::core::connector::DynStream;
 use crate::core::session::SessionError;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -48,8 +49,9 @@ pub struct WsStream<S> {
     writer: WriteHalf<S>,
 }
 
-/// The plain-TCP WebSocket client used by the device sessions.
-pub type WsClient = WsStream<TcpStream>;
+/// The WebSocket client used by the device sessions (dialed through
+/// the [`crate::core::connector`] seam).
+pub type WsClient = WsStream<DynStream>;
 
 impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
     /// Send a text message to the server.
@@ -134,9 +136,9 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
     }
 }
 
-impl WsStream<TcpStream> {
-    /// Open the TCP connection, perform the RFC 6455 handshake and
-    /// return the established client.
+impl WsStream<DynStream> {
+    /// Dial through the connector seam, perform the RFC 6455
+    /// handshake and return the established client.
     pub async fn connect(
         host: &str,
         port: u16,
@@ -156,7 +158,7 @@ impl WsStream<TcpStream> {
         timeout: Duration,
     ) -> Result<Self, SessionError> {
         tokio::time::timeout(timeout, async {
-            let stream = TcpStream::connect((host, port))
+            let stream = crate::core::connector::dial(host, port)
                 .await
                 .map_err(|e| WsError(e.to_string()))?;
             handshake(stream, host, port, path, origin)

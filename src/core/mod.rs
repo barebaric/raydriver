@@ -7,18 +7,20 @@
 //! build their sessions on top of this layer.
 //!
 //! Host-dependent pieces are feature-gated so a wasm build can omit
-//! them entirely: `http`/`ws` and `remote` behind `net` (plus the
-//! `mdns`/`remote-daemon` subpieces), leaving the pure value types,
-//! dialects, session primitives and transport registry.
+//! what a browser physically cannot do (`mdns`, the remote daemon
+//! listener, the remote client): those live behind `mdns`/`net`/
+//! `remote-daemon`.  The HTTP/WS clients, the telnet transport and
+//! the connector seam compile everywhere — on hosts without TCP
+//! sockets the embedder installs a stream connector and the same
+//! code runs against browser-provided streams (see docs/wasm.md).
 
+pub mod connector;
 pub mod dialect;
 pub mod discovery;
-#[cfg(feature = "net")]
 pub mod http;
 #[cfg(any(feature = "net", feature = "mdns"))]
 pub mod remote;
 pub mod session;
 pub mod transport;
 pub mod types;
-#[cfg(feature = "net")]
 pub mod ws;

@@ -1,9 +1,12 @@
 //! Byte transports for talking to Grbl devices.
 //!
-//! Platform- or feature-dependent transports keep their canonical
-//! module path in every build: without the `serial`/`net` features
-//! the `serial`/`telnet` modules compile as stubs whose operations
-//! fail at runtime, so [`TransportKind::build`] stays intact.
+//! Platform-dependent transports keep their canonical module path in
+//! every build: without the `serial` feature the `serial` module
+//! compiles as a stub whose operations fail at runtime, so
+//! [`TransportKind::build`] stays intact.  The telnet transport
+//! dials through [`crate::core::connector::dial`] and therefore runs
+//! on every target; bluetooth is platform-gated with an `unsupported`
+//! backend elsewhere.
 
 pub mod bluetooth;
 pub mod mock;
@@ -14,10 +17,6 @@ pub mod serial;
 #[path = "serial_unsupported.rs"]
 pub mod serial;
 
-#[cfg(feature = "net")]
-pub mod telnet;
-#[cfg(not(feature = "net"))]
-#[path = "telnet_unsupported.rs"]
 pub mod telnet;
 
 use std::sync::Arc;

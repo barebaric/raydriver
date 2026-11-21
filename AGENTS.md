@@ -121,22 +121,32 @@ subset used for interactive commands. Formatting supports the Python
 
 ## Build Features and WASM
 
-The crate compiles for hosts *and* for `wasm32-unknown-unknown`. Cargo
-features slice out everything a browser has no backing for; verify
-with `make check-wasm`.
+The crate compiles for hosts *and* for `wasm32-unknown-unknown` —
+and wasm keeps everything a browser can plausibly drive: session
+logic, the HTTP/WS clients, the telnet transport and the
+esp3d/octoprint/xtool sessions all run there, with dialing going
+through the injectable `core::connector` seam (see docs/wasm.md).
+Cargo features exist only for what a browser physically cannot do;
+verify with `make check-wasm`.
 
-| Feature | Gates | Notes |
+| Feature | Gates | Why it cannot run on wasm |
 |---|---|---|
-| `net` | `core::http`, `core::ws`, telnet transport, `discovery::{daemon,probe,subnet}`, `remote::{client,inspect}`, `esp3d`, `octoprint`, `xtool` | TCP/IP client networking; implies tokio `net` |
-| `mdns` | `discovery::mdns`, `remote::mdns` | UDP + OS threads |
-| `serial` | tokio-serial transport impl | Port *enumeration* (`serialport`) stays available without it |
-| `remote-daemon` | `remote::daemon` | Host-side TCP/TLS server; implies `net` |
+| `net` | `discovery::{daemon,probe,subnet}`, `remote::{client,inspect}` | raw TCP/UDP sockets (device-facing dialing is deliberately **not** gated — it uses the connector seam) |
+| `mdns` | `discovery::mdns`, `remote::mdns` | UDP multicast + OS threads |
+| `serial` | tokio-serial transport impl | OS file descriptors (Web Serial replaces it; port *enumeration* via `serialport` stays available without the feature) |
+| `remote-daemon` | `remote::daemon` | TCP listener, TLS certs from the filesystem; implies `net` |
+| `m2` | `xtool::m2` | tokio-tungstenite has no wasm build; implies `net` |
 | `python` | `src/python/` | Implies all desktop features + tokio `rt-multi-thread` |
 
 Rules:
 
-- `default = ["net", "mdns", "serial", "remote-daemon"]`; a wasm build
-  is `--no-default-features` with **no** features.
+- `default = ["net", "mdns", "serial", "remote-daemon", "m2"]`; a
+  wasm build is `--no-default-features` with **no** features.
+- Device-facing network code (HTTP/WS clients, telnet transport,
+  esp3d/octoprint/xtool sessions) dials through
+  `core::connector::dial` and must compile unconditionally; on hosts
+  without TCP sockets the embedder installs a `StreamConnector`.
+  Never reintroduce `tokio::net::TcpStream` there.
 - Feature-gated transports keep their canonical module path in every
   build (`#[path = "..._unsupported.rs"]` stubs fail at runtime), so
   `TransportKind::build` needs no cfg arms.
@@ -145,6 +155,5 @@ Rules:
   `getrandom`) — all forbidden without a cfg gate and an
   `unsupported` fallback (see `transport/bluetooth/` for the
   pattern: platform-gated backends + `is_supported()`).
-- New host-only code goes behind one of the features above; pure
-  value types, dialects, session primitives and the line-based
-  protocol sessions (`grbl`, `smoothie`, `marlin`) compile everywhere.
+- New host-only code goes behind one of the features above;
+  everything else compiles everywhere.

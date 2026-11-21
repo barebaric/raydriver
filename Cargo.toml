@@ -8,13 +8,16 @@ repository = "https://github.com/barebaric/raydriver"
 
 [features]
 # No defaults for embedding: pure-Rust consumers pick the pieces they
-# need (`default-features = false`) — a wasm32-unknown-unknown build
-# runs with no features at all, compiling only the protocol-neutral
-# core, the mock/custom transports and the line-based protocol
-# sessions.  Native desktop consumers get the full feature set via
-# `default`; the Python build enables `python` (see [tool.maturin] in
-# pyproject.toml).
-default = ["net", "mdns", "serial", "remote-daemon"]
+# need (`default-features = false`).  A wasm32-unknown-unknown build
+# runs with no features and still compiles *everything a browser can
+# plausibly drive* — the session logic, the HTTP/WS clients, the
+# telnet transport and the esp3d/octoprint/xtool sessions — with the
+# dialing seam (`core::connector`) producing streams from the
+# platform (see docs/wasm.md).  The features exist for what a browser
+# physically cannot do.  Native desktop consumers get the full set
+# via `default`; the Python build enables `python` (see
+# [tool.maturin] in pyproject.toml).
+default = ["net", "mdns", "serial", "remote-daemon", "m2"]
 python = [
     "dep:pyo3",
     "dep:pyo3-stub-gen",
@@ -27,24 +30,30 @@ python = [
     "mdns",
     "serial",
     "remote-daemon",
+    "m2",
 ]
-# TCP/IP client networking: the HTTP and WebSocket clients, the
-# telnet transport, network discovery (probes, subnet scan, control
-# streams), the remote client, and the network-native protocol
-# sessions (esp3d, octoprint, xtool).
+# Host-side TCP/IP networking that needs real sockets: the network
+# discovery scanners (probes, subnet scan, TLS control streams) and
+# the remote client.  Device-facing HTTP/WS/telnet dialing is NOT
+# gated by this — it goes through the connector seam and compiles
+# everywhere.
 net = [
-    "dep:base64",
-    "dep:futures-util",
     "dep:if-addrs",
     "dep:rustls",
-    "dep:sha1",
     "dep:tokio-rustls",
-    "dep:tokio-tungstenite",
-    "dep:uuid",
     "tokio/net",
 ]
+# The xTool M2 session: its tokio-tungstenite stack has no wasm
+# build.
+m2 = [
+    "net",
+    "dep:futures-util",
+    "dep:rustls",
+    "dep:tokio-tungstenite",
+    "dep:uuid",
+]
 # mDNS announcement and browsing (host-side; no UDP sockets on wasm).
-mdns = ["dep:if-addrs", "dep:mdns-sd", "dep:sha1"]
+mdns = ["dep:if-addrs", "dep:mdns-sd"]
 # OS serial ports (tokio-serial).  Port *enumeration* via the
 # `serialport` crate stays available without this feature.
 serial = ["dep:tokio-serial"]
@@ -55,7 +64,7 @@ remote-daemon = ["net", "dep:uuid"]
 [dependencies]
 
 async-trait = "0.1"
-base64 = { version = "0.22", default-features = false, features = ["std"], optional = true }
+base64 = { version = "0.22", default-features = false, features = ["std"] }
 env_filter = { version = "0.1", optional = true }
 futures-util = { version = "0.3", features = ["sink"], optional = true }
 if-addrs = { version = "0.15", optional = true }
@@ -68,7 +77,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serialport = { version = "4.10", default-features = false }
-sha1 = { version = "0.10", default-features = false, optional = true }
+sha1 = { version = "0.10", default-features = false }
 thiserror = "2"
 tokio-rustls = { version = "0.26", default-features = false, features = [
     "ring",

@@ -19,20 +19,18 @@
 //! Rust and must not depend on PyO3; the optional `python` feature
 //! provides bindings that mirror this structure.
 //!
-//! Build features slice the host-dependent pieces out for embedded
-//! targets: `net` (HTTP/WS/telnet/network sessions), `mdns`,
-//! `serial` and `remote-daemon`.  `wasm32-unknown-unknown` builds
-//! with `--no-default-features` and none of them; see AGENTS.md.
+//! Build features slice out what a wasm host physically cannot do
+//! (`mdns`, the remote daemon listener, the remote client, OS serial
+//! ports, the tungstenite-based M2 session); everything else —
+//! including the HTTP/WS device sessions — compiles and runs on
+//! wasm against embedder-provided streams (see docs/wasm.md).
 
 pub mod core;
-#[cfg(feature = "net")]
 pub mod esp3d;
 pub mod grbl;
 pub mod marlin;
-#[cfg(feature = "net")]
 pub mod octoprint;
 pub mod smoothie;
-#[cfg(feature = "net")]
 pub mod xtool;
 
 #[cfg(feature = "python")]

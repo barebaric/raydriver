@@ -271,10 +271,7 @@ async fn query_inner(
 }
 
 /// A control-protocol stream, plain TCP or TLS.
-pub trait ControlStream: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send> ControlStream for T {}
-
-pub type BoxedStream = Box<dyn ControlStream>;
+pub type BoxedStream = Box<dyn crate::core::connector::ByteStream>;
 
 pub async fn connect_stream(
     host: &str,

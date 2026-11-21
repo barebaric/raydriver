@@ -7,16 +7,16 @@
 //! which keeps the parser simple; both `Content-Length` and
 //! `Transfer-Encoding: chunked` bodies are decoded.
 //!
-//! The exchange is generic over the byte stream
-//! ([`request_on_stream`]); the host/port helpers dial a plain TCP
-//! connection first.  An embedder on a platform without TCP sockets
-//! (e.g. wasm) can run the same exchange over any
-//! `AsyncRead + AsyncWrite` stream it provides.
+//! Dialing goes through [`crate::core::connector::dial`]: on native
+//! hosts a plain TCP connection, or the connector the embedding
+//! application installed — so this module and every session built on
+//! it compile and run on all targets, including wasm.  The exchange
+//! itself is generic over the byte stream
+//! ([`request_on_stream`]).
 
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 use crate::core::session::SessionError;
 
@@ -182,7 +182,7 @@ async fn request(
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
     tokio::time::timeout(timeout, async {
-        let stream = TcpStream::connect((host, port))
+        let stream = crate::core::connector::dial(host, port)
             .await
             .map_err(|e| SessionError::Connection(e.to_string()))?;
         exchange(
