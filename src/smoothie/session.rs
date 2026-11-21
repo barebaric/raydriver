@@ -31,7 +31,9 @@ use crate::core::dialect::{format_template, Arg, Dialect};
 use crate::core::line_session::{
     cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
-use crate::core::session::{secs, SessionError, SessionEvents};
+use crate::core::session::{
+    secs, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::transport::TransportKind;
 use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
 
@@ -492,5 +494,101 @@ impl PingPongSession for SmoothieCore {
 
     fn reconnect_delay(&self) -> Duration {
         secs(self.config.reconnect_delay)
+    }
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for SmoothieCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        SmoothieCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        SmoothieCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        SmoothieCore::run(&self, gcode, op_map.clone()).await;
+        Ok(())
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        SmoothieCore::cancel(self, mode == CancelMode::Immediate).await
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        SmoothieCore::execute_interactive_command(self, command.to_string())
+            .await
+    }
+
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        SmoothieCore::home(self, axes).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SmoothieCore::move_to(self, speed, x, y).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        SmoothieCore::jog(self, speed, deltas).await
+    }
+
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        SmoothieCore::select_tool(self, tool_number).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        SmoothieCore::set_power(self, power).await
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SmoothieCore::set_focus_power(self, power).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        SmoothieCore::set_hold(self, hold).await
+    }
+
+    async fn clear_alarm(&self) -> Result<(), SessionError> {
+        SmoothieCore::clear_alarm(self).await
+    }
+
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SmoothieCore::set_wcs_offset(self, wcs_slot, x, y, z).await
     }
 }

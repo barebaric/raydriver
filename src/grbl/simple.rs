@@ -31,7 +31,9 @@ use crate::core::dialect::{format_template, Arg, Dialect};
 use crate::core::line_session::{
     cancel, LineSessionBase, PendingStore, PingPongSession, StopCommand,
 };
-use crate::core::session::{secs, SessionError, SessionEvents};
+use crate::core::session::{
+    secs, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::transport::TransportKind;
 use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
@@ -633,5 +635,136 @@ impl PingPongSession for SimpleCore {
             return;
         }
         self.run(&gcode.join("\n"), HashMap::new()).await;
+    }
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for SimpleCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        SimpleCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        SimpleCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        SimpleCore::run(&self, gcode, op_map.clone()).await;
+        Ok(())
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        SimpleCore::cancel(self, mode == CancelMode::Immediate).await
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        SimpleCore::execute_interactive_command(self, command.to_string()).await
+    }
+
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        SimpleCore::home(self, axes, active_wcs).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SimpleCore::move_to(self, speed, x, y).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        SimpleCore::jog(self, speed, deltas).await
+    }
+
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        SimpleCore::select_tool(self, tool_number).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        SimpleCore::set_power(self, power).await
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SimpleCore::set_focus_power(self, power).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        SimpleCore::set_hold(self, hold).await
+    }
+
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SimpleCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+    }
+
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        SimpleCore::read_settings(self).await
+    }
+
+    async fn write_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), SessionError> {
+        SimpleCore::write_setting(self, key, value).await
+    }
+
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+        SimpleCore::read_wcs_offsets(self).await
+    }
+
+    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+        SimpleCore::read_parser_state(self).await
+    }
+
+    async fn run_probe_cycle(
+        &self,
+        axis_letter: &str,
+        max_travel: f64,
+        feed_rate: f64,
+    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+        SimpleCore::run_probe_cycle(self, axis_letter, max_travel, feed_rate)
+            .await
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        SimpleCore::detect_unit_system(self).await
     }
 }
