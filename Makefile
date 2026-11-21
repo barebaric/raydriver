@@ -1,4 +1,4 @@
-.PHONY: build dev stubs format format-rust format-python lint lint-rust lint-python test check doc docs install-docs-deps venv
+.PHONY: build dev stubs format format-rust format-python lint lint-rust lint-python test check check-wasm doc docs install-docs-deps venv
 
 build:
 	maturin build --release --out dist
@@ -43,6 +43,14 @@ test:
 	pytest -v
 
 check: lint test
+
+# The wasm target builds with no features at all: only the
+# protocol-neutral core, mock/custom transports and the line-based
+# protocol sessions.  Requires `rustup target add
+# wasm32-unknown-unknown`.
+check-wasm:
+	cargo check --no-default-features
+	cargo check --target wasm32-unknown-unknown --no-default-features
 
 doc docs: install-docs-deps
 	python -m tools.cli all

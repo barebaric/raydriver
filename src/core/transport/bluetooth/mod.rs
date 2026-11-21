@@ -43,6 +43,33 @@ use windows as platform;
 )))]
 use unsupported as platform;
 
+/// Runs a blocking platform call off the async workers.
+///
+/// On native targets this is `spawn_blocking`; on wasm there is no
+/// blocking thread pool (spawning one panics), so the call runs
+/// inline — the only backend reachable there is `unsupported`, whose
+/// calls return errors immediately without blocking.  The `Err`
+/// variant reports the task-level failure (a panicking task on
+/// native); call sites attach their own message prefix.
+#[cfg(not(target_family = "wasm"))]
+async fn run_platform<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_family = "wasm")]
+async fn run_platform<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T,
+{
+    Ok(f())
+}
+
 /// The Bluetooth SIG Serial Port Profile service UUID.
 pub const SPP_UUID: &str = "00001101-0000-1000-8000-00805f9b34fb";
 
@@ -128,7 +155,7 @@ impl Transport for BluetoothTransport {
         let address = self.address.clone();
         let channel = self.channel;
         let open = self.open.clone();
-        let link = tokio::task::spawn_blocking(move || {
+        let link = run_platform(move || {
             platform::connect(&address, channel, tx, open)
         })
         .await
@@ -145,7 +172,7 @@ impl Transport for BluetoothTransport {
     async fn close(&self) {
         self.open.store(false, Ordering::SeqCst);
         if let Some(link) = self.link.lock().await.take() {
-            let _ = tokio::task::spawn_blocking(move || link.close()).await;
+            let _ = run_platform(move || link.close()).await;
         }
     }
 
@@ -157,7 +184,7 @@ impl Transport for BluetoothTransport {
             return Err(TransportError::NotConnected);
         }
         let data = data.to_vec();
-        match tokio::task::spawn_blocking(move || link.write(&data)).await {
+        match run_platform(move || link.write(&data)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
                 self.open.store(false, Ordering::SeqCst);

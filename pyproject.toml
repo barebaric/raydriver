@@ -39,7 +39,8 @@ raydriver = "raydriver.cli.main:main"
 [tool.maturin]
 module-name = "raydriver"
 python-source = "python"
-# The Rust crate has no default features; the Python build opts in.
+# The Rust crate defaults to the full desktop feature set; `python`
+# adds the bindings and implies the desktop features.
 features = ["python"]
 
 [tool.pyo3-stub-gen]

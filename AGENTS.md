@@ -12,6 +12,8 @@
 - `make format-python` — format Python only (ruff handles formatting and import sorting)
 - `make test` — run the full test suite. make sure to "make dev" before you test
 - `make check` — lint + test
+- `make check-wasm` — `cargo check` for the pure-Rust core on the
+  native target and on `wasm32-unknown-unknown` (no features)
 - `make docs` — generate the API reference from the `.pyi` stubs
 - `make build` — build the wheel (release)
 
@@ -116,3 +118,33 @@ Dialects remain data owned by Rayforge. This crate receives resolved
 command templates (a plain dict of format strings) and only needs the
 subset used for interactive commands. Formatting supports the Python
 `str.format` subset `{name}` and `{name:.Nf}`.
+
+## Build Features and WASM
+
+The crate compiles for hosts *and* for `wasm32-unknown-unknown`. Cargo
+features slice out everything a browser has no backing for; verify
+with `make check-wasm`.
+
+| Feature | Gates | Notes |
+|---|---|---|
+| `net` | `core::http`, `core::ws`, telnet transport, `discovery::{daemon,probe,subnet}`, `remote::{client,inspect}`, `esp3d`, `octoprint`, `xtool` | TCP/IP client networking; implies tokio `net` |
+| `mdns` | `discovery::mdns`, `remote::mdns` | UDP + OS threads |
+| `serial` | tokio-serial transport impl | Port *enumeration* (`serialport`) stays available without it |
+| `remote-daemon` | `remote::daemon` | Host-side TCP/TLS server; implies `net` |
+| `python` | `src/python/` | Implies all desktop features + tokio `rt-multi-thread` |
+
+Rules:
+
+- `default = ["net", "mdns", "serial", "remote-daemon"]`; a wasm build
+  is `--no-default-features` with **no** features.
+- Feature-gated transports keep their canonical module path in every
+  build (`#[path = "..._unsupported.rs"]` stubs fail at runtime), so
+  `TransportKind::build` needs no cfg arms.
+- `tokio::net` / `rt-multi-thread` / `spawn_blocking` on the wasm
+  path, or new wasm-hostile dependencies (`mio`, `socket2`,
+  `getrandom`) — all forbidden without a cfg gate and an
+  `unsupported` fallback (see `transport/bluetooth/` for the
+  pattern: platform-gated backends + `is_supported()`).
+- New host-only code goes behind one of the features above; pure
+  value types, dialects, session primitives and the line-based
+  protocol sessions (`grbl`, `smoothie`, `marlin`) compile everywhere.
