@@ -13,11 +13,14 @@ use tokio::task::JoinHandle;
 
 use crate::core::dialect::Dialect;
 use crate::core::http;
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
 use crate::core::ws::WsClient;
+use async_trait::async_trait;
 
 /// Default HTTP (API) port of xTool machines.
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
@@ -994,4 +997,89 @@ fn format_power(template: &str, power: f64) -> String {
     let args = [("power", crate::core::dialect::Arg::Length(power))];
     crate::core::dialect::format_template(template, &args)
         .unwrap_or_else(|_| template.to_string())
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for XtoolCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        XtoolCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        XtoolCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        _op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        // The firmware reports progress via notifications; op
+        // indices are not addressable on this protocol.
+        XtoolCore::run(&self, gcode).await
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        // The native cancel reports failures through the command
+        // status, not the return value.
+        XtoolCore::cancel(&self, mode == CancelMode::Immediate).await;
+        Ok(())
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        XtoolCore::execute_interactive_command(self, command.to_string()).await
+    }
+
+    async fn home(
+        &self,
+        _axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        XtoolCore::home(self).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        XtoolCore::move_to(self, x, y, z, Some(speed)).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        XtoolCore::jog(self, speed, deltas.to_vec()).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        XtoolCore::set_hold(self, hold).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        // The native set_power reports failures through the command
+        // status, not the return value.
+        XtoolCore::set_power(self, power).await;
+        Ok(())
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        XtoolCore::set_focus_power(self, power).await;
+        Ok(())
+    }
 }

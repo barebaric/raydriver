@@ -15,11 +15,14 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::transport::{Transport, TransportKind};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
+use async_trait::async_trait;
 
 use super::flow::FlowControl;
 use super::flow::GrblResponseType;
@@ -2132,5 +2135,138 @@ impl SessionCore {
         self.report_in_inches
             .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
         Ok(parser::detect_unit_system_from_settings(&lines))
+    }
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for SessionCore {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        SessionCore::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        SessionCore::cleanup(self).await;
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        SessionCore::run(&self, gcode, op_map.clone(), op_estimates.to_vec())
+            .await;
+        Ok(())
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        SessionCore::cancel(self, mode == CancelMode::Immediate).await
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        SessionCore::execute_interactive_command(self, command.to_string())
+            .await
+    }
+
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        SessionCore::home(self, axes, active_wcs).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SessionCore::move_to(self, speed, x, y).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        SessionCore::jog(self, speed, deltas).await
+    }
+
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        SessionCore::select_tool(self, tool_number).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        SessionCore::set_power(self, power).await
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SessionCore::set_focus_power(self, power).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        SessionCore::set_hold(self, hold).await
+    }
+
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        SessionCore::set_wcs_offset(self, wcs_slot, x, y, z).await
+    }
+
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        SessionCore::read_settings(self).await
+    }
+
+    async fn write_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), SessionError> {
+        SessionCore::write_setting(self, key, value).await
+    }
+
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+        SessionCore::read_wcs_offsets(self).await
+    }
+
+    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+        SessionCore::read_parser_state(self).await
+    }
+
+    async fn run_probe_cycle(
+        &self,
+        axis_letter: &str,
+        max_travel: f64,
+        feed_rate: f64,
+    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+        SessionCore::run_probe_cycle(self, axis_letter, max_travel, feed_rate)
+            .await
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        SessionCore::detect_unit_system(self).await
     }
 }

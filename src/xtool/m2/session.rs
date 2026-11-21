@@ -3,6 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use async_trait::async_trait;
+
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{
     HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier,
@@ -22,7 +24,9 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
@@ -937,4 +941,69 @@ fn apply_mode(
         state.clone()
     };
     events.state_changed(&state);
+}
+
+/// The typed uniform session surface (see
+/// [`core::session::Session`]): adapts the protocol-native methods,
+/// which remain the behavior source.
+#[async_trait]
+impl Session for M2Core {
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        M2Core::connect(&self).await;
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        M2Core::disconnect(self).await;
+    }
+
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+        // The machine API has no emergency variant.
+        M2Core::cancel(self).await
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        M2Core::set_hold(self, hold).await
+    }
+
+    async fn home(
+        &self,
+        _axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        M2Core::home(self).await
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        M2Core::move_to(self, x, y, speed).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        let mut dz = 0.0;
+        for (axis, distance) in deltas {
+            match axis.to_ascii_uppercase().as_str() {
+                "X" => dx = *distance,
+                "Y" => dy = *distance,
+                "Z" => dz = *distance,
+                other => {
+                    return Err(crate::core::session::unsupported(&format!(
+                        "jog axis {other}"
+                    )));
+                }
+            }
+        }
+        M2Core::jog(self, dx, dy, dz, speed).await
+    }
 }
