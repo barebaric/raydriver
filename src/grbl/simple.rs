@@ -113,6 +113,70 @@ impl SimpleCore {
     }
 
     // ---------------------------------------------------------------
+    // Shared ping-pong surface (delegates to the trait mechanics)
+    // ---------------------------------------------------------------
+
+    pub async fn execute_command(
+        &self,
+        command: String,
+    ) -> Result<Vec<String>, SessionError> {
+        PingPongSession::execute_command(self, command).await
+    }
+
+    pub async fn execute_interactive_command(
+        &self,
+        command: String,
+    ) -> Result<Vec<String>, SessionError> {
+        PingPongSession::execute_interactive_command(self, command).await
+    }
+
+    pub async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
+        PingPongSession::run(self, gcode, op_map).await;
+    }
+
+    pub async fn run_raw(&self, machine_code: &str) {
+        PingPongSession::run_raw(self, machine_code).await;
+    }
+
+    pub async fn move_to(
+        &self,
+        speed: f64,
+        pos_x: f64,
+        pos_y: f64,
+    ) -> Result<(), SessionError> {
+        PingPongSession::move_to(self, speed, pos_x, pos_y).await
+    }
+
+    pub async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        PingPongSession::jog(self, speed, deltas).await
+    }
+
+    pub async fn select_tool(
+        &self,
+        tool_number: i64,
+    ) -> Result<(), SessionError> {
+        PingPongSession::select_tool(self, tool_number).await
+    }
+
+    pub async fn set_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        PingPongSession::set_power(self, power).await
+    }
+
+    pub async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        PingPongSession::set_focus_power(self, power).await
+    }
+
+    // ---------------------------------------------------------------
     // Connect / disconnect
     // ---------------------------------------------------------------
 

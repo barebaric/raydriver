@@ -117,6 +117,39 @@ pub(crate) fn address_octets(address: &str) -> Result<[u8; 6], String> {
     Ok(octets)
 }
 
+/// The RFCOMM receive loop shared by the raw-socket platform
+/// backends.
+///
+/// *read* performs one blocking socket read — the unsafe FFI stays
+/// at the backend, this loop only owns the byte-chunking, error and
+/// shutdown semantics.  Returns bytes read (> 0), 0 on EOF, negative
+/// on error (mapped through `std::io::Error::last_os_error`).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn rfcomm_reader_loop(
+    mut read: impl FnMut(&mut [u8]) -> isize,
+    tx: &mpsc::UnboundedSender<Vec<u8>>,
+    open: &AtomicBool,
+) {
+    let mut buf = [0u8; 1024];
+    loop {
+        let n = read(&mut buf);
+        if n > 0 {
+            if tx.send(buf[..n as usize].to_vec()).is_err() {
+                break;
+            }
+        } else if n == 0 {
+            break;
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                log::debug!("Bluetooth RFCOMM read error: {err}");
+                break;
+            }
+        }
+    }
+    open.store(false, Ordering::SeqCst);
+}
+
 /// A live RFCOMM link.  Platform implementations own any reader or
 /// run-loop thread and stop it from [`Link::close`].
 pub(crate) trait Link: Send + Sync {

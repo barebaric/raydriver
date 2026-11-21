@@ -19,6 +19,9 @@ pub mod serial;
 
 pub mod telnet;
 
+#[cfg(any(feature = "serial", feature = "net"))]
+pub(crate) mod stream_base;
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
