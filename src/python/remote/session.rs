@@ -14,6 +14,7 @@ use crate::core::remote::protocol::WireEvent;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
+use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 use crate::python::core::json::value_to_py;
 use crate::python::core::types::DeviceState as PyDeviceState;
@@ -196,30 +197,37 @@ impl HostedSession for PySessionAdapter {
         *self.sink.lock().unwrap() = Some(sink);
     }
 
-    async fn connect(&self) -> Result<(), String> {
+    async fn connect(&self) -> Result<(), SessionError> {
         self.call_async("connect", Vec::new(), None)
             .await
             .map(|_| ())
+            .map_err(SessionError::Other)
     }
 
-    async fn disconnect(&self) -> Result<(), String> {
+    async fn disconnect(&self) -> Result<(), SessionError> {
         self.call_async("disconnect", Vec::new(), None)
             .await
             .map(|_| ())
+            .map_err(SessionError::Other)
     }
 
     async fn execute(
         &self,
         method: &str,
         args: Value,
-    ) -> Result<Value, String> {
-        let kwargs = self.config_kwargs(&args)?;
+    ) -> Result<Value, SessionError> {
+        let kwargs = self.config_kwargs(&args).map_err(SessionError::Other)?;
         if method == "update_dialect" {
-            return self.call_sync(method, Some(kwargs));
+            return self
+                .call_sync(method, Some(kwargs))
+                .map_err(SessionError::Other);
         }
-        let result = self.call_async(method, Vec::new(), Some(kwargs)).await?;
+        let result = self
+            .call_async(method, Vec::new(), Some(kwargs))
+            .await
+            .map_err(SessionError::Other)?;
         Python::attach(|py| py_to_json(result.bind(py)))
-            .map_err(|err| err.to_string())
+            .map_err(|err| SessionError::Other(err.to_string()))
     }
 
     async fn run(
@@ -227,13 +235,10 @@ impl HostedSession for PySessionAdapter {
         gcode: String,
         op_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
-    ) -> Result<(), String> {
-        let sink = self
-            .sink
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or_else(|| "session has no event sink".to_string())?;
+    ) -> Result<(), SessionError> {
+        let sink = self.sink.lock().unwrap().clone().ok_or_else(|| {
+            SessionError::Other("session has no event sink".to_string())
+        })?;
         let kwargs = Python::attach(|py| {
             let dict = PyDict::new(py);
             dict.set_item("gcode", gcode)?;
@@ -251,10 +256,11 @@ impl HostedSession for PySessionAdapter {
             dict.set_item("progress_callback", callback)?;
             Ok::<_, PyErr>(dict.unbind().into_any())
         })
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| SessionError::Other(err.to_string()))?;
         self.call_async("run", Vec::new(), Some(kwargs))
             .await
             .map(|_| ())
+            .map_err(SessionError::Other)
     }
 }
 
@@ -304,7 +310,7 @@ impl SessionFactory for PySessionFactory {
         config: Value,
         dialect: Value,
         sink: Arc<dyn RemoteEventSink>,
-    ) -> Result<Arc<dyn HostedSession>, String> {
+    ) -> Result<Arc<dyn HostedSession>, SessionError> {
         Python::attach(|py| {
             let sink_slot = Arc::new(Mutex::new(Some(sink)));
             let callback = Py::new(
@@ -336,6 +342,6 @@ impl SessionFactory for PySessionFactory {
                 sink: sink_slot,
             }) as Arc<dyn HostedSession>)
         })
-        .map_err(|err| err.to_string())
+        .map_err(|err| SessionError::Other(err.to_string()))
     }
 }

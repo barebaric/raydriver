@@ -18,6 +18,14 @@ use crate::core::remote::protocol::{self, WireEvent};
 use crate::core::types::DeviceState;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bounded wait for a reply; a silently-dead daemon (power loss,
+/// partition without RST) must not hang requests forever.  Generous
+/// enough for slow handshakes inside `session_open`.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// No-frame deadline on the reader loop; the daemon pings every
+/// [`protocol::DEFAULT_KEEPALIVE_INTERVAL`] seconds, so silence well
+/// past a few missed keepalives means the connection is gone.
+const READER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct RemoteEndpoint {
@@ -176,7 +184,8 @@ impl RemoteSession {
             endpoint.tls_hostname.as_deref(),
             CONNECT_TIMEOUT,
         )
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
         let welcome = protocol::read_frame(&mut stream)
             .await
             .map_err(|err| err.to_string())?;
@@ -466,7 +475,11 @@ impl RemoteSession {
             self.pending.lock().unwrap().remove(&id);
             return Err(err);
         }
-        rx.await.map_err(|_| "connection lost".to_string())
+        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(_)) => Err("connection lost".to_string()),
+            Err(_) => Err("timed out waiting for the daemon reply".to_string()),
+        }
     }
 
     fn enqueue_without_reply(
@@ -493,10 +506,21 @@ impl RemoteSession {
 
     async fn reader_loop(self: Arc<Self>, mut reader: ReadHalf<BoxedStream>) {
         loop {
-            let message = match protocol::read_frame(&mut reader).await {
-                Ok(message) => message,
-                Err(err) => {
+            let message = match tokio::time::timeout(
+                READER_IDLE_TIMEOUT,
+                protocol::read_frame(&mut reader),
+            )
+            .await
+            {
+                Ok(Ok(message)) => message,
+                Ok(Err(err)) => {
                     self.on_disconnect(&err.to_string());
+                    return;
+                }
+                Err(_) => {
+                    self.on_disconnect(
+                        "no frames from the daemon (keepalive timeout)",
+                    );
                     return;
                 }
             };
@@ -884,7 +908,8 @@ pub async fn list_devices(
         endpoint.tls_hostname.as_deref(),
         &requests,
     )
-    .await?;
+    .await
+    .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Err(reply
@@ -915,7 +940,8 @@ pub async fn list_protocols(
         endpoint.tls_hostname.as_deref(),
         &requests,
     )
-    .await?;
+    .await
+    .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Err("protocol/list failed".to_string());
