@@ -31,6 +31,7 @@ def test_safe_list_ports_linux(monkeypatch):
     mapping = {
         ("/dev", "ttyUSB"): ["/dev/ttyUSB1", "/dev/ttyUSB0"],
         ("/dev", "ttyACM"): ["/dev/ttyACM0"],
+        ("/dev", "rfcomm"): ["/dev/rfcomm0"],
         ("/dev/serial/by-id", ""): [BY_ID_LINK],
         ("/dev/serial/by-path", ""): [
             "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0"
@@ -39,6 +40,7 @@ def test_safe_list_ports_linux(monkeypatch):
     monkeypatch.setattr(ports, "glob_ports", _fake_glob(mapping))
     ports_list = safe_list_ports_linux()
     assert ports_list == [
+        "/dev/rfcomm0",
         BY_ID_LINK,
         "/dev/serial/by-path/pci-0000:00:14.0-usb-0:1:1.0-port0",
         "/dev/ttyACM0",
@@ -61,11 +63,16 @@ def test_list_usb_ports_filtering(monkeypatch):
         "/dev/ttyS0",
         "/dev/ttyUSB0",
         "/dev/ttyACM1",
+        "/dev/rfcomm0",
         "COM3",
         "/dev/cu.usbmodem123",
     ]
     monkeypatch.setattr(ports, "list_ports", lambda: mock_ports)
-    assert list_usb_ports() == ["/dev/ttyUSB0", "/dev/ttyACM1"]
+    assert list_usb_ports() == [
+        "/dev/ttyUSB0",
+        "/dev/ttyACM1",
+        "/dev/rfcomm0",
+    ]
 
 
 @pytest.mark.skipif(os.name == "posix", reason="non-POSIX returns all")

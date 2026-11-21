@@ -869,7 +869,7 @@ pub(crate) fn create_session(
     py: Python<'_>,
     protocol_name: String,
     #[gen_stub(override_type(
-        type_repr = "typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]",
+        type_repr = "typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]",
         imports = ("typing", "builtins", "raydriver.config")
     ))]
     config: Py<PyAny>,
@@ -946,7 +946,7 @@ pub(crate) fn open_session(
     device: Option<String>,
     session_id: Option<String>,
     #[gen_stub(override_type(
-        type_repr = "typing.Optional[typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]]",
+        type_repr = "typing.Optional[typing.Union[dict[builtins.str, builtins.object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]]",
         imports = ("typing", "builtins", "raydriver.config")
     ))]
     config: Option<Py<PyAny>>,

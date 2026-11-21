@@ -157,6 +157,136 @@ The mapping form expected by the session constructors; fields that are None are 
 | --------- | ------ | ----------- |
 | _Returns_ | `dict` |             |
 
+## GrblBluetoothConfig
+
+GRBL over Bluetooth Classic SPP/RFCOMM.
+
+### `address`
+
+```python
+address: str
+```
+
+### `cached_rx_buffer_size`
+
+```python
+cached_rx_buffer_size: Optional[int]
+```
+
+### `channel`
+
+```python
+channel: int
+```
+
+### `command_timeout`
+
+```python
+command_timeout: float
+```
+
+### `deadlock_detection`
+
+```python
+deadlock_detection: bool
+```
+
+### `handshake_poll_interval`
+
+```python
+handshake_poll_interval: float
+```
+
+### `handshake_timeout`
+
+```python
+handshake_timeout: float
+```
+
+### `poll_response_attempts`
+
+```python
+poll_response_attempts: int
+```
+
+### `poll_response_interval`
+
+```python
+poll_response_interval: float
+```
+
+### `poll_status_while_running`
+
+```python
+poll_status_while_running: bool
+```
+
+### `reconnect_delay`
+
+```python
+reconnect_delay: float
+```
+
+### `rx_buffer_size_override`
+
+```python
+rx_buffer_size_override: int
+```
+
+### `safety_shutdown_delay`
+
+```python
+safety_shutdown_delay: float
+```
+
+### `stall_timeout_default`
+
+```python
+stall_timeout_default: float
+```
+
+### `stall_timeout_max`
+
+```python
+stall_timeout_max: float
+```
+
+### `stall_timeout_min`
+
+```python
+stall_timeout_min: float
+```
+
+### `stall_timeout_safety_factor`
+
+```python
+stall_timeout_safety_factor: float
+```
+
+### `status_poll_interval`
+
+```python
+status_poll_interval: float
+```
+
+### `unanswered_poll_limit`
+
+```python
+unanswered_poll_limit: int
+```
+
+### `to_dict()`
+
+```python
+to_dict() -> dict
+```
+
+The mapping form expected by the session constructors; fields that are None are omitted.
+
+| Parameter | Type   | Description |
+| --------- | ------ | ----------- |
+| _Returns_ | `dict` |             |
+
 ## GrblSerialConfig
 
 GRBL serial session configuration.

@@ -11,6 +11,9 @@ WCS access, and probe cycles. ESP3D/FluidNC controllers use the same
 GRBL session over an HTTP command endpoint and WebSocket response
 channel, with upload-and-execute jobs. Dialects (command templates)
 remain data owned by Rayforge and are passed in resolved form.
+GRBL sessions can also connect over Bluetooth Classic SPP/RFCOMM on
+Linux, macOS and Windows, once the device is paired by the operating
+system.
 
 ## CLI
 

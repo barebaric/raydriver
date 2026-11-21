@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use pyo3::exceptions::{
     PyConnectionError, PyNotImplementedError, PyRuntimeError, PyTimeoutError,
+    PyValueError,
 };
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -153,7 +154,7 @@ pub(crate) fn transport_kind_from_config(
 ) -> PyResult<TransportKind> {
     let Some(dict) = dict else {
         return Err(PyRuntimeError::new_err(
-            "config with a 'port' (serial) or 'host' (telnet) is required",
+            "config with a 'port' (serial), 'host' (telnet) or 'address' (Bluetooth) is required",
         ));
     };
     if let Some(host) = get_str(dict, "host")? {
@@ -178,6 +179,21 @@ pub(crate) fn transport_kind_from_config(
         }
         let port = get_i64(dict, "tcp_port")?.unwrap_or(23) as u16;
         return Ok(TransportKind::Telnet { host, port });
+    }
+    if let Some(address) = get_str(dict, "address")? {
+        let channel = get_i64(dict, "channel")?.unwrap_or(1);
+        if !(1..=30).contains(&channel) {
+            return Err(PyValueError::new_err(
+                "Bluetooth channel must be between 1 and 30",
+            ));
+        }
+        let address =
+            crate::core::transport::bluetooth::normalize_address(&address)
+                .map_err(PyValueError::new_err)?;
+        return Ok(TransportKind::Bluetooth {
+            address,
+            channel: channel as u8,
+        });
     }
     let port = get_str(dict, "port")?.unwrap_or_default();
     let baudrate = get_i64(dict, "baudrate")?.unwrap_or(115200) as u32;
@@ -227,7 +243,7 @@ impl GrblSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
@@ -251,7 +267,7 @@ impl GrblSession {
     fn with_transport(
         transport: PyRef<'_, MockTransport>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.Esp3dConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,

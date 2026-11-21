@@ -13,7 +13,7 @@ use regex::Regex;
 
 use crate::core::transport::serial::list_serial_ports as platform_ports;
 
-const USB_PORT_MARKERS: [&str; 2] = ["ttyUSB", "ttyACM"];
+const USB_PORT_MARKERS: [&str; 3] = ["ttyUSB", "ttyACM", "rfcomm"];
 
 /// A serial port path together with optional metadata used to
 /// identify the underlying USB device.
@@ -134,6 +134,7 @@ pub fn safe_list_ports_linux() -> Vec<String> {
     for (dir, prefix) in [
         ("/dev", "ttyUSB"),
         ("/dev", "ttyACM"),
+        ("/dev", "rfcomm"),
         ("/dev/serial/by-id", ""),
         ("/dev/serial/by-path", ""),
     ] {

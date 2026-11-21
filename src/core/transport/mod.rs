@@ -1,5 +1,6 @@
 //! Byte transports for talking to Grbl devices.
 
+pub mod bluetooth;
 pub mod mock;
 pub mod serial;
 pub mod telnet;
@@ -9,6 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::core::transport::bluetooth::BluetoothTransport;
 use crate::core::transport::mock::MockInner;
 use crate::core::transport::serial::SerialTransport;
 use crate::core::transport::telnet::TelnetTransport;
@@ -84,6 +86,10 @@ pub enum TransportKind {
         host: String,
         port: u16,
     },
+    Bluetooth {
+        address: String,
+        channel: u8,
+    },
     Mock(Arc<MockInner>),
     /// A transport constructed by a protocol module (e.g. ESP3D).
     Custom(Arc<dyn Transport>),
@@ -98,6 +104,9 @@ impl TransportKind {
             }
             TransportKind::Telnet { host, port } => {
                 TelnetTransport::new(host, *port)
+            }
+            TransportKind::Bluetooth { address, channel } => {
+                BluetoothTransport::new(address, *channel)
             }
             TransportKind::Mock(inner) => inner.clone(),
             TransportKind::Custom(transport) => transport.clone(),

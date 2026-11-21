@@ -395,19 +395,19 @@ write_setting(key: str, value: str) -> Awaitable[None]
 ```python
 create_session(
     protocol_name: str,
-    config: Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config],
+    config: Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config],
     dialect: Optional[dict[str, object]],
     event_callback: Optional[Callable[[core.SessionEvent], object]],
 ) -> Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]
 ```
 
-| Parameter        | Type                                                                                                                                                                                                                               | Description |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `protocol_name`  | `str`                                                                                                                                                                                                                              |             |
-| `config`         | `Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]` |             |
-| `dialect`        | `Optional[dict[str, object]]`                                                                                                                                                                                                      |             |
-| `event_callback` | `Optional[Callable[[core.SessionEvent], object]]`                                                                                                                                                                                  |             |
-| _Returns_        | `Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]`                                                                                     |             |
+| Parameter        | Type                                                                                                                                                                                                                                                           | Description |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `protocol_name`  | `str`                                                                                                                                                                                                                                                          |             |
+| `config`         | `Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]` |             |
+| `dialect`        | `Optional[dict[str, object]]`                                                                                                                                                                                                                                  |             |
+| `event_callback` | `Optional[Callable[[core.SessionEvent], object]]`                                                                                                                                                                                                              |             |
+| _Returns_        | `Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]`                                                                                                                 |             |
 
 ### `list_devices()`
 
@@ -442,18 +442,18 @@ open_session(
     endpoint: Union[dict[str, object], str],
     device: Optional[str] = None,
     session_id: Optional[str] = None,
-    config: Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None,
+    config: Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None,
     dialect: Optional[dict[str, object]] = None,
     event_callback: Optional[Callable[[core.SessionEvent], object]] = None,
 ) -> RemoteSession
 ```
 
-| Parameter        | Type                                                                                                                                                                                                                                                | Description |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `endpoint`       | `Union[dict[str, object], str]`                                                                                                                                                                                                                     |             |
-| `device`         | `Optional[str] = None`                                                                                                                                                                                                                              |             |
-| `session_id`     | `Optional[str] = None`                                                                                                                                                                                                                              |             |
-| `config`         | `Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None` |             |
-| `dialect`        | `Optional[dict[str, object]] = None`                                                                                                                                                                                                                |             |
-| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                                                                                                                                                                                            |             |
-| _Returns_        | `RemoteSession`                                                                                                                                                                                                                                     |             |
+| Parameter        | Type                                                                                                                                                                                                                                                                            | Description |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `endpoint`       | `Union[dict[str, object], str]`                                                                                                                                                                                                                                                 |             |
+| `device`         | `Optional[str] = None`                                                                                                                                                                                                                                                          |             |
+| `session_id`     | `Optional[str] = None`                                                                                                                                                                                                                                                          |             |
+| `config`         | `Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None` |             |
+| `dialect`        | `Optional[dict[str, object]] = None`                                                                                                                                                                                                                                            |             |
+| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                                                                                                                                                                                                                        |             |
+| _Returns_        | `RemoteSession`                                                                                                                                                                                                                                                                 |             |
