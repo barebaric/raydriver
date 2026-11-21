@@ -410,7 +410,9 @@ impl SimpleCore {
             SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
         })?;
         let dialect = self.base.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        let cmd = dialect
+            .format_wcs_offset(p_num, x, y, z)
+            .map_err(SessionError::Other)?;
         self.execute_command(cmd).await?;
         Ok(())
     }

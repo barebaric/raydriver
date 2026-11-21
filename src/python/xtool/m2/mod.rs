@@ -1,3 +1,5 @@
+//! PyO3 bindings for the xTool M2 session (`raydriver.xtool.m2`).
+
 pub(crate) mod session;
 
 use pyo3::prelude::*;

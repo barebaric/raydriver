@@ -5,6 +5,7 @@
 //! transport via [`super::stream_base`].
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::net::TcpStream;
@@ -12,6 +13,10 @@ use tokio::sync::mpsc;
 
 use super::stream_base::StreamTransportBase;
 use super::{Transport, TransportError};
+
+/// The dial deadline; an unreachable host must not block `open`
+/// indefinitely (session-level timeouts start after connect).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct TelnetTransport {
     base: StreamTransportBase<TcpStream>,
@@ -35,9 +40,18 @@ impl Transport for TelnetTransport {
         &self,
         tx: mpsc::UnboundedSender<Vec<u8>>,
     ) -> Result<(), TransportError> {
-        let stream = TcpStream::connect((self.host.as_str(), self.port))
-            .await
-            .map_err(|e| TransportError::Connection(e.to_string()))?;
+        let stream = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            TcpStream::connect((self.host.as_str(), self.port)),
+        )
+        .await
+        .map_err(|_| {
+            TransportError::Connection(format!(
+                "connecting to {}:{} timed out",
+                self.host, self.port
+            ))
+        })?
+        .map_err(|e| TransportError::Connection(e.to_string()))?;
         self.base.start(stream, "Telnet", tx).await;
         Ok(())
     }

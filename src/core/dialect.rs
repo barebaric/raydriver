@@ -100,13 +100,17 @@ impl Dialect {
 
     /// Format the `set_wcs_offset` template, dropping the Z word
     /// when `z` is `None` (machines without a Z axis).
+    ///
+    /// The templates are caller-supplied data; a malformed
+    /// `set_wcs_offset` template (unknown placeholder or bad
+    /// precision spec) is an error, not a panic.
     pub fn format_wcs_offset(
         &self,
         p_num: i64,
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> String {
+    ) -> Result<String, String> {
         let mut template = self.set_wcs_offset.clone();
         if z.is_none() {
             template = template
@@ -124,7 +128,6 @@ impl Dialect {
                 ("z", Arg::Length(z.unwrap_or(0.0))),
             ],
         )
-        .expect("valid template")
     }
 }
 
