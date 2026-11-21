@@ -129,7 +129,7 @@ pub async fn post_multipart_fields(
     extra_headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
-    let boundary = format!("raydriver{}", std::process::id());
+    let boundary = multipart_boundary();
     let mut body = Vec::with_capacity(file.len() + 256);
     body.extend_from_slice(
         format!(
@@ -171,6 +171,18 @@ pub async fn post_multipart_fields(
     )
     .await
 }
+
+/// A multipart boundary tag unique per process invocation.
+pub(crate) fn multipart_boundary() -> String {
+    format!(
+        "raydriver{}-{}",
+        std::process::id(),
+        REQUEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+static REQUEST_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
 
 async fn request(
     host: &str,

@@ -1,3 +1,7 @@
+//! The `raydriver.xtool.m2.session` submodule: the `M2Session`
+//! pyclass mirroring the Rust `M2Core` surface (config parsing,
+//! asyncio futures, event marshaling).
+
 use std::sync::Arc;
 
 use pyo3::prelude::*;

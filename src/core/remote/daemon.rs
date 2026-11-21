@@ -26,6 +26,7 @@ use crate::core::remote::registry;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
+use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 
 pub const DEFAULT_PORT: u16 = 8765;
@@ -260,7 +261,7 @@ pub struct StartedServer {
 
 /// Session host serving the remote control protocol.
 pub struct Daemon {
-    pub config: Arc<Mutex<DaemonConfig>>,
+    config: Arc<Mutex<DaemonConfig>>,
     factory: Arc<dyn SessionFactory>,
     /// The embedder-supplied protocol table (core carries no
     /// protocol knowledge of its own).
@@ -284,6 +285,13 @@ impl Daemon {
             clients: Mutex::new(HashMap::new()),
             listener: Mutex::new(None),
         }
+    }
+
+    /// The live daemon configuration.  The embedding application
+    /// shares this handle and may adjust settings (cameras, sessions,
+    /// keepalive) between calls; the daemon re-reads it per request.
+    pub fn config(&self) -> Arc<Mutex<DaemonConfig>> {
+        self.config.clone()
     }
 
     /// Open the listener and auto-open configured sessions.
@@ -929,9 +937,7 @@ impl Daemon {
         let session = self
             .factory
             .create(protocol_name, config.clone(), dialect.clone(), sink)
-            .map_err(|message| {
-                ProtocolError::new(protocol::INTERNAL, message)
-            })?;
+            .map_err(internal)?;
         let host = Arc::new(Host {
             id: uuid::Uuid::new_v4().simple().to_string()[..12].to_string(),
             protocol: protocol_name.to_string(),
@@ -1346,8 +1352,13 @@ impl Daemon {
             if let Some(job) = job_host.job.lock().unwrap().as_mut() {
                 job.data["running"] = json!(false);
             }
-            if let Err(message) = result {
-                daemon.fan_out(&job_host, WireEvent::JobError { message });
+            if let Err(err) = result {
+                daemon.fan_out(
+                    &job_host,
+                    WireEvent::JobError {
+                        message: err.to_string(),
+                    },
+                );
             }
         });
         *host.job_task.lock().unwrap() = Some(task);
@@ -1428,8 +1439,8 @@ fn require_control(
     Ok(())
 }
 
-fn internal(message: String) -> ProtocolError {
-    ProtocolError::new(protocol::INTERNAL, message)
+fn internal(err: SessionError) -> ProtocolError {
+    ProtocolError::new(protocol::INTERNAL, err.to_string())
 }
 
 fn device_ref(config: &Value) -> String {

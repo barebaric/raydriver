@@ -83,6 +83,9 @@ impl Link for WindowsLink {
 
     fn close(&self) {
         unsafe {
+            // SAFETY: `socket.0` is a valid open socket handle; the
+            // `SocketHandle` Drop closes it only after all readers
+            // and writers drop their `Arc`.
             shutdown(self.socket.0, SD_BOTH);
         }
         if let Some(handle) = self.reader.lock().unwrap().take() {
@@ -94,6 +97,10 @@ impl Link for WindowsLink {
 fn winsock_error() -> io::Result<()> {
     static START: OnceLock<i32> = OnceLock::new();
     let code = *START.get_or_init(|| unsafe {
+        // SAFETY: `WSADATA` is a plain-old-data out-parameter the
+        // API initializes; zeroed is the documented initialization
+        // pattern.  Once-initialized WinSock needs no cleanup for
+        // the process lifetime.
         let mut data: WSADATA = std::mem::zeroed();
         WSAStartup(0x0202, &mut data)
     });
@@ -117,6 +124,9 @@ pub(crate) fn connect(
         .iter()
         .fold(0u64, |value, octet| (value << 8) | u64::from(*octet));
 
+    // SAFETY: constant arguments; a null protocol info and no
+    // flags produce a plain Bluetooth RFCOMM socket whose validity
+    // is checked against INVALID_SOCKET below.
     let socket = unsafe {
         WSASocketW(
             i32::from(windows_sys::Win32::Devices::Bluetooth::AF_BTH),
@@ -138,6 +148,8 @@ pub(crate) fn connect(
         windows_sys::Win32::Devices::Bluetooth::SO_BTH_ENCRYPT,
     ] {
         unsafe {
+            // SAFETY: `socket` is valid; the option value is a live
+            // `i32` whose pointer/size describe it.
             setsockopt(
                 socket.0,
                 windows_sys::Win32::Devices::Bluetooth::SOL_RFCOMM as i32,
@@ -155,6 +167,10 @@ pub(crate) fn connect(
         port: 0,
     };
     let result = unsafe {
+        // SAFETY: `socket` is valid; `sockaddr` is a `#[repr(C)]`
+        // `SOCKADDR_BTH` (family, address, SPP service class, port)
+        // cast to the generic `SOCKADDR` the API expects, and it
+        // outlives the call.
         winsock_connect(
             socket.0,
             (&sockaddr as *const SOCKADDR_BTH).cast::<SOCKADDR>(),
@@ -188,6 +204,10 @@ fn reader_loop(
         // WinSock `recv` returns `int` where POSIX `recv` returns
         // `ssize_t`; the cast sign-extends negatives intact.
         |buf| unsafe {
+            // SAFETY: the socket handle is valid for the whole
+            // reader thread (the link keeps it alive and `close`
+            // shuts the socket down before joining); the pointer and
+            // length describe `buf`, which is never aliased.
             recv(socket.0, buf.as_mut_ptr(), buf.len() as i32, 0) as isize
         },
         &tx,
@@ -210,6 +230,9 @@ pub(crate) fn list_paired_devices() -> io::Result<Vec<BluetoothDeviceInfo>> {
         dwSize: std::mem::size_of::<BLUETOOTH_DEVICE_INFO>() as u32,
         ..Default::default()
     };
+    // SAFETY: both pointers are valid for the call: `params` is a
+    // fully initialized search structure, `info` a `dwSize`-tagged
+    // out record.
     let find = unsafe { BluetoothFindFirstDevice(&params, &mut info) };
     if find.is_null() {
         let err = io::Error::last_os_error();
@@ -224,11 +247,16 @@ pub(crate) fn list_paired_devices() -> io::Result<Vec<BluetoothDeviceInfo>> {
         if let Some(device) = info_to_device(&info) {
             devices.push(device);
         }
+        // SAFETY: `find` is a live enumeration handle from
+        // `BluetoothFindFirstDevice` (non-null, checked above);
+        // `info` is the same record the API filled before.
         let has_next = unsafe { BluetoothFindNextDevice(find, &mut info) };
         if has_next == 0 {
             break;
         }
     }
+    // SAFETY: `find` is the live enumeration handle; every exit
+    // path from the loop above reaches this close.
     unsafe {
         BluetoothFindDeviceClose(find);
     }
@@ -237,6 +265,9 @@ pub(crate) fn list_paired_devices() -> io::Result<Vec<BluetoothDeviceInfo>> {
 }
 
 fn info_to_device(info: &BLUETOOTH_DEVICE_INFO) -> Option<BluetoothDeviceInfo> {
+    // SAFETY: reading the `btAddr` union member the API just
+    // initialized (`BTH_ADDR` is stored in the union's ullLong
+    // variant).
     let raw = unsafe { info.Address.Anonymous.ullLong };
     if raw == 0 {
         return None;

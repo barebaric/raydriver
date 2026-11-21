@@ -26,8 +26,30 @@ use crate::core::session::SessionError;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/// Guard against hostile peers sending unbounded frames.
+const MAX_FRAME_BYTES: u64 = 16 * 1024 * 1024;
+/// Guard against oversized handshake responses.
+const MAX_HANDSHAKE_BYTES: usize = 16 * 1024;
+
 /// Handshake failed or the connection broke mid-frame.
-pub struct WsError(pub String);
+#[derive(Debug)]
+pub struct WsError(String);
+
+impl WsError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for WsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 impl From<std::io::Error> for WsError {
     fn from(err: std::io::Error) -> Self {
@@ -196,7 +218,7 @@ async fn read_frame<S: AsyncRead + Unpin>(
         ),
         n => u64::from(n),
     };
-    if length > 16 * 1024 * 1024 {
+    if length > MAX_FRAME_BYTES {
         return Err(WsError("websocket frame too large".to_string()));
     }
     let mask = if masked {
@@ -262,7 +284,7 @@ async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
         if response.ends_with(b"\r\n\r\n") {
             break;
         }
-        if response.len() > 16 * 1024 {
+        if response.len() > MAX_HANDSHAKE_BYTES {
             return Err(WsError(
                 "oversized websocket handshake response".to_string(),
             ));

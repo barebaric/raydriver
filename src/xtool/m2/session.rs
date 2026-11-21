@@ -1,3 +1,17 @@
+//! The xTool M2 session: a JSON-RPC-style protocol over TLS
+//! WebSocket (`wss://<host>:28900/websocket`).
+//!
+//! Requests are length-prefixed binary frames (`ba be` header) with
+//! wrapping 16-bit transaction IDs; the machine answers each with a
+//! code/message/data triple and pushes notification frames (state,
+//! working, finished) that update the device state.  The session
+//! authenticates as the machine's guest user on connect and rejects
+//! devices that do not identify as an M2.
+//!
+//! Everything is device-API-driven — no line protocol and no
+//! `ok`/`error` acks; a parked request fails when the socket drops
+//! (`fail_pending`) or at its per-request deadline.
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -264,7 +278,7 @@ impl M2Session {
 
 struct M2Connection {
     writer: AsyncMutex<SocketWriter>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
+    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, SessionError>>>>,
     reader_task: Mutex<Option<JoinHandle<()>>>,
     transaction: AtomicU64,
     closed: AsyncEvent,
@@ -408,8 +422,9 @@ impl M2Connection {
                 self.pending.lock().unwrap().remove(&transaction_id);
                 SessionError::Timeout
             })?
-            .map_err(|_| SessionError::Connection("connection closed".into()))?
-            .map_err(SessionError::Device)?;
+            .map_err(|_| {
+                SessionError::Connection("connection closed".into())
+            })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
             let message = response
@@ -476,8 +491,9 @@ impl M2Connection {
                 self.pending.lock().unwrap().remove(&transaction_id);
                 SessionError::Timeout
             })?
-            .map_err(|_| SessionError::Connection("connection closed".into()))?
-            .map_err(SessionError::Device)?;
+            .map_err(|_| {
+                SessionError::Connection("connection closed".into())
+            })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
             return Err(SessionError::Device(format!(
@@ -539,7 +555,9 @@ impl M2Connection {
         self.closed.set();
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err("M2 WebSocket closed".to_string()));
+            let _ = sender.send(Err(SessionError::Connection(
+                "M2 WebSocket closed".into(),
+            )));
         }
     }
 
@@ -626,7 +644,9 @@ impl M2Connection {
     fn fail_pending(&self) {
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err("M2 WebSocket closed".to_string()));
+            let _ = sender.send(Err(SessionError::Connection(
+                "M2 WebSocket closed".into(),
+            )));
         }
     }
 }
@@ -691,6 +711,9 @@ impl ServerCertVerifier for AllowInvalidCerts {
     }
 }
 
+/// Guard against hostile peers sending unbounded frames.
+const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 fn encode_frame(payload: &[u8], protocol: u8) -> Vec<u8> {
     let length = payload.len();
     let mut header = [0u8; 10];
@@ -721,7 +744,7 @@ fn decode_frames(buffer: &[u8]) -> (Vec<(u8, Vec<u8>)>, Vec<u8>) {
         let length = ((buffer[position + 2] as usize) << 16)
             | ((buffer[position + 3] as usize) << 8)
             | buffer[position + 4] as usize;
-        if length > 16 * 1024 * 1024 {
+        if length > MAX_FRAME_BYTES {
             position += 1;
             continue;
         }
