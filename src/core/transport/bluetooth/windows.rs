@@ -185,7 +185,11 @@ fn reader_loop(
     open: Arc<AtomicBool>,
 ) {
     super::rfcomm_reader_loop(
-        |buf| unsafe { recv(socket.0, buf.as_mut_ptr(), buf.len() as i32, 0) },
+        // WinSock `recv` returns `int` where POSIX `recv` returns
+        // `ssize_t`; the cast sign-extends negatives intact.
+        |buf| unsafe {
+            recv(socket.0, buf.as_mut_ptr(), buf.len() as i32, 0) as isize
+        },
         &tx,
         &open,
     );
