@@ -9,6 +9,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
+use crate::core::line_session::PingPongSession;
 use crate::core::transport::TransportKind;
 use crate::core::types::{UnitSystem, WcsOffsets};
 use crate::grbl::simple::{SimpleConfig, SimpleCore};

@@ -1,11 +1,19 @@
 //! Session primitives shared by the protocol sessions: the event
-//! notification trait, the error type and the async latch.
+//! notification trait, the error type, the async latch and small
+//! shared helpers.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use crate::core::transport::TransportError;
 use crate::core::types::{DeviceState, TransportStatus};
+
+/// Converts a (possibly negative) seconds value into a non-negative
+/// [`Duration`]; shared by every session's timeout configuration.
+pub(crate) fn secs(v: f64) -> Duration {
+    Duration::from_secs_f64(v.max(0.0))
+}
 
 /// Notifications emitted by a device session, implemented by the
 /// Python bindings (or by embedders).
