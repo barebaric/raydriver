@@ -31,6 +31,8 @@ pub struct Dialect {
 }
 
 impl Default for Dialect {
+    /// The default template set is GRBL-flavored (callers that use
+    /// another firmware pass their own dialect data).
     fn default() -> Self {
         Self {
             home_all: "$H".to_string(),

@@ -1,4 +1,4 @@
-//! Shared value types used across the Grbl protocol implementation.
+//! Shared device value types (status, state, errors, units).
 //!
 //! These mirror Rayforge's `machine.driver.driver` module so the
 //! Python bindings can convert losslessly.
@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-/// Machine state as reported in Grbl status reports.
+/// Machine state as reported in device status reports (GRBL-style).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DeviceStatus {
     #[default]
