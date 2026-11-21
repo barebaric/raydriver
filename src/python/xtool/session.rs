@@ -14,7 +14,7 @@ use crate::python::events::PyEvents;
 // bindings and live with the largest consumer (grbl), mirroring how
 // the smoothie and marlin bindings reuse them.
 use crate::python::grbl::session::{get_f64, get_i64, get_str, parse_dialect};
-use crate::python::pyfuture::{none_obj, spawn_future};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::xtool::session::{XtoolConfig, XtoolCore};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
@@ -84,15 +84,15 @@ impl XtoolSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.XtoolConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -103,23 +103,23 @@ impl XtoolSession {
     }
 
     /// Open the connection and start the background tasks.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.connect().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Stop all background tasks and close the connection.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
             core.cleanup().await;
             events.quiesce();
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -130,13 +130,10 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let lines = core.execute_interactive_command(command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
+            Ok(core.execute_interactive_command(command).await?)
         })
     }
 
@@ -146,11 +143,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.execute_command(command).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -159,11 +156,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         block: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.execute_block(block).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -173,11 +170,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         gcode: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.run(&gcode).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -186,20 +183,20 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         machine_code: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.run_raw(&machine_code).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Run the homing cycle and await the machine going idle again.
-    fn home<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.home().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -212,11 +209,11 @@ impl XtoolSession {
         y: f64,
         z: Option<f64>,
         speed: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.move_to(x, y, z, speed).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -227,11 +224,11 @@ impl XtoolSession {
         py: Python<'py>,
         speed: f64,
         deltas: Option<Vec<(String, f64)>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.jog(speed, deltas.unwrap_or_default()).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -241,11 +238,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         hold: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_hold(hold).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -255,11 +252,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         emergency: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cancel(emergency).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -270,11 +267,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_power(power).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -284,11 +281,11 @@ impl XtoolSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_focus_power(power).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 

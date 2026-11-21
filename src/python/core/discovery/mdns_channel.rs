@@ -23,10 +23,10 @@ use crate::core::discovery::tokens;
 use crate::core::discovery::types::{
     DeviceIdentity as CoreIdentity, DiscoveredDevice as CoreDevice, ParamValue,
 };
-use crate::python::pyfuture::{await_py, spawn_future};
+use crate::python::pyfuture::{await_py, spawn_future, PyAwait};
 
 use super::helpers;
-use super::mdns_scan::MDNSService;
+use super::mdns_scan::{MDNSService, ScanMdnsFn};
 use super::spec::DiscoverySpec;
 use super::types::DiscoveredDevice;
 
@@ -57,8 +57,14 @@ struct Declaration {
 /// types are normalized to their canonical ``_name._transport`` form.
 #[gen_stub_pyfunction(module = "raydriver.core.discovery.mdns_channel")]
 #[pyfunction]
+#[gen_stub(override_return_type(
+    type_repr = "builtins.list[tuple[builtins.type, \
+                 spec.MdnsRecognizer]]",
+    imports = ("builtins", "raydriver.core.discovery.spec"),
+))]
 fn collect_mdns_recognizers<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'py, PyAny>>,
 ) -> PyResult<Bound<'py, PyList>> {
     let out = PyList::empty(py);
@@ -147,15 +153,14 @@ fn fingerprint_service_types(declarations: &[Declaration]) -> BTreeSet<String> {
 #[pyfunction]
 fn find_network_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'_, PyAny>>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<DiscoveredDevice>>> {
     let collected = collect_mdns_recognizers(py, driver_classes)?;
     if collected.is_empty() {
         return spawn_future(py, async move {
-            Python::attach(|py| {
-                let empty: Vec<DiscoveredDevice> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
-            })
+            let empty: Vec<DiscoveredDevice> = Vec::new();
+            Ok(empty)
         });
     }
     let declarations = read_declarations(&collected)?;
@@ -196,7 +201,7 @@ fn find_network_devices<'py>(
                         );
                     }
                     let empty: Vec<DiscoveredDevice> = Vec::new();
-                    empty.into_pyobject(py).map(|o| o.unbind().into_any())
+                    Ok(empty)
                 });
             }
         };
@@ -214,7 +219,7 @@ fn find_network_devices<'py>(
             for (declaration, service) in fingerprinted {
                 devices.push(build_device(py, &declaration, &service)?);
             }
-            devices.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(devices)
         })
     })
 }
@@ -361,7 +366,9 @@ async fn run_fingerprints(
             continue;
         };
         let matched = Python::attach(|py| match outcome {
-            Ok(value) => !value.is_none(py),
+            // The claim is the probe's truthiness: the built-in
+            // fingerprints resolve to a plain bool.
+            Ok(value) => value.is_truthy(py).unwrap_or(false),
             Err(e) => {
                 helpers::log_debug(
                     py,
@@ -488,5 +495,5 @@ pyo3_stub_gen::module_variable!(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.mdns_channel",
     "scan_mdns_services",
-    Py<PyAny>
+    ScanMdnsFn
 );

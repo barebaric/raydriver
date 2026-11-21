@@ -3,7 +3,7 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use pyo3::exceptions::PyOverflowError;
+use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -13,8 +13,8 @@ use crate::core::remote::daemon::{
     self as core, ClientQueue as CoreClientQueue, Daemon as CoreDaemon,
     DaemonConfig as CoreConfig, DaemonError, SEND_QUEUE_LIMIT,
 };
-use crate::python::core::json::value_to_py;
-use crate::python::pyfuture::spawn_future;
+use crate::python::core::json::{value_to_dict, JsonDict};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::bridge::{py_to_json, running_loop};
 use crate::python::remote::session::PySessionFactory;
 
@@ -54,7 +54,15 @@ impl DaemonConfig {
         keepalive_misses: u32,
         lease_grace: f64,
         ring_size: usize,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Sequence[dict[builtins.str, builtins.object]]]",
+            imports = ("typing", "builtins")
+        ))]
         cameras: Option<Py<PyAny>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[typing.Sequence[dict[builtins.str, builtins.object]]]",
+            imports = ("typing", "builtins")
+        ))]
         sessions: Option<Py<PyAny>>,
         mdns: bool,
     ) -> PyResult<Self> {
@@ -175,25 +183,39 @@ impl DaemonConfig {
     }
 
     #[getter]
-    fn cameras(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn cameras(&self, py: Python<'_>) -> PyResult<Vec<JsonDict>> {
         let value = self.inner.lock().unwrap().cameras.clone();
-        value_to_py(py, &value)
+        decode_dict_list(py, &value)
     }
 
     #[setter]
-    fn set_cameras(&self, value: Bound<'_, PyAny>) -> PyResult<()> {
+    fn set_cameras(
+        &self,
+        #[gen_stub(override_type(
+            type_repr = "typing.Sequence[dict[builtins.str, builtins.object]]",
+            imports = ("typing", "builtins")
+        ))]
+        value: Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         self.inner.lock().unwrap().cameras = py_to_json(&value)?;
         Ok(())
     }
 
     #[getter]
-    fn sessions(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+    fn sessions(&self, py: Python<'_>) -> PyResult<Vec<JsonDict>> {
         let value = self.inner.lock().unwrap().sessions.clone();
-        value_to_py(py, &value)
+        decode_dict_list(py, &value)
     }
 
     #[setter]
-    fn set_sessions(&self, value: Bound<'_, PyAny>) -> PyResult<()> {
+    fn set_sessions(
+        &self,
+        #[gen_stub(override_type(
+            type_repr = "typing.Sequence[dict[builtins.str, builtins.object]]",
+            imports = ("typing", "builtins")
+        ))]
+        value: Bound<'_, PyAny>,
+    ) -> PyResult<()> {
         self.inner.lock().unwrap().sessions = py_to_json(&value)?;
         Ok(())
     }
@@ -224,6 +246,10 @@ impl Daemon {
     fn new(
         py: Python<'_>,
         config: Option<PyRef<'_, DaemonConfig>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[..., builtins.object]]",
+            imports = ("typing", "collections.abc")
+        ))]
         session_factory: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let config = config
@@ -242,22 +268,22 @@ impl Daemon {
         }
     }
 
-    fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn start<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<PyAwait<'py, StartedServer>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let started = inner.start().await.map_err(core_error)?;
-            Python::attach(|py| {
-                Ok(Py::new(py, StartedServer { addr: started.addr })?
-                    .into_any())
-            })
+            Ok(StartedServer { addr: started.addr })
         })
     }
 
-    fn stop<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn stop<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             inner.stop().await;
-            Ok(Python::attach(|py| py.None()))
+            Ok(())
         })
     }
 }
@@ -279,11 +305,13 @@ fn core_error(err: DaemonError) -> PyErr {
     }
 }
 
+#[gen_stub_pyclass]
 #[pyclass(module = "raydriver.remote.daemon")]
 pub struct SocketInfo {
     addr: SocketAddr,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl SocketInfo {
     fn getsockname(&self) -> (String, u16) {
@@ -291,14 +319,20 @@ impl SocketInfo {
     }
 }
 
+#[gen_stub_pyclass]
 #[pyclass(module = "raydriver.remote.daemon")]
 pub struct StartedServer {
     addr: SocketAddr,
 }
 
+#[gen_stub_pymethods]
 #[pymethods]
 impl StartedServer {
     #[getter]
+    #[gen_stub(override_return_type(
+        type_repr = "tuple[SocketInfo, ...]",
+        imports = ()
+    ))]
     fn sockets(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let socket = Py::new(py, SocketInfo { addr: self.addr })?;
         Ok(PyTuple::new(py, [socket])?.unbind().into_any())
@@ -309,6 +343,18 @@ impl StartedServer {
 #[pyclass(module = "raydriver.remote.daemon")]
 pub struct ClientQueue {
     inner: Arc<CoreClientQueue>,
+}
+
+/// Decodes a stored config array (cameras/sessions) into JSON object
+/// dicts.
+fn decode_dict_list(py: Python<'_>, value: &Value) -> PyResult<Vec<JsonDict>> {
+    let entries = value
+        .as_array()
+        .ok_or_else(|| PyValueError::new_err("expected a list of objects"))?;
+    entries
+        .iter()
+        .map(|entry| value_to_dict(py, entry))
+        .collect()
 }
 
 #[gen_stub_pymethods]
@@ -322,7 +368,15 @@ impl ClientQueue {
         }
     }
 
-    fn put(&self, py: Python<'_>, frame: Py<PyAny>) -> PyResult<()> {
+    fn put(
+        &self,
+        py: Python<'_>,
+        #[gen_stub(override_type(
+            type_repr = "dict[builtins.str, builtins.object]",
+            imports = ("builtins",)
+        ))]
+        frame: Py<PyAny>,
+    ) -> PyResult<()> {
         let frame = py_to_json(frame.bind(py))?;
         if !self.inner.push(frame) {
             return Err(PyOverflowError::new_err("client send queue overflow"));
@@ -330,11 +384,11 @@ impl ClientQueue {
         Ok(())
     }
 
-    fn get<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn get<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, JsonDict>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let frame = inner.get().await;
-            Python::attach(|py| value_to_py(py, &frame))
+            Python::attach(|py| value_to_dict(py, &frame))
         })
     }
 }

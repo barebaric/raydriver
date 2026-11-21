@@ -1,5 +1,6 @@
-"""Device census tests: ``describe()`` parity fixtures and
-``probe_device()`` against the Marlin firmware emulator."""
+"""Device census tests: `describe()` parity fixtures and the
+`probe_device()` session method against the Marlin firmware
+emulator."""
 
 import asyncio
 
@@ -9,11 +10,7 @@ from conftest import DEFAULT_DIALECT
 from raydriver.core import SessionEvent
 from raydriver.marlin import MarlinSession
 from raydriver.marlin.emulator import MarlinEmulator
-from raydriver.marlin.probe import (
-    MarlinDeviceInfo,
-    describe,
-    probe_device,
-)
+from raydriver.marlin.probe import MarlinDeviceInfo, describe
 
 TIMINGS = {
     "handshake_timeout": 2.0,
@@ -23,6 +20,15 @@ TIMINGS = {
     "command_timeout": 2.0,
     "connect_settle": 0.05,
 }
+
+FULL_M115_LINES = [
+    ("FIRMWARE_NAME:Marlin 2.1.2.7 MACHINE_TYPE:CustomLaser EXTRUDER_COUNT:1")
+]
+FULL_M211_LINES = ["X: 400.00 Y: 300.00 Z: 200.00 S: 1 (Enabled)"]
+FULL_M503_LINES = [
+    "echo: M203 X300.00 Y300.00 Z5.00 E25.00",
+    "echo: M204 S3000.00 T3000.00",
+]
 
 
 def make_marlin_session(mock, events, config=None):
@@ -61,19 +67,13 @@ async def marlin_rig(mock, events):
 
 class TestDescribe:
     def test_full_census(self):
-        m115_lines = [
-            (
-                "FIRMWARE_NAME:Marlin 2.1.2.7 "
-                "MACHINE_TYPE:CustomLaser EXTRUDER_COUNT:1"
-            )
-        ]
-        m211_lines = ["X: 400.00 Y: 300.00 Z: 200.00 S: 1 (Enabled)"]
-        m503_lines = [
-            "echo: M203 X300.00 Y300.00 Z5.00 E25.00",
-            "echo: M204 S3000.00 T3000.00",
-        ]
-        boot_lines = ["Marlin 2.1.2.7"]
-        info = describe(m115_lines, m211_lines, m503_lines, [], boot_lines)
+        info = describe(
+            FULL_M115_LINES,
+            FULL_M211_LINES,
+            FULL_M503_LINES,
+            [],
+            ["Marlin 2.1.2.7"],
+        )
         assert isinstance(info, MarlinDeviceInfo)
         assert info.name == "CustomLaser"
         assert info.firmware_version == "2.1.2.7"
@@ -115,13 +115,15 @@ class TestDescribe:
         assert info.units == "imperial"
 
     def test_units_unknown(self):
-        assert describe([], [], [], []).units is None
+        info = describe([], [], [], [])
+        assert info.units is None
 
 
 class TestProbeDevice:
     async def test_probe_device_against_emulator(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
-        info = await probe_device(session, boot_lines=["Marlin 2.1.2"])
+        info = await session.probe_device(["Marlin 2.1.2"])
+        assert isinstance(info, MarlinDeviceInfo)
         assert info.machine_type == "3D Printer"
         assert info.name == "Marlin"
         assert info.firmware_version == "2.1.2"
@@ -132,6 +134,6 @@ class TestProbeDevice:
 
     async def test_probe_device_without_boot_lines(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
-        info = await probe_device(session)
+        info = await session.probe_device()
         assert info.name == "Marlin"
         assert info.firmware_version == "Marlin"

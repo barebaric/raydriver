@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "SerialPortInfo",
@@ -19,7 +20,7 @@ __all__ = [
     "sort_ports",
 ]
 
-list_serial_ports: typing.Any
+list_serial_ports: collections.abc.Callable[[], builtins.list[dict[builtins.str, builtins.object]]]
 @typing.final
 class SerialPortInfo:
     r"""

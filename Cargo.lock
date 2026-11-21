@@ -987,6 +987,7 @@ dependencies = [
  "pyo3-stub-gen",
  "regex",
  "rustls",
+ "serde",
  "serde_json",
  "serialport",
  "sha1 0.10.7",

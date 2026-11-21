@@ -2,8 +2,11 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 from raydriver.core import discovery
 from raydriver.core.discovery import ports
+from raydriver.core.discovery import serial_scan
+from raydriver.core.discovery import spec
 import typing
 __all__ = [
     "CORPORATE_TOKENS",
@@ -23,7 +26,7 @@ GENERIC_DEVICE_TOKENS: builtins.set[builtins.str]
 GENERIC_TOKENS: builtins.set[builtins.str]
 SERIAL_SCAN_TIMEOUT: builtins.float
 USB_CHIP_TOKENS: builtins.set[builtins.str]
-scan_serial_ports: typing.Any
+scan_serial_ports: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[serial_scan.PortObservation]]]
 def build_identity(firmware: typing.Optional[builtins.str], port_info: typing.Optional[ports.SerialPortInfo], device_name: typing.Optional[builtins.str] = None) -> discovery.DeviceIdentity:
     r"""
     Assembles a `DeviceIdentity` from serial scan artifacts. A
@@ -32,13 +35,13 @@ def build_identity(firmware: typing.Optional[builtins.str], port_info: typing.Op
     matching tokens.
     """
 
-def collect_serial_recognizers(driver_classes: typing.Sequence[typing.Any]) -> list:
+def collect_serial_recognizers(driver_classes: typing.Sequence[builtins.type]) -> builtins.list[tuple[builtins.type, spec.SerialRecognizer]]:
     r"""
     Pairs every driver whose ``DISCOVERY`` spec declares a valid
     serial recognizer with it.
     """
 
-def find_serial_devices(driver_classes: typing.Sequence[typing.Any], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> typing.Any:
+def find_serial_devices(driver_classes: typing.Sequence[builtins.type], ports: typing.Optional[typing.Iterable[builtins.str]] = None, baud_rates: typing.Optional[typing.Iterable[builtins.int]] = None, exclude_ports: typing.Optional[typing.Iterable[builtins.str]] = None) -> collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]:
     r"""
     Runs one serial scan and evaluates it against every declared
     serial recognizer. Like every channel, this never raises: failures
@@ -46,7 +49,7 @@ def find_serial_devices(driver_classes: typing.Sequence[typing.Any], ports: typi
     slow or silent adapter can at most cost its own probe time.
     """
 
-def normalize_tokens(*texts: typing.Any) -> builtins.frozenset[builtins.str]:
+def normalize_tokens(*texts: typing.Optional[builtins.str]) -> builtins.frozenset[builtins.str]:
     r"""
     Splits arbitrary identification strings (descriptions, by-id link
     names, manufacturer strings) into lowercase word tokens suitable

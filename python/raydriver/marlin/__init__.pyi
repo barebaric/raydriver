@@ -12,9 +12,11 @@ from raydriver.core import transport
 from raydriver.core import types
 import typing
 from . import parser
+from . import probe
 __all__ = [
     "MarlinSession",
     "parser",
+    "probe",
 ]
 
 @typing.final
@@ -39,76 +41,81 @@ class MarlinSession:
     def job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> MarlinSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.MarlinConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> MarlinSession: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.SessionConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> MarlinSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.MarlinConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> MarlinSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def connect(self) -> typing.Any:
+    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[probe.MarlinDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
+        Run the device census: query M115, M211, M503 and M149,
+        and return the structured result as a dict. *boot_lines* are
+        the startup messages the caller observed on the session,
+        used to refine the firmware version.
         """
-    def disconnect(self) -> typing.Any:
+    def connect(self) -> collections.abc.Awaitable[None]: ...
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the transport.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any:
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Send a command and await its full response.
         """
-    def execute_command(self, command: builtins.str) -> typing.Any:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Queue a command and await its response (identical to
         `execute_interactive_command`).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[typing.Any] = None) -> typing.Any:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the ping-pong protocol.
         
         `op_line_map` maps G-code line indices to op indices for
         progress reporting.
         """
-    def run_raw(self, machine_code: builtins.str) -> typing.Any:
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Execute a raw G-code string line by line.
         """
-    def cancel(self, emergency: builtins.bool = False) -> typing.Any:
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Abort the running job: M410 quick stop and safety shutdown.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> typing.Any:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes (e.g.
         `["X"]`).
         """
-    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> typing.Any:
+    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute position (mm) at `speed` (mm/min).
         """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> typing.Any:
+    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
         r"""
         Jog by relative deltas (mm) at `speed` (mm/min).
         """
-    def select_tool(self, tool_number: builtins.int) -> typing.Any: ...
-    def clear_alarm(self) -> typing.Any:
+    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]: ...
+    def clear_alarm(self) -> collections.abc.Awaitable[None]:
         r"""
         Clear an alarm state with the dialect's clear command.
         """
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power.  `power` is the absolute S value; `None`
         (or zero) turns the laser off.
         """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power for focus mode; `None` turns the laser off.
         """
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> typing.Any:
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]:
         r"""
         Set a WCS offset via the dialect's `set_wcs_offset` template.
         """
-    def detect_unit_system(self) -> typing.Any:
+    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
         Query the device's active linear unit via `M149`
         ("metric"/"imperial"), or None when it cannot be determined.

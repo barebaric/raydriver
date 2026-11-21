@@ -37,39 +37,39 @@ class M2Session:
         r"""
         WebSocket URI of the configured device.
         """
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> M2Session:
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.M2Config]], event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> M2Session:
         r"""
         Create an M2 session for the configured host.
         """
-    def connect(self) -> typing.Any:
+    def connect(self) -> collections.abc.Awaitable[None]:
         r"""
         Connect and start monitoring the M2.
         """
-    def disconnect(self) -> typing.Any:
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop monitoring and close the connection.
         """
-    def start(self) -> typing.Any:
+    def start(self) -> collections.abc.Awaitable[None]:
         r"""
         Start a job already staged on the device.
         """
-    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
         r"""
         Pause the current job, or resume it when `hold` is false.
         """
-    def cancel(self) -> typing.Any:
+    def cancel(self) -> collections.abc.Awaitable[None]:
         r"""
         Cancel the current job.
         """
-    def home(self) -> typing.Any:
+    def home(self) -> collections.abc.Awaitable[None]:
         r"""
         Home the laser head.
         """
-    def move_to(self, x: builtins.float, y: builtins.float, speed: builtins.float = 18000.0) -> typing.Any:
+    def move_to(self, x: builtins.float, y: builtins.float, speed: builtins.float = 18000.0) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute XY coordinate in millimeters.
         """
-    def jog(self, dx: builtins.float = 0.0, dy: builtins.float = 0.0, dz: builtins.float = 0.0, speed: builtins.float = 18000.0) -> typing.Any:
+    def jog(self, dx: builtins.float = 0.0, dy: builtins.float = 0.0, dz: builtins.float = 0.0, speed: builtins.float = 18000.0) -> collections.abc.Awaitable[None]:
         r"""
         Move by relative XYZ deltas in millimeters.
         """

@@ -1,4 +1,6 @@
-"""Typed session config dataclasses and the factory boundary."""
+"""Typed session config classes and the factory boundary."""
+
+import pytest
 
 from raydriver.config import (
     Esp3dConfig,
@@ -54,6 +56,18 @@ def test_remote_endpoint_to_dict():
         "remote_port": 8765,
         "token": "secret",
     }
+
+
+def test_grbl_options_defaults_are_flattened():
+    data = GrblTelnetConfig(host="grbl.local").to_dict()
+    assert data["stall_timeout_default"] == 30.0
+    assert data["poll_response_attempts"] == 10
+    assert "cached_rx_buffer_size" not in data
+
+
+def test_configs_are_keyword_only():
+    with pytest.raises(TypeError):
+        GrblSerialConfig("/dev/null")  # pyright: ignore[reportCallIssue]
 
 
 def test_session_accepts_typed_config():

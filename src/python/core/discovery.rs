@@ -27,7 +27,8 @@ use crate::core::discovery::types::{
     DeviceIdentity as CoreIdentity, DiscoveredDevice as CoreDevice,
 };
 use crate::core::discovery::{mdns, serial, subnet};
-use crate::python::pyfuture::spawn_future;
+use crate::python::core::json::JsonDict;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use types::{DeviceIdentity, DiscoveredDevice};
 
 /// Probe serial ports for device output.
@@ -45,7 +46,7 @@ fn scan_serial_ports(
     ports: Vec<String>,
     baud_rates: Option<Vec<u32>>,
     timeout: Option<f64>,
-) -> PyResult<Bound<'_, PyAny>> {
+) -> PyResult<PyAwait<'_, Vec<JsonDict>>> {
     let rates = baud_rates.unwrap_or_default();
     let deadline = timeout.map(Duration::from_secs_f64);
     spawn_future(py, async move {
@@ -58,9 +59,9 @@ fn scan_serial_ports(
                 dict.set_item("port", observation.port)?;
                 dict.set_item("baud_rate", observation.baud_rate)?;
                 dict.set_item("data", PyBytes::new(py, &observation.data))?;
-                out.push(dict);
+                out.push(JsonDict(dict.unbind()));
             }
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(out)
         })
     })
 }
@@ -78,7 +79,7 @@ fn scan_mdns_services(
     py: Python<'_>,
     service_types: Vec<String>,
     browse_window: f64,
-) -> PyResult<Bound<'_, PyAny>> {
+) -> PyResult<PyAwait<'_, Vec<JsonDict>>> {
     let window = Duration::from_secs_f64(browse_window);
     spawn_future(py, async move {
         let services = mdns::scan_mdns_services(service_types, window).await;
@@ -92,9 +93,9 @@ fn scan_mdns_services(
                 dict.set_item("port", service.port)?;
                 dict.set_item("server", service.server)?;
                 dict.set_item("txt", service.txt)?;
-                out.push(dict);
+                out.push(JsonDict(dict.unbind()));
             }
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(out)
         })
     })
 }
@@ -140,14 +141,12 @@ fn scan_subnet(
     port: u16,
     connect_timeout: f64,
     concurrency: usize,
-) -> PyResult<Bound<'_, PyAny>> {
+) -> PyResult<PyAwait<'_, Vec<String>>> {
     let timeout = Duration::from_secs_f64(connect_timeout);
     spawn_future(py, async move {
         let reachable =
             subnet::scan_subnet(hosts, port, timeout, concurrency).await;
-        Python::attach(|py| {
-            reachable.into_pyobject(py).map(|o| o.unbind().into_any())
-        })
+        Ok(reachable)
     })
 }
 
@@ -170,9 +169,10 @@ fn scan_subnet(
 #[pyo3(signature = (specs, subnets=None))]
 fn find_subnet_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[dict[builtins.str, builtins.object]]", imports = ("typing", "builtins")))]
     specs: Vec<Bound<'py, PyDict>>,
     subnets: Option<Vec<(String, u8)>>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<DiscoveredDevice>>> {
     let mut parsed = Vec::with_capacity(specs.len());
     let mut display = Vec::with_capacity(specs.len());
     for spec in &specs {
@@ -233,7 +233,7 @@ fn find_subnet_devices<'py>(
                     probe_profile: None,
                 });
             }
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(out)
         })
     })
 }
@@ -245,6 +245,7 @@ fn find_subnet_devices<'py>(
 #[pyfunction]
 fn device_key(
     driver_name: &str,
+    #[gen_stub(override_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
     params: &Bound<'_, PyDict>,
 ) -> PyResult<String> {
     Ok(crate::core::discovery::types::device_key(

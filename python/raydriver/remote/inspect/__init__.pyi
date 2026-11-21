@@ -2,6 +2,7 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "daemon_rpc",
@@ -9,9 +10,9 @@ __all__ = [
     "welcome_probe",
 ]
 
-def daemon_rpc(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str], tls_ca: typing.Optional[builtins.str], requests: typing.Any) -> typing.Any: ...
+def daemon_rpc(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str], tls_ca: typing.Optional[builtins.str], requests: typing.Sequence[tuple[builtins.str, dict[builtins.str, builtins.object]]]) -> collections.abc.Awaitable[tuple[typing.Optional[dict[builtins.str, builtins.object]], builtins.list[dict[builtins.str, builtins.object]]]]: ...
 
-def snapshot(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str] = None, tls_ca: typing.Optional[builtins.str] = None) -> typing.Any: ...
+def snapshot(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str] = None, tls_ca: typing.Optional[builtins.str] = None) -> collections.abc.Awaitable[dict[builtins.str, builtins.object]]: ...
 
-def welcome_probe(host: builtins.str, port: builtins.int) -> typing.Any: ...
+def welcome_probe(host: builtins.str, port: builtins.int) -> collections.abc.Awaitable[typing.Optional[dict[builtins.str, builtins.object]]]: ...
 

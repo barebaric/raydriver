@@ -15,20 +15,20 @@ sidebar_label: raydriver.core.discovery.raydriver_channel
 
 ### scan_mdns_services
 
-`Any`
+`Callable[..., Awaitable[list[mdns_scan.MDNSService]]]`
 
 ## Functions
 
 ### `find_raydriver_devices()`
 
 ```python
-find_raydriver_devices() -> Any
+find_raydriver_devices() -> Awaitable[list[discovery.DiscoveredDevice]]
 ```
 
 Browse for raydriver daemons and list their sessions.
 
 Like every channel, this never raises: failures are logged and bounded by timeouts.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                                          | Description |
+| --------- | --------------------------------------------- | ----------- |
+| _Returns_ | `Awaitable[list[discovery.DiscoveredDevice]]` |             |

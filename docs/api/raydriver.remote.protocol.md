@@ -193,153 +193,175 @@ pack(value: int) -> bytes
 ### `decode_event()`
 
 ```python
-decode_event(payload: Any) -> Optional[Any]
+decode_event(payload: dict[str, object]) -> Optional[core.SessionEvent]
 ```
 
-| Parameter | Type            | Description |
-| --------- | --------------- | ----------- |
-| `payload` | `Any`           |             |
-| _Returns_ | `Optional[Any]` |             |
+Decodes an event frame payload; `None` when it is not an event.
+
+| Parameter | Type                          | Description |
+| --------- | ----------------------------- | ----------- |
+| `payload` | `dict[str, object]`           |             |
+| _Returns_ | `Optional[core.SessionEvent]` |             |
 
 ### `decode_frame()`
 
 ```python
-decode_frame(payload: Sequence[int], max_bytes: Optional[int] = None) -> Any
+decode_frame(
+    payload: Sequence[int],
+    max_bytes: Optional[int] = None,
+) -> dict[str, object]
 ```
 
 | Parameter   | Type                   | Description |
 | ----------- | ---------------------- | ----------- |
 | `payload`   | `Sequence[int]`        |             |
 | `max_bytes` | `Optional[int] = None` |             |
-| _Returns_   | `Any`                  |             |
+| _Returns_   | `dict[str, object]`    |             |
 
 ### `decode_state()`
 
 ```python
-decode_state(payload: Any) -> types.DeviceState
+decode_state(payload: dict[str, object]) -> types.DeviceState
 ```
 
 | Parameter | Type                | Description |
 | --------- | ------------------- | ----------- |
-| `payload` | `Any`               |             |
+| `payload` | `dict[str, object]` |             |
 | _Returns_ | `types.DeviceState` |             |
 
 ### `encode_event()`
 
 ```python
-encode_event(event: core.SessionEvent) -> Any
+encode_event(event: core.SessionEvent) -> dict[str, object]
 ```
 
 | Parameter | Type                | Description |
 | --------- | ------------------- | ----------- |
 | `event`   | `core.SessionEvent` |             |
-| _Returns_ | `Any`               |             |
+| _Returns_ | `dict[str, object]` |             |
 
 ### `encode_frame()`
 
 ```python
-encode_frame(message: Any, max_bytes: Optional[int] = None) -> bytes
+encode_frame(
+    message: dict[str, object],
+    max_bytes: Optional[int] = None,
+) -> bytes
 ```
 
 | Parameter   | Type                   | Description |
 | ----------- | ---------------------- | ----------- |
-| `message`   | `Any`                  |             |
+| `message`   | `dict[str, object]`    |             |
 | `max_bytes` | `Optional[int] = None` |             |
 | _Returns_   | `bytes`                |             |
 
 ### `encode_state()`
 
 ```python
-encode_state(state: types.DeviceState) -> Any
+encode_state(state: types.DeviceState) -> dict[str, object]
 ```
 
 | Parameter | Type                | Description |
 | --------- | ------------------- | ----------- |
 | `state`   | `types.DeviceState` |             |
-| _Returns_ | `Any`               |             |
+| _Returns_ | `dict[str, object]` |             |
 
 ### `error_response()`
 
 ```python
-error_response(msg_id: int, code: str, message: str) -> Any
+error_response(msg_id: int, code: str, message: str) -> dict[str, object]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `msg_id`  | `int` |             |
-| `code`    | `str` |             |
-| `message` | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                | Description |
+| --------- | ------------------- | ----------- |
+| `msg_id`  | `int`               |             |
+| `code`    | `str`               |             |
+| `message` | `str`               |             |
+| _Returns_ | `dict[str, object]` |             |
 
 ### `event_frame()`
 
 ```python
-event_frame(session_id: str, seq: int, event: Any) -> Any
+event_frame(
+    session_id: str,
+    seq: int,
+    event: dict[str, object],
+) -> dict[str, object]
 ```
 
-| Parameter    | Type  | Description |
-| ------------ | ----- | ----------- |
-| `session_id` | `str` |             |
-| `seq`        | `int` |             |
-| `event`      | `Any` |             |
-| _Returns_    | `Any` |             |
+| Parameter    | Type                | Description |
+| ------------ | ------------------- | ----------- |
+| `session_id` | `str`               |             |
+| `seq`        | `int`               |             |
+| `event`      | `dict[str, object]` |             |
+| _Returns_    | `dict[str, object]` |             |
 
 ### `read_frame()`
 
 ```python
-read_frame(reader: Any) -> Any
+read_frame(reader: object) -> Awaitable[dict[str, object]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `reader`  | `Any` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                           | Description |
+| --------- | ------------------------------ | ----------- |
+| `reader`  | `object`                       |             |
+| _Returns_ | `Awaitable[dict[str, object]]` |             |
 
 ### `request()`
 
 ```python
-request(msg_id: int, type_: str, payload: Optional[Any] = None) -> Any
+request(
+    msg_id: int,
+    type_: str,
+    payload: Optional[dict[str, object]] = None,
+) -> dict[str, object]
 ```
 
-| Parameter | Type                   | Description |
-| --------- | ---------------------- | ----------- |
-| `msg_id`  | `int`                  |             |
-| `type_`   | `str`                  |             |
-| `payload` | `Optional[Any] = None` |             |
-| _Returns_ | `Any`                  |             |
+| Parameter | Type                                 | Description |
+| --------- | ------------------------------------ | ----------- |
+| `msg_id`  | `int`                                |             |
+| `type_`   | `str`                                |             |
+| `payload` | `Optional[dict[str, object]] = None` |             |
+| _Returns_ | `dict[str, object]`                  |             |
 
 ### `response()`
 
 ```python
-response(msg_id: int, payload: Optional[Any] = None) -> Any
+response(
+    msg_id: int,
+    payload: Optional[dict[str, object]] = None,
+) -> dict[str, object]
 ```
 
-| Parameter | Type                   | Description |
-| --------- | ---------------------- | ----------- |
-| `msg_id`  | `int`                  |             |
-| `payload` | `Optional[Any] = None` |             |
-| _Returns_ | `Any`                  |             |
+| Parameter | Type                                 | Description |
+| --------- | ------------------------------------ | ----------- |
+| `msg_id`  | `int`                                |             |
+| `payload` | `Optional[dict[str, object]] = None` |             |
+| _Returns_ | `dict[str, object]`                  |             |
 
 ### `welcome_payload()`
 
 ```python
-welcome_payload(raydriver_version: str, auth_required: bool) -> Any
+welcome_payload(
+    raydriver_version: str,
+    auth_required: bool,
+) -> dict[str, object]
 ```
 
-| Parameter           | Type   | Description |
-| ------------------- | ------ | ----------- |
-| `raydriver_version` | `str`  |             |
-| `auth_required`     | `bool` |             |
-| _Returns_           | `Any`  |             |
+| Parameter           | Type                | Description |
+| ------------------- | ------------------- | ----------- |
+| `raydriver_version` | `str`               |             |
+| `auth_required`     | `bool`              |             |
+| _Returns_           | `dict[str, object]` |             |
 
 ### `write_frame()`
 
 ```python
-write_frame(writer: Any, message: Any) -> Any
+write_frame(writer: object, message: dict[str, object]) -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `writer`  | `Any` |             |
-| `message` | `Any` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                | Description |
+| --------- | ------------------- | ----------- |
+| `writer`  | `object`            |             |
+| `message` | `dict[str, object]` |             |
+| _Returns_ | `Awaitable[None]`   |             |

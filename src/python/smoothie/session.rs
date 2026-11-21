@@ -14,7 +14,8 @@ use crate::python::events::PyEvents;
 use crate::python::grbl::session::{
     get_bool, get_f64, parse_dialect, transport_kind_from_config,
 };
-use crate::python::pyfuture::{none_obj, spawn_future};
+use crate::python::pyfuture::{spawn_future, PyAwait};
+use crate::python::smoothie::probe::SmoothieDeviceInfo;
 use crate::smoothie::session::{SmoothieConfig, SmoothieCore};
 
 fn build_smoothie_config(
@@ -70,15 +71,15 @@ impl SmoothieSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.SmoothieConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -94,15 +95,15 @@ impl SmoothieSession {
     fn with_transport(
         transport: PyRef<'_, crate::python::core::mock::MockTransport>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.SmoothieConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -113,23 +114,23 @@ impl SmoothieSession {
     }
 
     /// Open the connection and start the background tasks.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.connect().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Stop all background tasks and close the transport.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
             core.cleanup().await;
             events.quiesce();
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -140,7 +141,7 @@ impl SmoothieSession {
     fn probe_device<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, SmoothieDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             let mut replies: Vec<Vec<String>> = Vec::new();
@@ -150,16 +151,15 @@ impl SmoothieSession {
                         .await?,
                 );
             }
-            let census = crate::smoothie::probe::describe(
-                &replies[0],
-                &replies[1],
-                &replies[2],
-                &replies[3],
-                &replies[4],
-                &replies[5],
-            );
-            Python::attach(|py| {
-                crate::python::core::json::value_to_py(py, &census)
+            Ok(SmoothieDeviceInfo {
+                inner: crate::smoothie::probe::describe(
+                    &replies[0],
+                    &replies[1],
+                    &replies[2],
+                    &replies[3],
+                    &replies[4],
+                    &replies[5],
+                ),
             })
         })
     }
@@ -168,13 +168,10 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let lines = core.execute_interactive_command(command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
+            Ok(core.execute_interactive_command(command).await?)
         })
     }
 
@@ -184,14 +181,12 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let lines = core.execute_command(command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
-        })
+        spawn_future(
+            py,
+            async move { Ok(core.execute_command(command).await?) },
+        )
     }
 
     /// Stream a G-code program using the ping-pong protocol.
@@ -204,15 +199,19 @@ impl SmoothieSession {
         py: Python<'py>,
         gcode: String,
         op_line_map: Option<HashMap<usize, i64>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
+            imports = ("typing", "collections.abc")
+        ))]
         progress_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
             core.run(&gcode, op_map).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -221,11 +220,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         machine_code: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.run_raw(&machine_code).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -235,11 +234,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         hold: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_hold(hold).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -249,11 +248,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         emergency: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cancel(emergency).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -264,11 +263,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         axes: Option<Vec<String>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.home(axes).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -279,11 +278,11 @@ impl SmoothieSession {
         speed: f64,
         x: f64,
         y: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.move_to(speed, x, y).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -293,11 +292,11 @@ impl SmoothieSession {
         py: Python<'py>,
         speed: f64,
         deltas: Vec<(String, f64)>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.jog(speed, &deltas).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -305,20 +304,20 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         tool_number: i64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.select_tool(tool_number).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Clear an alarm state with the dialect's clear command.
-    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.clear_alarm().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -329,11 +328,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -343,11 +342,11 @@ impl SmoothieSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_focus_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -359,11 +358,11 @@ impl SmoothieSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_wcs_offset(&wcs_slot, x, y, z).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 

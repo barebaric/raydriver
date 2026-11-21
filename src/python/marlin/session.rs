@@ -15,7 +15,8 @@ use crate::python::events::PyEvents;
 use crate::python::grbl::session::{
     get_bool, get_f64, parse_dialect, transport_kind_from_config,
 };
-use crate::python::pyfuture::{none_obj, spawn_future};
+use crate::python::marlin::probe::MarlinDeviceInfo;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 fn build_marlin_config(
     kind: TransportKind,
@@ -72,15 +73,15 @@ impl MarlinSession {
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.MarlinConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -96,15 +97,15 @@ impl MarlinSession {
     fn with_transport(
         transport: PyRef<'_, crate::python::core::mock::MockTransport>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.MarlinConfig]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -115,23 +116,54 @@ impl MarlinSession {
     }
 
     /// Open the connection and start the background tasks.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    /// Run the device census: query M115, M211, M503 and M149,
+    /// and return the structured result as a dict. *boot_lines* are
+    /// the startup messages the caller observed on the session,
+    /// used to refine the firmware version.
+    #[pyo3(signature = (boot_lines=None))]
+    fn probe_device<'py>(
+        &self,
+        py: Python<'py>,
+        boot_lines: Option<Vec<String>>,
+    ) -> PyResult<PyAwait<'py, MarlinDeviceInfo>> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            let mut replies: Vec<Vec<String>> = Vec::new();
+            for command in crate::marlin::probe::CENSUS_COMMANDS {
+                let lines = core
+                    .execute_interactive_command(command.to_string())
+                    .await?;
+                replies.push(crate::marlin::probe::filter_ok_lines(&lines));
+            }
+            Ok(MarlinDeviceInfo {
+                inner: crate::marlin::probe::describe(
+                    &replies[0],
+                    &replies[1],
+                    &replies[2],
+                    &replies[3],
+                    &boot_lines.unwrap_or_default(),
+                ),
+            })
+        })
+    }
+
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.connect().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Stop all background tasks and close the transport.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
             core.cleanup().await;
             events.quiesce();
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -140,13 +172,10 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let lines = core.execute_interactive_command(command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
+            Ok(core.execute_interactive_command(command).await?)
         })
     }
 
@@ -156,14 +185,12 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            let lines = core.execute_command(command).await?;
-            Python::attach(|py| {
-                Ok(lines.into_pyobject(py)?.unbind().into_any())
-            })
-        })
+        spawn_future(
+            py,
+            async move { Ok(core.execute_command(command).await?) },
+        )
     }
 
     /// Stream a G-code program using the ping-pong protocol.
@@ -176,15 +203,19 @@ impl MarlinSession {
         py: Python<'py>,
         gcode: String,
         op_line_map: Option<HashMap<usize, i64>>,
+        #[gen_stub(override_type(
+            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
+            imports = ("typing", "collections.abc")
+        ))]
         progress_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
             core.run(&gcode, op_map).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -193,11 +224,11 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         machine_code: String,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.run_raw(&machine_code).await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -207,11 +238,11 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         emergency: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cancel(emergency).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -222,11 +253,11 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         axes: Option<Vec<String>>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.home(axes).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -237,11 +268,11 @@ impl MarlinSession {
         speed: f64,
         x: f64,
         y: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.move_to(speed, x, y).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -251,11 +282,11 @@ impl MarlinSession {
         py: Python<'py>,
         speed: f64,
         deltas: Vec<(String, f64)>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.jog(speed, &deltas).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -263,20 +294,20 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         tool_number: i64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.select_tool(tool_number).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Clear an alarm state with the dialect's clear command.
-    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.clear_alarm().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -287,11 +318,11 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -301,11 +332,11 @@ impl MarlinSession {
         &self,
         py: Python<'py>,
         power: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_focus_power(power).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -317,11 +348,11 @@ impl MarlinSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_wcs_offset(&wcs_slot, x, y, z).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -330,15 +361,16 @@ impl MarlinSession {
     fn detect_unit_system<'py>(
         &self,
         py: Python<'py>,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, Option<String>>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             let unit = core.detect_unit_system().await?;
-            let name = unit.map(|u| match u {
-                crate::core::types::UnitSystem::Metric => "metric",
-                crate::core::types::UnitSystem::Imperial => "imperial",
-            });
-            Python::attach(|py| Ok(name.into_pyobject(py)?.unbind().into_any()))
+            Ok(unit.map(|u| match u {
+                crate::core::types::UnitSystem::Metric => "metric".to_string(),
+                crate::core::types::UnitSystem::Imperial => {
+                    "imperial".to_string()
+                }
+            }))
         })
     }
 

@@ -23,7 +23,7 @@ firmware: Optional[str]
 ### `tokens`
 
 ```python
-tokens: Any
+tokens: frozenset[str]
 ```
 
 The identity tokens as a frozenset of strings.
@@ -79,7 +79,7 @@ label: str
 ### `params`
 
 ```python
-params: dict
+params: dict[str, object]
 ```
 
 ### `probe_name`
@@ -93,36 +93,36 @@ The machine name the device itself reported, if any.
 ### `probe_profile`
 
 ```python
-probe_profile: Optional[Any]
+probe_profile: Optional[object]
 ```
 
 Profile data collected by probing the device after discovery; attached by the embedding
-application's UI. Opaque here.
+application's UI. Opaque here: the embedding application's profile object, not a core type.
 
 ## Functions
 
 ### `device_key()`
 
 ```python
-device_key(driver_name: str, params: dict) -> str
+device_key(driver_name: str, params: dict[str, object]) -> str
 ```
 
 Stable identity for a device from its driver and connection parameters: serial ports by path,
 network devices by host and TCP port, remote devices by daemon endpoint plus device resource.
 
-| Parameter     | Type   | Description |
-| ------------- | ------ | ----------- |
-| `driver_name` | `str`  |             |
-| `params`      | `dict` |             |
-| _Returns_     | `str`  |             |
+| Parameter     | Type                | Description |
+| ------------- | ------------------- | ----------- |
+| `driver_name` | `str`               |             |
+| `params`      | `dict[str, object]` |             |
+| _Returns_     | `str`               |             |
 
 ### `find_subnet_devices()`
 
 ```python
 find_subnet_devices(
-    specs: Sequence[dict],
+    specs: Sequence[dict[str, object]],
     subnets: Optional[Sequence[tuple[str, int]]] = None,
-) -> Any
+) -> Awaitable[list[DiscoveredDevice]]
 ```
 
 Scan the local subnets for declared TCP ports and confirm each reachable host with its spec's probe.
@@ -138,9 +138,9 @@ interfaces.
 
 | Parameter | Type                                         | Description |
 | --------- | -------------------------------------------- | ----------- |
-| `specs`   | `Sequence[dict]`                             |             |
+| `specs`   | `Sequence[dict[str, object]]`                |             |
 | `subnets` | `Optional[Sequence[tuple[str, int]]] = None` |             |
-| _Returns_ | `Any`                                        |             |
+| _Returns_ | `Awaitable[list[DiscoveredDevice]]`          |             |
 
 ### `local_subnets()`
 
@@ -160,7 +160,7 @@ The local non-loopback IPv4 interfaces as (address, prefixlen) pairs, for subnet
 scan_mdns_services(
     service_types: Sequence[str],
     browse_window: float = 2.0,
-) -> Any
+) -> Awaitable[list[dict[str, object]]]
 ```
 
 Browse mDNS for the given service types.
@@ -169,11 +169,11 @@ Returns one dict per resolved service with the keys `service_type` (normalized, 
 `name`, `host`, `port`, `server` and `txt` (a str->str dict). `browse_window` is the listen time in
 seconds.
 
-| Parameter       | Type            | Description |
-| --------------- | --------------- | ----------- |
-| `service_types` | `Sequence[str]` |             |
-| `browse_window` | `float = 2.0`   |             |
-| _Returns_       | `Any`           |             |
+| Parameter       | Type                                 | Description |
+| --------------- | ------------------------------------ | ----------- |
+| `service_types` | `Sequence[str]`                      |             |
+| `browse_window` | `float = 2.0`                        |             |
+| _Returns_       | `Awaitable[list[dict[str, object]]]` |             |
 
 ### `scan_serial_ports()`
 
@@ -182,7 +182,7 @@ scan_serial_ports(
     ports: Sequence[str],
     baud_rates: Optional[Sequence[int]] = None,
     timeout: Optional[float] = None,
-) -> Any
+) -> Awaitable[list[dict[str, object]]]
 ```
 
 Probe serial ports for device output.
@@ -191,12 +191,12 @@ Opens each port once, tries the baud rates in order and captures everything a ta
 Returns one dict per talking port with the keys `port`, `baud_rate` and `data` (bytes). `timeout`
 bounds the whole scan; observations collected so far are still returned when it expires.
 
-| Parameter    | Type                             | Description |
-| ------------ | -------------------------------- | ----------- |
-| `ports`      | `Sequence[str]`                  |             |
-| `baud_rates` | `Optional[Sequence[int]] = None` |             |
-| `timeout`    | `Optional[float] = None`         |             |
-| _Returns_    | `Any`                            |             |
+| Parameter    | Type                                 | Description |
+| ------------ | ------------------------------------ | ----------- |
+| `ports`      | `Sequence[str]`                      |             |
+| `baud_rates` | `Optional[Sequence[int]] = None`     |             |
+| `timeout`    | `Optional[float] = None`             |             |
+| _Returns_    | `Awaitable[list[dict[str, object]]]` |             |
 
 ### `scan_subnet()`
 
@@ -206,7 +206,7 @@ scan_subnet(
     port: int,
     connect_timeout: float = 0.5,
     concurrency: int = 32,
-) -> Any
+) -> Awaitable[list[str]]
 ```
 
 TCP-connect to *port* on every host and return the hosts that accept a connection, in input order.
@@ -214,13 +214,13 @@ TCP-connect to *port* on every host and return the hosts that accept a connectio
 At most *concurrency* connects run in flight, each bounded by *connect_timeout* seconds. Intended
 for explicit, user-requested scans only.
 
-| Parameter         | Type            | Description |
-| ----------------- | --------------- | ----------- |
-| `hosts`           | `Sequence[str]` |             |
-| `port`            | `int`           |             |
-| `connect_timeout` | `float = 0.5`   |             |
-| `concurrency`     | `int = 32`      |             |
-| _Returns_         | `Any`           |             |
+| Parameter         | Type                   | Description |
+| ----------------- | ---------------------- | ----------- |
+| `hosts`           | `Sequence[str]`        |             |
+| `port`            | `int`                  |             |
+| `connect_timeout` | `float = 0.5`          |             |
+| `concurrency`     | `int = 32`             |             |
+| _Returns_         | `Awaitable[list[str]]` |             |
 
 ### `subnet_hosts()`
 

@@ -13,14 +13,13 @@ use std::time::Duration;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::PyBool;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use regex::{Regex, RegexBuilder};
 
 use crate::core::discovery::probe::{
     probe_http, probe_tcp, HttpProbe, TcpProbe,
 };
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 use super::helpers;
 
@@ -28,8 +27,9 @@ use super::helpers;
 ///
 /// The probe waits *banner_wait* seconds for an unsolicited banner,
 /// then (when *probe_command* is set) sends it and waits for the
-/// remaining *timeout* seconds. It returns a truthy value when a
-/// line starts with *match_prefix*, and `None` otherwise.
+/// remaining *timeout* seconds. It resolves to whether a line
+/// starts with *match_prefix*: ``True`` claims the candidate,
+/// ``False`` does not.
 #[gen_stub_pyclass(module = "raydriver.core.discovery.fingerprints")]
 #[pyclass(
     module = "raydriver.core.discovery.fingerprints",
@@ -88,13 +88,14 @@ impl TcpFingerprint {
         self.timeout
     }
 
-    #[gen_stub(override_return_type(type_repr = "typing.Awaitable[typing.Any]", imports = ("typing",)))]
+    /// The claim is boolean: ``True`` claims the candidate host for
+    /// the declaring driver, ``False`` leaves it unclaimed.
     fn __call__<'py>(
         &self,
         py: Python<'py>,
         host: String,
         port: u16,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, bool>> {
         let config = self.clone();
         spawn_future(py, async move {
             let timeout = Duration::from_secs_f64(config.timeout.max(0.01));
@@ -117,13 +118,7 @@ impl TcpFingerprint {
             )
             .await
             .is_some();
-            Python::attach(|py| {
-                if matched {
-                    Ok(PyBool::new(py, true).to_owned().into_any().unbind())
-                } else {
-                    Ok(py.None())
-                }
-            })
+            Ok(matched)
         })
     }
 }
@@ -133,8 +128,8 @@ impl TcpFingerprint {
 /// The probe GETs *path* and reports a match when the endpoint
 /// answers `200` with a body matching *match_regex* (matched
 /// case-insensitively), bounded by *timeout* seconds and *max_bytes*
-/// of body. It returns a truthy value on a match, and `None` on any
-/// failure.
+/// of body. It resolves to ``True`` on a match, and ``False`` on
+/// any failure.
 #[gen_stub_pyclass(module = "raydriver.core.discovery.fingerprints")]
 #[pyclass(
     module = "raydriver.core.discovery.fingerprints",
@@ -196,13 +191,14 @@ impl HttpFingerprint {
         self.max_bytes
     }
 
-    #[gen_stub(override_return_type(type_repr = "typing.Awaitable[typing.Any]", imports = ("typing",)))]
+    /// The claim is boolean: ``True`` claims the candidate host for
+    /// the declaring driver, ``False`` leaves it unclaimed.
     fn __call__<'py>(
         &self,
         py: Python<'py>,
         host: String,
         port: u16,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, bool>> {
         let config = self.clone();
         spawn_future(py, async move {
             let matched = probe_http(
@@ -217,13 +213,7 @@ impl HttpFingerprint {
             )
             .await
             .is_some();
-            Python::attach(|py| {
-                if matched {
-                    Ok(PyBool::new(py, true).to_owned().into_any().unbind())
-                } else {
-                    Ok(py.None())
-                }
-            })
+            Ok(matched)
         })
     }
 }

@@ -9,7 +9,7 @@ Confirms a generic HTTP service by matching the response body.
 
 The probe GETs *path* and reports a match when the endpoint answers `200` with a body matching
 *match_regex* (matched case-insensitively), bounded by *timeout* seconds and *max_bytes* of body. It
-returns a truthy value on a match, and `None` on any failure.
+resolves to `True` on a match, and `False` on any failure.
 
 ### `match_regex`
 
@@ -40,8 +40,8 @@ timeout: float
 Confirms a generic TCP service by matching a response line.
 
 The probe waits *banner_wait* seconds for an unsolicited banner, then (when *probe_command* is set)
-sends it and waits for the remaining *timeout* seconds. It returns a truthy value when a line starts
-with *match_prefix*, and `None` otherwise.
+sends it and waits for the remaining *timeout* seconds. It resolves to whether a line starts with
+*match_prefix*: `True` claims the candidate, `False` does not.
 
 ### `banner_wait`
 

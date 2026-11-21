@@ -11,12 +11,38 @@ use std::collections::HashSet;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
+use pyo3_stub_gen::{PyStubType, TypeInfo};
 
-use crate::python::pyfuture::{await_py, spawn_future};
+use crate::python::pyfuture::{await_py, spawn_future, PyAwait};
 
 use super::helpers;
 use super::spec::{DiscoverySpec, TcpRecognizer};
 use super::types::DiscoveredDevice;
+
+/// A replaceable device-scan callable: the channels resolve their
+/// collaborators from their module namespace at call time (see
+/// helpers), so the engine's scanner attributes are typed as async
+/// callables resolving to the discovered devices.
+pub(crate) struct ScanDevicesFn;
+
+impl PyStubType for ScanDevicesFn {
+    fn type_output() -> TypeInfo {
+        let device = DiscoveredDevice::type_output();
+        let mut import = device.import.clone();
+        import.insert("collections.abc".into());
+        import.insert("builtins".into());
+        TypeInfo {
+            name: format!(
+                "collections.abc.Callable[..., \
+                 collections.abc.Awaitable[builtins.list[{}]]]",
+                device.name
+            ),
+            source_module: None,
+            import,
+            type_refs: device.type_refs,
+        }
+    }
+}
 
 const LOGGER: &str = "raydriver.core.discovery.engine";
 
@@ -35,6 +61,7 @@ const SUBNET_SCAN_TIMEOUT: f64 = 30.0;
 #[pyo3(signature = (driver_classes, ports=None, baud_rates=None, exclude_ports=None))]
 fn find_all_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     ports: Option<Bound<'_, PyAny>>,
@@ -42,7 +69,7 @@ fn find_all_devices<'py>(
     baud_rates: Option<Bound<'_, PyAny>>,
     #[gen_stub(override_type(type_repr = "typing.Optional[typing.Iterable[builtins.str]]", imports = ("typing", "builtins")))]
     exclude_ports: Option<Bound<'_, PyAny>>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<Py<DiscoveredDevice>>>> {
     let serial = helpers::attr(py, "engine", "find_serial_devices")?;
     let network = helpers::attr(py, "engine", "find_network_devices")?;
     let raydriver = helpers::attr(py, "engine", "find_raydriver_devices")?;
@@ -71,8 +98,7 @@ fn find_all_devices<'py>(
                     result?.bind(py).extract()?;
                 devices.extend(found);
             }
-            let deduped = dedupe(py, devices)?;
-            deduped.into_pyobject(py).map(|o| o.unbind().into_any())
+            dedupe(py, devices)
         })
     })
 }
@@ -85,8 +111,9 @@ fn find_all_devices<'py>(
 #[pyfunction]
 fn find_subnet_devices<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(type_repr = "typing.Sequence[builtins.type]", imports = ("typing", "builtins")))]
     driver_classes: Vec<Bound<'_, PyAny>>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<Py<DiscoveredDevice>>>> {
     let mut specs = Vec::new();
     for cls in &driver_classes {
         let Ok(spec) = cls.getattr("DISCOVERY") else {
@@ -116,10 +143,8 @@ fn find_subnet_devices<'py>(
     }
     if specs.is_empty() {
         return spawn_future(py, async move {
-            Python::attach(|py| {
-                let empty: Vec<DiscoveredDevice> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
-            })
+            let empty: Vec<Py<DiscoveredDevice>> = Vec::new();
+            Ok(empty)
         });
     }
 
@@ -129,7 +154,7 @@ fn find_subnet_devices<'py>(
     spawn_future(py, async move {
         let outcome = scan_fut.await;
         Python::attach(|py| match outcome {
-            Ok(value) => Ok(value),
+            Ok(value) => value.bind(py).extract::<Vec<Py<DiscoveredDevice>>>(),
             Err(e) => {
                 if helpers::is_timeout(py, &e) {
                     helpers::log_warning(
@@ -145,8 +170,8 @@ fn find_subnet_devices<'py>(
                         &e,
                     );
                 }
-                let empty: Vec<DiscoveredDevice> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
+                let empty: Vec<Py<DiscoveredDevice>> = Vec::new();
+                Ok(empty)
             }
         })
     })
@@ -214,20 +239,20 @@ pyo3_stub_gen::module_variable!(
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.engine",
     "find_serial_devices",
-    Py<PyAny>
+    ScanDevicesFn
 );
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.engine",
     "find_network_devices",
-    Py<PyAny>
+    ScanDevicesFn
 );
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.engine",
     "find_raydriver_devices",
-    Py<PyAny>
+    ScanDevicesFn
 );
 pyo3_stub_gen::module_variable!(
     "raydriver.core.discovery.engine",
     "_rust_find_subnet_devices",
-    Py<PyAny>
+    ScanDevicesFn
 );

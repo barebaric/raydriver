@@ -9,7 +9,8 @@ use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
 use super::helpers;
 use crate::core::discovery::daemon;
-use crate::python::pyfuture::spawn_future;
+use crate::python::core::json::JsonDict;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 /// Lists the cameras a daemon advertises on the device host.
 ///
@@ -38,7 +39,7 @@ fn list_cameras(
     tls_ca: Option<String>,
     tls_hostname: Option<String>,
     timeout: f64,
-) -> PyResult<Bound<'_, PyAny>> {
+) -> PyResult<PyAwait<'_, Vec<JsonDict>>> {
     let duration = Duration::from_secs_f64(timeout.max(0.0));
     spawn_future(py, async move {
         let cameras = daemon::query_cameras(
@@ -58,9 +59,9 @@ fn list_cameras(
                 dict.set_item("name", camera.name)?;
                 dict.set_item("uri", camera.uri)?;
                 dict.set_item("type", camera.source_type)?;
-                out.push(dict);
+                out.push(JsonDict(dict.unbind()));
             }
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
+            Ok(out)
         })
     })
 }

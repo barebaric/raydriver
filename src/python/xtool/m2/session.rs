@@ -7,7 +7,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
-use crate::python::pyfuture::{none_obj, spawn_future};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::xtool::m2::session::{M2Config, M2Core};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
@@ -66,14 +66,14 @@ impl M2Session {
     /// Create an M2 session for the configured host.
     fn new(
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[typing.Union[dict, config.SessionConfig]]",
+            type_repr = "typing.Optional[typing.Union[dict, config.M2Config]]",
             imports = ("typing", "raydriver.config")
         ))]
         config: Option<Bound<'_, PyAny>>,
 
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]]",
-            imports = ("collections.abc", "typing", "raydriver.core")
+            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
@@ -82,32 +82,32 @@ impl M2Session {
     }
 
     /// Connect and start monitoring the M2.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
         let core = self.core.clone();
         spawn_future(py, async move {
             core.connect().await;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Stop monitoring and close the connection.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         spawn_future(py, async move {
             core.disconnect().await;
             events.quiesce();
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Start a job already staged on the device.
-    fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn start<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.start().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -117,29 +117,29 @@ impl M2Session {
         &self,
         py: Python<'py>,
         hold: bool,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.set_hold(hold).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Cancel the current job.
-    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.cancel().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
     /// Home the laser head.
-    fn home<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.home().await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -151,11 +151,11 @@ impl M2Session {
         x: f64,
         y: f64,
         speed: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.move_to(x, y, speed).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 
@@ -168,11 +168,11 @@ impl M2Session {
         dy: f64,
         dz: f64,
         speed: f64,
-    ) -> PyResult<Bound<'py, PyAny>> {
+    ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.jog(dx, dy, dz, speed).await?;
-            Ok(Python::attach(none_obj))
+            Ok(())
         })
     }
 

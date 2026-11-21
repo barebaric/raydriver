@@ -26,23 +26,23 @@ sidebar_label: raydriver.remote.daemon
 ### `get()`
 
 ```python
-get() -> Any
+get() -> Awaitable[dict[str, object]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                           | Description |
+| --------- | ------------------------------ | ----------- |
+| _Returns_ | `Awaitable[dict[str, object]]` |             |
 
 ### `put()`
 
 ```python
-put(frame: Any) -> None
+put(frame: dict[str, object]) -> None
 ```
 
-| Parameter | Type   | Description |
-| --------- | ------ | ----------- |
-| `frame`   | `Any`  |             |
-| _Returns_ | `None` |             |
+| Parameter | Type                | Description |
+| --------- | ------------------- | ----------- |
+| `frame`   | `dict[str, object]` |             |
+| _Returns_ | `None`              |             |
 
 ## Daemon
 
@@ -55,29 +55,29 @@ config: DaemonConfig
 ### `start()`
 
 ```python
-start() -> Any
+start() -> Awaitable[StartedServer]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| _Returns_ | `Awaitable[StartedServer]` |             |
 
 ### `stop()`
 
 ```python
-stop() -> Any
+stop() -> Awaitable[None]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ## DaemonConfig
 
 ### `cameras`
 
 ```python
-cameras: Any
+cameras: list[dict[str, object]]
 ```
 
 ### `host`
@@ -125,7 +125,7 @@ ring_size: int
 ### `sessions`
 
 ```python
-sessions: Any
+sessions: list[dict[str, object]]
 ```
 
 ### `tls_cert`
@@ -144,4 +144,24 @@ tls_key: Optional[str]
 
 ```python
 token: Optional[str]
+```
+
+## SocketInfo
+
+### `getsockname()`
+
+```python
+getsockname() -> tuple[str, int]
+```
+
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `tuple[str, int]` |             |
+
+## StartedServer
+
+### `sockets`
+
+```python
+sockets: tuple[SocketInfo, ...]
 ```

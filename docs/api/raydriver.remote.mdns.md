@@ -17,6 +17,16 @@ sidebar_label: raydriver.remote.mdns
 info: ServiceInfo
 ```
 
+### `close()`
+
+```python
+close() -> Awaitable[None]
+```
+
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
+
 ## ServiceInfo
 
 ### `port`
@@ -24,6 +34,22 @@ info: ServiceInfo
 ```python
 port: int
 ```
+
+### `properties`
+
+```python
+properties: dict[bytes, bytes]
+```
+
+### `parsed_addresses()`
+
+```python
+parsed_addresses() -> list[str]
+```
+
+| Parameter | Type        | Description |
+| --------- | ----------- | ----------- |
+| _Returns_ | `list[str]` |             |
 
 ## Functions
 
@@ -66,23 +92,23 @@ announce(
     config: daemon.DaemonConfig,
     port: int,
     name: Optional[str] = None,
-) -> Any
+) -> Awaitable[Optional[Announcer]]
 ```
 
-| Parameter | Type                   | Description |
-| --------- | ---------------------- | ----------- |
-| `config`  | `daemon.DaemonConfig`  |             |
-| `port`    | `int`                  |             |
-| `name`    | `Optional[str] = None` |             |
-| _Returns_ | `Any`                  |             |
+| Parameter | Type                             | Description |
+| --------- | -------------------------------- | ----------- |
+| `config`  | `daemon.DaemonConfig`            |             |
+| `port`    | `int`                            |             |
+| `name`    | `Optional[str] = None`           |             |
+| _Returns_ | `Awaitable[Optional[Announcer]]` |             |
 
 ### `browse_daemons()`
 
 ```python
-browse_daemons(timeout: float = 3.0) -> Any
+browse_daemons(timeout: float = 3.0) -> Awaitable[list[dict[str, object]]]
 ```
 
-| Parameter | Type          | Description |
-| --------- | ------------- | ----------- |
-| `timeout` | `float = 3.0` |             |
-| _Returns_ | `Any`         |             |
+| Parameter | Type                                 | Description |
+| --------- | ------------------------------------ | ----------- |
+| `timeout` | `float = 3.0`                        |             |
+| _Returns_ | `Awaitable[list[dict[str, object]]]` |             |

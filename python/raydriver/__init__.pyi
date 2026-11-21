@@ -3,19 +3,23 @@
 
 import builtins
 import typing
+from . import config
 from . import core
 from . import grbl
 from . import marlin
 from . import octoprint
+from . import protocols
 from . import remote
 from . import smoothie
 from . import xtool
 __all__ = [
+    "config",
     "core",
     "grbl",
     "init_logging",
     "marlin",
     "octoprint",
+    "protocols",
     "remote",
     "smoothie",
     "xtool",

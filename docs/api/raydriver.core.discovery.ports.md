@@ -7,7 +7,7 @@ sidebar_label: raydriver.core.discovery.ports
 
 ### list_serial_ports
 
-`Any`
+`Callable[[], list[dict[str, object]]]`
 
 ## SerialPortInfo
 

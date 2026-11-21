@@ -75,15 +75,15 @@ Reduces a service type to its canonical `_name._transport` form: `_octoprint._tc
 scan_mdns_services(
     service_types: Iterable[str],
     browse_window: float = 2.0,
-) -> Any
+) -> Awaitable[list[MDNSService]]
 ```
 
 Browses *service_types* over mDNS for a short window and returns every service that could be
 resolved to an address. Failures (no network, no responder) are logged and yield an empty list
 rather than raising.
 
-| Parameter       | Type            | Description |
-| --------------- | --------------- | ----------- |
-| `service_types` | `Iterable[str]` |             |
-| `browse_window` | `float = 2.0`   |             |
-| _Returns_       | `Any`           |             |
+| Parameter       | Type                           | Description |
+| --------------- | ------------------------------ | ----------- |
+| `service_types` | `Iterable[str]`                |             |
+| `browse_window` | `float = 2.0`                  |             |
+| _Returns_       | `Awaitable[list[MDNSService]]` |             |

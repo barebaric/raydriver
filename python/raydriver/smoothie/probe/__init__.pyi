@@ -4,13 +4,42 @@
 import builtins
 import typing
 __all__ = [
+    "SmoothieDeviceInfo",
     "describe",
 ]
 
-def describe(version_lines: typing.Sequence[builtins.str], alpha_max_lines: typing.Sequence[builtins.str], beta_max_lines: typing.Sequence[builtins.str], alpha_max_rate_lines: typing.Sequence[builtins.str], beta_max_rate_lines: typing.Sequence[builtins.str], acceleration_lines: typing.Sequence[builtins.str]) -> typing.Any:
+@typing.final
+class SmoothieDeviceInfo:
     r"""
-    Builds the census dict from raw Smoothieware census-command
-    responses.
+    The structured result of probing a Smoothieware device: firmware
+    identity and the motion limits applications need.
+    """
+    @property
+    def firmware_version(self) -> typing.Optional[builtins.str]: ...
+    @property
+    def alpha_max(self) -> typing.Optional[builtins.float]: ...
+    @property
+    def beta_max(self) -> typing.Optional[builtins.float]: ...
+    @property
+    def alpha_rate(self) -> typing.Optional[builtins.float]: ...
+    @property
+    def beta_rate(self) -> typing.Optional[builtins.float]: ...
+    @property
+    def acceleration(self) -> typing.Optional[builtins.float]: ...
+    @property
+    def max_travel(self) -> typing.Optional[tuple[builtins.float, builtins.float]]: ...
+    @property
+    def max_speed(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def acceleration_steps(self) -> typing.Optional[builtins.int]: ...
+    def to_dict(self) -> dict:
+        r"""
+        The mapping form of the census (the daemon wire form).
+        """
+
+def describe(version_lines: typing.Sequence[builtins.str], alpha_max_lines: typing.Sequence[builtins.str], beta_max_lines: typing.Sequence[builtins.str], alpha_max_rate_lines: typing.Sequence[builtins.str], beta_max_rate_lines: typing.Sequence[builtins.str], acceleration_lines: typing.Sequence[builtins.str]) -> SmoothieDeviceInfo:
+    r"""
+    Builds the census from raw Smoothieware census-command responses.
     
     Pure data transformation with no I/O; the caller is responsible
     for communicating with the device and passing the collected

@@ -13,18 +13,18 @@ daemon_rpc(
     port: int,
     token: Optional[str],
     tls_ca: Optional[str],
-    requests: Any,
-) -> Any
+    requests: Sequence[tuple[str, dict[str, object]]],
+) -> Awaitable[tuple[Optional[dict[str, object]], list[dict[str, object]]]]
 ```
 
-| Parameter  | Type            | Description |
-| ---------- | --------------- | ----------- |
-| `host`     | `str`           |             |
-| `port`     | `int`           |             |
-| `token`    | `Optional[str]` |             |
-| `tls_ca`   | `Optional[str]` |             |
-| `requests` | `Any`           |             |
-| _Returns_  | `Any`           |             |
+| Parameter  | Type                                                                     | Description |
+| ---------- | ------------------------------------------------------------------------ | ----------- |
+| `host`     | `str`                                                                    |             |
+| `port`     | `int`                                                                    |             |
+| `token`    | `Optional[str]`                                                          |             |
+| `tls_ca`   | `Optional[str]`                                                          |             |
+| `requests` | `Sequence[tuple[str, dict[str, object]]]`                                |             |
+| _Returns_  | `Awaitable[tuple[Optional[dict[str, object]], list[dict[str, object]]]]` |             |
 
 ### `snapshot()`
 
@@ -34,25 +34,25 @@ snapshot(
     port: int,
     token: Optional[str] = None,
     tls_ca: Optional[str] = None,
-) -> Any
+) -> Awaitable[dict[str, object]]
 ```
 
-| Parameter | Type                   | Description |
-| --------- | ---------------------- | ----------- |
-| `host`    | `str`                  |             |
-| `port`    | `int`                  |             |
-| `token`   | `Optional[str] = None` |             |
-| `tls_ca`  | `Optional[str] = None` |             |
-| _Returns_ | `Any`                  |             |
+| Parameter | Type                           | Description |
+| --------- | ------------------------------ | ----------- |
+| `host`    | `str`                          |             |
+| `port`    | `int`                          |             |
+| `token`   | `Optional[str] = None`         |             |
+| `tls_ca`  | `Optional[str] = None`         |             |
+| _Returns_ | `Awaitable[dict[str, object]]` |             |
 
 ### `welcome_probe()`
 
 ```python
-welcome_probe(host: str, port: int) -> Any
+welcome_probe(host: str, port: int) -> Awaitable[Optional[dict[str, object]]]
 ```
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `host`    | `str` |             |
-| `port`    | `int` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                                     | Description |
+| --------- | ---------------------------------------- | ----------- |
+| `host`    | `str`                                    |             |
+| `port`    | `int`                                    |             |
+| _Returns_ | `Awaitable[Optional[dict[str, object]]]` |             |

@@ -92,6 +92,7 @@ const GRBL_EXTRA: &[&str] = &[
     "read_parser_state",
     "run_probe_cycle",
     "detect_unit_system",
+    "probe_device",
 ];
 
 fn build(name: &str) -> ProtocolInfo {
@@ -129,7 +130,7 @@ fn build(name: &str) -> ProtocolInfo {
             dialect_family: "smoothieware",
             connection: "telnet",
             config_keys: &["host", "tcp_port"],
-            methods: methods(&["set_hold", "clear_alarm"]),
+            methods: methods(&["set_hold", "clear_alarm", "probe_device"]),
             properties: common_properties(),
         },
         "octoprint" => ProtocolInfo {
@@ -159,7 +160,11 @@ fn build(name: &str) -> ProtocolInfo {
             dialect_family: "marlin",
             connection: "serial",
             config_keys: &["port", "baudrate"],
-            methods: methods(&["clear_alarm", "detect_unit_system"]),
+            methods: methods(&[
+                "clear_alarm",
+                "detect_unit_system",
+                "probe_device",
+            ]),
             properties: common_properties(),
         },
     }

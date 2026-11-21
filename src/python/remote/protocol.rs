@@ -10,10 +10,10 @@ use pyo3_stub_gen::derive::{
 use serde_json::Value;
 
 use crate::core::remote::protocol as core;
-use crate::python::core::json::value_to_py;
+use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState as PyDeviceState;
 use crate::python::events::SessionEvent;
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::bridge::{call_on_loop, py_to_json, running_loop};
 use crate::python::remote::events::{event_to_wire, wire_to_py_event};
 
@@ -100,6 +100,10 @@ fn decode_value(
 #[pyo3(signature = (message, max_bytes = None))]
 pub(crate) fn encode_frame(
     py: Python<'_>,
+    #[gen_stub(override_type(
+        type_repr = "dict[builtins.str, builtins.object]",
+        imports = ("builtins",)
+    ))]
     message: Py<PyAny>,
     max_bytes: Option<usize>,
 ) -> PyResult<Py<PyBytes>> {
@@ -117,11 +121,11 @@ pub(crate) fn decode_frame(
     py: Python<'_>,
     payload: Vec<u8>,
     max_bytes: Option<usize>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<JsonDict> {
     let max_bytes = resolve_max_bytes(py, max_bytes)?;
     let value = decode_value(&payload, max_bytes)
         .map_err(|err| protocol_error(py, &err))?;
-    value_to_py(py, &value)
+    value_to_dict(py, &value)
 }
 
 #[gen_stub_pyclass]
@@ -190,8 +194,12 @@ fn read_error(py: Python<'_>, err: PyErr) -> PyErr {
 #[pyfunction]
 pub(crate) fn read_frame<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(
+        type_repr = "builtins.object",
+        imports = ("builtins",)
+    ))]
     reader: Py<PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, JsonDict>> {
     let loop_ = running_loop(py)?;
     let max_bytes = resolve_max_bytes(py, None)?;
     spawn_future(py, async move {
@@ -221,7 +229,7 @@ pub(crate) fn read_frame<'py>(
         let payload: Vec<u8> = Python::attach(|py| payload.extract(py))?;
         let value = decode_value(&payload, max_bytes)
             .map_err(|err| Python::attach(|py| protocol_error(py, &err)))?;
-        Python::attach(|py| value_to_py(py, &value))
+        Python::attach(|py| value_to_dict(py, &value))
     })
 }
 
@@ -229,9 +237,17 @@ pub(crate) fn read_frame<'py>(
 #[pyfunction]
 pub(crate) fn write_frame<'py>(
     py: Python<'py>,
+    #[gen_stub(override_type(
+        type_repr = "builtins.object",
+        imports = ("builtins",)
+    ))]
     writer: Py<PyAny>,
+    #[gen_stub(override_type(
+        type_repr = "dict[builtins.str, builtins.object]",
+        imports = ("builtins",)
+    ))]
     message: Py<PyAny>,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, ()>> {
     let loop_ = running_loop(py)?;
     let max_bytes = resolve_max_bytes(py, None)?;
     let frame = encode_value(&py_to_json(message.bind(py))?, max_bytes)
@@ -244,7 +260,7 @@ pub(crate) fn write_frame<'py>(
             Ok(())
         })?;
         drain(&writer, &loop_).await?;
-        Ok(Python::attach(|py| py.None()))
+        Ok(())
     })
 }
 
@@ -255,13 +271,17 @@ pub(crate) fn request(
     py: Python<'_>,
     msg_id: i64,
     type_: &str,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[dict[builtins.str, builtins.object]]",
+        imports = ("typing", "builtins")
+    ))]
     payload: Option<Py<PyAny>>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<JsonDict> {
     let payload = match payload {
         Some(payload) => py_to_json(payload.bind(py))?,
         None => Value::Object(Default::default()),
     };
-    value_to_py(py, &core::request(msg_id, type_, payload))
+    value_to_dict(py, &core::request(msg_id, type_, payload))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
@@ -270,13 +290,17 @@ pub(crate) fn request(
 pub(crate) fn response(
     py: Python<'_>,
     msg_id: i64,
+    #[gen_stub(override_type(
+        type_repr = "typing.Optional[dict[builtins.str, builtins.object]]",
+        imports = ("typing", "builtins")
+    ))]
     payload: Option<Py<PyAny>>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<JsonDict> {
     let payload = match payload {
         Some(payload) => py_to_json(payload.bind(py))?,
         None => Value::Object(Default::default()),
     };
-    value_to_py(py, &core::response(msg_id, payload))
+    value_to_dict(py, &core::response(msg_id, payload))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
@@ -286,8 +310,8 @@ pub(crate) fn error_response(
     msg_id: i64,
     code: &str,
     message: &str,
-) -> PyResult<Py<PyAny>> {
-    value_to_py(py, &core::error_response(msg_id, code, message))
+) -> PyResult<JsonDict> {
+    value_to_dict(py, &core::error_response(msg_id, code, message))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
@@ -296,10 +320,14 @@ pub(crate) fn event_frame(
     py: Python<'_>,
     session_id: &str,
     seq: i64,
+    #[gen_stub(override_type(
+        type_repr = "dict[builtins.str, builtins.object]",
+        imports = ("builtins",)
+    ))]
     event: Py<PyAny>,
-) -> PyResult<Py<PyAny>> {
+) -> PyResult<JsonDict> {
     let event = py_to_json(event.bind(py))?;
-    value_to_py(py, &core::event_frame(session_id, seq, event))
+    value_to_dict(py, &core::event_frame(session_id, seq, event))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
@@ -308,8 +336,8 @@ pub(crate) fn welcome_payload(
     py: Python<'_>,
     raydriver_version: &str,
     auth_required: bool,
-) -> PyResult<Py<PyAny>> {
-    value_to_py(py, &core::welcome_payload(raydriver_version, auth_required))
+) -> PyResult<JsonDict> {
+    value_to_dict(py, &core::welcome_payload(raydriver_version, auth_required))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
@@ -317,14 +345,18 @@ pub(crate) fn welcome_payload(
 pub(crate) fn encode_state(
     py: Python<'_>,
     state: PyRef<'_, PyDeviceState>,
-) -> PyResult<Py<PyAny>> {
-    value_to_py(py, &core::encode_state(&state.inner))
+) -> PyResult<JsonDict> {
+    value_to_dict(py, &core::encode_state(&state.inner))
 }
 
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
 #[pyfunction]
 pub(crate) fn decode_state(
     py: Python<'_>,
+    #[gen_stub(override_type(
+        type_repr = "dict[builtins.str, builtins.object]",
+        imports = ("builtins",)
+    ))]
     payload: Py<PyAny>,
 ) -> PyResult<PyDeviceState> {
     let value = py_to_json(payload.bind(py))?;
@@ -338,14 +370,23 @@ pub(crate) fn decode_state(
 pub(crate) fn encode_event(
     py: Python<'_>,
     event: PyRef<'_, SessionEvent>,
-) -> PyResult<Py<PyAny>> {
-    value_to_py(py, &event_to_wire(&event).to_json())
+) -> PyResult<JsonDict> {
+    value_to_dict(py, &event_to_wire(&event).to_json())
 }
 
+/// Decodes an event frame payload; ``None`` when it is not an event.
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
+#[gen_stub(override_return_type(
+    type_repr = "typing.Optional[core.SessionEvent]",
+    imports = ("typing", "raydriver.core")
+))]
 #[pyfunction]
 pub(crate) fn decode_event(
     py: Python<'_>,
+    #[gen_stub(override_type(
+        type_repr = "dict[builtins.str, builtins.object]",
+        imports = ("builtins",)
+    ))]
     payload: Py<PyAny>,
 ) -> PyResult<Option<Py<PyAny>>> {
     let value = py_to_json(payload.bind(py))?;

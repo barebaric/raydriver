@@ -3,5 +3,6 @@
 pub mod errors;
 pub mod flow;
 pub mod parser;
+pub mod probe;
 pub mod session;
 pub mod simple;

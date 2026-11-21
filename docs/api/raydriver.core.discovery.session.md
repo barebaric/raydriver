@@ -33,7 +33,7 @@ Ports of known devices; exclude from rescans.
 ### `apply_probe()`
 
 ```python
-apply_probe(key: str, profile: Any) -> Optional[discovery.DiscoveredDevice]
+apply_probe(key: str, profile: object) -> Optional[discovery.DiscoveredDevice]
 ```
 
 Attaches a probed profile to the device with *key* and returns the enriched device, or None when the
@@ -42,7 +42,7 @@ key is unknown.
 | Parameter | Type                                   | Description |
 | --------- | -------------------------------------- | ----------- |
 | `key`     | `str`                                  |             |
-| `profile` | `Any`                                  |             |
+| `profile` | `object`                               |             |
 | _Returns_ | `Optional[discovery.DiscoveredDevice]` |             |
 
 ### `apply_scan()`

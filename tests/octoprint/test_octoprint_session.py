@@ -9,7 +9,7 @@ from conftest import EventRecorder
 from raydriver.core import SessionEvent
 from raydriver.octoprint import OctoPrintSession
 from raydriver.octoprint.emulator import OctoPrintEmulator
-from raydriver.octoprint.probe import describe
+from raydriver.octoprint.probe import OctoPrintDeviceInfo, describe
 from raydriver.protocols import protocol_info
 
 FAST_CONFIG = {
@@ -65,17 +65,17 @@ class TestProbe:
         session = make_session(EventRecorder(), emulator)
         info = await session.probe_device()
         await session.disconnect()
-        assert isinstance(info, dict)
-        assert info["server_version"] == "1.9.3"
-        assert info["name"] == "TestPrinter"
-        assert info["max_travel"] == [200.0, 300.0]
+        assert isinstance(info, OctoPrintDeviceInfo)
+        assert info.server_version == "1.9.3"
+        assert info.name == "TestPrinter"
+        assert info.max_travel == (200.0, 300.0)
 
     def test_describe_without_server_data(self):
         info = describe(None, None)
-        assert isinstance(info, dict)
-        assert info["server_version"] is None
-        assert info["name"] == "OctoPrint"
-        assert info["max_travel"] is None
+        assert isinstance(info, OctoPrintDeviceInfo)
+        assert info.server_version is None
+        assert info.name == "OctoPrint"
+        assert info.max_travel is None
 
     def test_registry_capabilities(self):
         info = protocol_info("octoprint")

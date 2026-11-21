@@ -38,97 +38,100 @@ Current snapshot of the device state.
 ### `cancel()`
 
 ```python
-cancel(emergency: bool = False) -> Any
+cancel(emergency: bool = False) -> Awaitable[None]
 ```
 
 Stop the running job and send the safety-off commands.
 
-| Parameter   | Type           | Description |
-| ----------- | -------------- | ----------- |
-| `emergency` | `bool = False` |             |
-| _Returns_   | `Any`          |             |
+| Parameter   | Type              | Description |
+| ----------- | ----------------- | ----------- |
+| `emergency` | `bool = False`    |             |
+| _Returns_   | `Awaitable[None]` |             |
 
 ### `connect()`
 
 ```python
-connect() -> Any
+connect() -> Awaitable[None]
 ```
 
 Open the connection and start the background tasks.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `disconnect()`
 
 ```python
-disconnect() -> Any
+disconnect() -> Awaitable[None]
 ```
 
 Stop all background tasks and close the connection.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `execute_block()`
 
 ```python
-execute_block(block: str) -> Any
+execute_block(block: str) -> Awaitable[None]
 ```
 
 Execute a multi-line block of G-code via POST /cmd.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `block`   | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `block`   | `str`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `execute_command()`
 
 ```python
-execute_command(command: str) -> Any
+execute_command(command: str) -> Awaitable[None]
 ```
 
 Queue a single G-code line without failing on device-side rejections; the command status carries the
 error.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `command` | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `command` | `str`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `execute_interactive_command()`
 
 ```python
-execute_interactive_command(command: str) -> Any
+execute_interactive_command(command: str) -> Awaitable[list[str]]
 ```
 
 Send a single G-code line and await the device's HTTP acknowledgement. The protocol has no per-line
 response text, so the result is always empty.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `command` | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type                   | Description |
+| --------- | ---------------------- | ----------- |
+| `command` | `str`                  |             |
+| _Returns_ | `Awaitable[list[str]]` |             |
 
 ### `home()`
 
 ```python
-home() -> Any
+home() -> Awaitable[None]
 ```
 
 Run the homing cycle and await the machine going idle again.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `jog()`
 
 ```python
-jog(speed: float, deltas: Optional[Sequence[tuple[str, float]]] = None) -> Any
+jog(
+    speed: float,
+    deltas: Optional[Sequence[tuple[str, float]]] = None,
+) -> Awaitable[None]
 ```
 
 Jog by relative deltas (mm) at `speed` (mm/min).
@@ -137,7 +140,7 @@ Jog by relative deltas (mm) at `speed` (mm/min).
 | --------- | ---------------------------------------------- | ----------- |
 | `speed`   | `float`                                        |             |
 | `deltas`  | `Optional[Sequence[tuple[str, float]]] = None` |             |
-| _Returns_ | `Any`                                          |             |
+| _Returns_ | `Awaitable[None]`                              |             |
 
 ### `move_to()`
 
@@ -147,7 +150,7 @@ move_to(
     y: float,
     z: Optional[float] = None,
     speed: Optional[float] = None,
-) -> Any
+) -> Awaitable[None]
 ```
 
 Move to an absolute position (mm) at `speed` (mm/min).
@@ -158,38 +161,38 @@ Move to an absolute position (mm) at `speed` (mm/min).
 | `y`       | `float`                  |             |
 | `z`       | `Optional[float] = None` |             |
 | `speed`   | `Optional[float] = None` |             |
-| _Returns_ | `Any`                    |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `run()`
 
 ```python
-run(gcode: str) -> Any
+run(gcode: str) -> Awaitable[None]
 ```
 
 Upload a G-code job, start it and await the machine's job-state events until it reports idle again.
 
-| Parameter | Type  | Description |
-| --------- | ----- | ----------- |
-| `gcode`   | `str` |             |
-| _Returns_ | `Any` |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `gcode`   | `str`             |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `run_raw()`
 
 ```python
-run_raw(machine_code: str) -> Any
+run_raw(machine_code: str) -> Awaitable[None]
 ```
 
 Upload a raw G-code string, start it and await completion.
 
-| Parameter      | Type  | Description |
-| -------------- | ----- | ----------- |
-| `machine_code` | `str` |             |
-| _Returns_      | `Any` |             |
+| Parameter      | Type              | Description |
+| -------------- | ----------------- | ----------- |
+| `machine_code` | `str`             |             |
+| _Returns_      | `Awaitable[None]` |             |
 
 ### `set_focus_power()`
 
 ```python
-set_focus_power(power: Optional[float] = None) -> Any
+set_focus_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
 Set laser power for focus mode; `None` turns the laser off.
@@ -197,25 +200,25 @@ Set laser power for focus mode; `None` turns the laser off.
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
 | `power`   | `Optional[float] = None` |             |
-| _Returns_ | `Any`                    |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `set_hold()`
 
 ```python
-set_hold(hold: bool = True) -> Any
+set_hold(hold: bool = True) -> Awaitable[None]
 ```
 
 Pause (true) or resume (false) the running job.
 
-| Parameter | Type          | Description |
-| --------- | ------------- | ----------- |
-| `hold`    | `bool = True` |             |
-| _Returns_ | `Any`         |             |
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `hold`    | `bool = True`     |             |
+| _Returns_ | `Awaitable[None]` |             |
 
 ### `set_power()`
 
 ```python
-set_power(power: Optional[float] = None) -> Any
+set_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
 Set laser power. `power` is the absolute S value; `None` turns the laser off.
@@ -223,7 +226,7 @@ Set laser power. `power` is the absolute S value; `None` turns the laser off.
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
 | `power`   | `Optional[float] = None` |             |
-| _Returns_ | `Any`                    |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `update_dialect()`
 

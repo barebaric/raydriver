@@ -2,6 +2,10 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
+from raydriver.core import discovery
+from raydriver.core.discovery import mdns_scan
+from raydriver.core.discovery import spec
 import typing
 __all__ = [
     "NETWORK_SCAN_TIMEOUT",
@@ -11,15 +15,15 @@ __all__ = [
 ]
 
 NETWORK_SCAN_TIMEOUT: builtins.float
-scan_mdns_services: typing.Any
-def collect_mdns_recognizers(driver_classes: typing.Sequence[typing.Any]) -> list:
+scan_mdns_services: collections.abc.Callable[..., collections.abc.Awaitable[builtins.list[mdns_scan.MDNSService]]]
+def collect_mdns_recognizers(driver_classes: typing.Sequence[builtins.type]) -> builtins.list[tuple[builtins.type, spec.MdnsRecognizer]]:
     r"""
     Pairs every driver whose ``DISCOVERY`` spec declares a valid mDNS
     recognizer with it. Declared service types and fingerprint service
     types are normalized to their canonical ``_name._transport`` form.
     """
 
-def find_network_devices(driver_classes: typing.Sequence[typing.Any]) -> typing.Any:
+def find_network_devices(driver_classes: typing.Sequence[builtins.type]) -> collections.abc.Awaitable[builtins.list[discovery.DiscoveredDevice]]:
     r"""
     Browses the network for every declared service type plus the
     generic types needed for fingerprinting, and returns one device

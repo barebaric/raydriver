@@ -34,7 +34,7 @@ mDNS services by the network channel.
 ### `fingerprint`
 
 ```python
-fingerprint: Optional[Callable[..., Awaitable[Any]]]
+fingerprint: Optional[Callable[..., Awaitable[bool]]]
 ```
 
 ### `fingerprint_services`

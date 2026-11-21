@@ -14,10 +14,36 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
+use pyo3_stub_gen::{PyStubType, TypeInfo};
 
 use super::helpers;
 use crate::core::discovery::mdns;
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
+
+/// A replaceable mDNS browse callable: the network channels resolve
+/// their scanner from their module namespace at call time (see
+/// helpers), so the attribute is typed as an async callable
+/// resolving to the resolved services.
+pub(crate) struct ScanMdnsFn;
+
+impl PyStubType for ScanMdnsFn {
+    fn type_output() -> TypeInfo {
+        let service = MDNSService::type_output();
+        let mut import = service.import.clone();
+        import.insert("collections.abc".into());
+        import.insert("builtins".into());
+        TypeInfo {
+            name: format!(
+                "collections.abc.Callable[..., \
+                 collections.abc.Awaitable[builtins.list[{}]]]",
+                service.name
+            ),
+            source_module: None,
+            import,
+            type_refs: service.type_refs,
+        }
+    }
+}
 
 /// One service resolved during an mDNS browse.
 #[gen_stub_pyclass(module = "raydriver.core.discovery.mdns_scan")]
@@ -126,7 +152,7 @@ fn scan_mdns_services<'py>(
     #[gen_stub(override_type(type_repr = "typing.Iterable[builtins.str]", imports = ("typing", "builtins")))]
     service_types: &Bound<'_, PyAny>,
     browse_window: f64,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Vec<MDNSService>>> {
     let service_types = helpers::string_iter(service_types)?;
     let normalized: Vec<String> = service_types
         .iter()
@@ -137,29 +163,25 @@ fn scan_mdns_services<'py>(
         .collect();
     if normalized.is_empty() {
         return spawn_future(py, async move {
-            Python::attach(|py| {
-                let empty: Vec<MDNSService> = Vec::new();
-                empty.into_pyobject(py).map(|o| o.unbind().into_any())
-            })
+            let empty: Vec<MDNSService> = Vec::new();
+            Ok(empty)
         });
     }
     let window = Duration::from_secs_f64(browse_window);
     spawn_future(py, async move {
         let services = mdns::scan_mdns_services(normalized, window).await;
-        Python::attach(|py| {
-            let out: Vec<MDNSService> = services
-                .into_iter()
-                .map(|s| MDNSService {
-                    service_type: s.service_type,
-                    name: s.name,
-                    host: s.host,
-                    port: s.port,
-                    server: s.server,
-                    txt: s.txt,
-                })
-                .collect();
-            out.into_pyobject(py).map(|o| o.unbind().into_any())
-        })
+        let out: Vec<MDNSService> = services
+            .into_iter()
+            .map(|s| MDNSService {
+                service_type: s.service_type,
+                name: s.name,
+                host: s.host,
+                port: s.port,
+                server: s.server,
+                txt: s.txt,
+            })
+            .collect();
+        Ok(out)
     })
 }
 

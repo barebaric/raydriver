@@ -11,15 +11,15 @@ sidebar_label: raydriver.core.discovery.engine
 
 ### find_network_devices
 
-`Any`
+`Callable[..., Awaitable[list[discovery.DiscoveredDevice]]]`
 
 ### find_raydriver_devices
 
-`Any`
+`Callable[..., Awaitable[list[discovery.DiscoveredDevice]]]`
 
 ### find_serial_devices
 
-`Any`
+`Callable[..., Awaitable[list[discovery.DiscoveredDevice]]]`
 
 ## Functions
 
@@ -27,11 +27,11 @@ sidebar_label: raydriver.core.discovery.engine
 
 ```python
 find_all_devices(
-    driver_classes: Sequence[Any],
+    driver_classes: Sequence[type],
     ports: Optional[Iterable[str]] = None,
     baud_rates: Optional[Iterable[int]] = None,
     exclude_ports: Optional[Iterable[str]] = None,
-) -> Any
+) -> Awaitable[list[discovery.DiscoveredDevice]]
 ```
 
 Runs every discovery channel concurrently and returns the merged, deduplicated results.
@@ -40,25 +40,27 @@ Runs every discovery channel concurrently and returns the merged, deduplicated r
 probed by the caller). Channels never raise: a failing or slow scan yields no devices from that
 channel only.
 
-| Parameter        | Type                             | Description |
-| ---------------- | -------------------------------- | ----------- |
-| `driver_classes` | `Sequence[Any]`                  |             |
-| `ports`          | `Optional[Iterable[str]] = None` |             |
-| `baud_rates`     | `Optional[Iterable[int]] = None` |             |
-| `exclude_ports`  | `Optional[Iterable[str]] = None` |             |
-| _Returns_        | `Any`                            |             |
+| Parameter        | Type                                          | Description |
+| ---------------- | --------------------------------------------- | ----------- |
+| `driver_classes` | `Sequence[type]`                              |             |
+| `ports`          | `Optional[Iterable[str]] = None`              |             |
+| `baud_rates`     | `Optional[Iterable[int]] = None`              |             |
+| `exclude_ports`  | `Optional[Iterable[str]] = None`              |             |
+| _Returns_        | `Awaitable[list[discovery.DiscoveredDevice]]` |             |
 
 ### `find_subnet_devices()`
 
 ```python
-find_subnet_devices(driver_classes: Sequence[Any]) -> Any
+find_subnet_devices(
+    driver_classes: Sequence[type],
+) -> Awaitable[list[discovery.DiscoveredDevice]]
 ```
 
 Scans the local subnets for the TCP ports declared by drivers' `TcpRecognizer` and returns the
 devices the Rust core confirmed with each driver's probe. Finds controllers that announce nothing
 via mDNS, such as grblHAL boards with the raw telnet service.
 
-| Parameter        | Type            | Description |
-| ---------------- | --------------- | ----------- |
-| `driver_classes` | `Sequence[Any]` |             |
-| _Returns_        | `Any`           |             |
+| Parameter        | Type                                          | Description |
+| ---------------- | --------------------------------------------- | ----------- |
+| `driver_classes` | `Sequence[type]`                              |             |
+| _Returns_        | `Awaitable[list[discovery.DiscoveredDevice]]` |             |

@@ -595,7 +595,7 @@ impl RemoteSession {
 
     // -- command surface -------------------------------------------------
 
-    async fn command(
+    pub(crate) async fn command(
         self: &Arc<Self>,
         method: &str,
         args: Value,
@@ -834,6 +834,10 @@ impl RemoteSession {
         self.command("clear_alarm", json!({})).await.map(|_| ())
     }
 
+    /// Applies a dialect to the hosted session. Callable from sync
+    /// contexts (no runtime): while connected the command is enqueued
+    /// onto the socket thread; before connecting the dialect is only
+    /// stored, and the handshake carries it to the daemon.
     pub fn update_dialect(self: &Arc<Self>, dialect: Value) {
         *self.dialect.lock().unwrap() = dialect.clone();
         if self.connected.load(Ordering::SeqCst) {

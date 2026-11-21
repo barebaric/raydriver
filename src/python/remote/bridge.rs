@@ -126,6 +126,9 @@ pub(crate) fn py_to_json(value: &Bound<'_, PyAny>) -> PyResult<Value> {
     if value.is_none() {
         return Ok(Value::Null);
     }
+    if let Ok(dict) = value.call_method0("to_dict") {
+        return py_to_json(&dict);
+    }
     if let Ok(flag) = value.extract::<bool>() {
         if value.is_instance_of::<pyo3::types::PyBool>() {
             return Ok(Value::Bool(flag));

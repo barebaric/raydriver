@@ -126,7 +126,7 @@ async def test_tcp_fingerprint_rejects_other_listener():
         matched = await fingerprint("127.0.0.1", port)
     finally:
         await _stop_server(server)
-    assert matched is None
+    assert matched is False
 
 
 @pytest.mark.asyncio
@@ -240,7 +240,7 @@ async def test_http_fingerprint_rejects_other_body():
         matched = await fingerprint("127.0.0.1", port)
     finally:
         await _stop_server(server)
-    assert matched is None
+    assert matched is False
 
 
 @pytest.mark.asyncio
@@ -266,7 +266,7 @@ async def test_http_fingerprint_rejects_error_status():
         matched = await fingerprint("127.0.0.1", port)
     finally:
         await _stop_server(server)
-    assert matched is None
+    assert matched is False
 
 
 @pytest.mark.asyncio
@@ -290,7 +290,7 @@ async def test_http_fingerprint_honors_max_bytes():
     narrow = HttpFingerprint("/x", r"grbl", timeout=1.0, max_bytes=10)
     wide = HttpFingerprint("/x", r"grbl", timeout=1.0)
     try:
-        assert await narrow("127.0.0.1", port) is None
+        assert await narrow("127.0.0.1", port) is False
         assert await wide("127.0.0.1", port)
     finally:
         await _stop_server(server)
@@ -301,7 +301,7 @@ async def test_http_fingerprint_dead_endpoint():
     """A connection failure is not a match."""
 
     fingerprint = HttpFingerprint("/x", r"grbl", timeout=0.5)
-    assert await fingerprint("127.0.0.1", 1) is None
+    assert await fingerprint("127.0.0.1", 1) is False
 
 
 def test_http_fingerprint_rejects_invalid_regex():

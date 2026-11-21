@@ -37,72 +37,72 @@ class XtoolSession:
     def is_job_running(self) -> builtins.bool: ...
     @property
     def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.SessionConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], typing.Any]] = None) -> XtoolSession: ...
-    def connect(self) -> typing.Any:
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.XtoolConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> XtoolSession: ...
+    def connect(self) -> collections.abc.Awaitable[None]:
         r"""
         Open the connection and start the background tasks.
         """
-    def disconnect(self) -> typing.Any:
+    def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the connection.
         """
-    def execute_interactive_command(self, command: builtins.str) -> typing.Any:
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Send a single G-code line and await the device's HTTP
         acknowledgement.  The protocol has no per-line response text,
         so the result is always empty.
         """
-    def execute_command(self, command: builtins.str) -> typing.Any:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Queue a single G-code line without failing on device-side
         rejections; the command status carries the error.
         """
-    def execute_block(self, block: builtins.str) -> typing.Any:
+    def execute_block(self, block: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Execute a multi-line block of G-code via POST /cmd.
         """
-    def run(self, gcode: builtins.str) -> typing.Any:
+    def run(self, gcode: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Upload a G-code job, start it and await the machine's
         job-state events until it reports idle again.
         """
-    def run_raw(self, machine_code: builtins.str) -> typing.Any:
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
         Upload a raw G-code string, start it and await completion.
         """
-    def home(self) -> typing.Any:
+    def home(self) -> collections.abc.Awaitable[None]:
         r"""
         Run the homing cycle and await the machine going idle again.
         """
-    def move_to(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> typing.Any:
+    def move_to(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Move to an absolute position (mm) at `speed` (mm/min).
         """
-    def jog(self, speed: builtins.float, deltas: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.float]]] = None) -> typing.Any:
+    def jog(self, speed: builtins.float, deltas: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.float]]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Jog by relative deltas (mm) at `speed` (mm/min).
         """
-    def set_hold(self, hold: builtins.bool = True) -> typing.Any:
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
         r"""
         Pause (true) or resume (false) the running job.
         """
-    def cancel(self, emergency: builtins.bool = False) -> typing.Any:
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Stop the running job and send the safety-off commands.
         """
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power.  `power` is the absolute S value; `None`
         turns the laser off.
         """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> typing.Any:
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
         Set laser power for focus mode; `None` turns the laser off.
         """
     def update_dialect(self, dialect: dict) -> None: ...
     def __repr__(self) -> builtins.str: ...
 
-def query_machine_type(host: builtins.str, port: builtins.int, timeout: builtins.float = 2.0) -> typing.Awaitable[typing.Optional[str]]:
+def query_machine_type(host: builtins.str, port: builtins.int, timeout: builtins.float = 2.0) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
     r"""
     Queries the machine type an xTool device reports for itself.
     

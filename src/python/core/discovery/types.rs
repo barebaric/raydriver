@@ -105,6 +105,7 @@ impl DeviceIdentity {
 
     /// The identity tokens as a frozenset of strings.
     #[getter]
+    #[gen_stub(override_return_type(type_repr = "builtins.frozenset[builtins.str]", imports = ("builtins",)))]
     fn tokens(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         Ok(PyFrozenSet::new(py, self.inner.tokens.iter())?
             .unbind()
@@ -121,8 +122,7 @@ pub struct DiscoveredDevice {
     pub(crate) inner: CoreDevice,
     /// Profile data collected by probing the device after discovery;
     /// attached by the embedding application's UI. Opaque here.
-    #[pyo3(get, set)]
-    pub probe_profile: Option<Py<PyAny>>,
+    pub(crate) probe_profile: Option<Py<PyAny>>,
 }
 
 #[gen_stub_pymethods]
@@ -132,10 +132,12 @@ impl DiscoveredDevice {
     #[pyo3(signature = (driver_name, params, label, detail, identity=None, probe_profile=None))]
     fn new(
         driver_name: String,
+        #[gen_stub(override_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
         params: &Bound<'_, PyDict>,
         label: String,
         detail: String,
         identity: Option<PyRef<'_, DeviceIdentity>>,
+        #[gen_stub(override_type(type_repr = "typing.Optional[builtins.object]", imports = ("typing", "builtins")))]
         probe_profile: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         Ok(Self {
@@ -156,6 +158,7 @@ impl DiscoveredDevice {
     }
 
     #[getter]
+    #[gen_stub(override_return_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
     fn params<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         params_to_py(py, &self.inner.params)
     }
@@ -198,8 +201,31 @@ impl DiscoveredDevice {
         Ok(Some(name))
     }
 
+    /// Profile data collected by probing the device after discovery;
+    /// attached by the embedding application's UI. Opaque here: the
+    /// embedding application's profile object, not a core type.
+    #[getter]
+    #[gen_stub(override_return_type(type_repr = "typing.Optional[builtins.object]", imports = ("typing", "builtins")))]
+    fn probe_profile(&self, py: Python<'_>) -> Option<Py<PyAny>> {
+        self.probe_profile.as_ref().map(|p| p.clone_ref(py))
+    }
+
+    /// Profile data collected by probing the device after discovery;
+    /// attached by the embedding application's UI. Opaque here: the
+    /// embedding application's profile object, not a core type.
+    #[setter]
+    fn set_probe_profile(
+        &mut self,
+        #[gen_stub(override_type(type_repr = "typing.Optional[builtins.object]", imports = ("typing", "builtins")))]
+        value: Option<Py<PyAny>>,
+    ) {
+        self.probe_profile = value;
+    }
+
+    #[gen_stub(override_return_type(type_repr = "builtins.bool", imports = ("builtins",)))]
     fn __eq__(
         &self,
+        #[gen_stub(override_type(type_repr = "builtins.object", imports = ("builtins",)))]
         other: &Bound<'_, PyAny>,
         py: Python<'_>,
     ) -> PyResult<Py<PyAny>> {

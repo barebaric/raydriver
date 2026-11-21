@@ -2,12 +2,13 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "list_cameras",
 ]
 
-def list_cameras(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str] = None, tls_ca: typing.Optional[builtins.str] = None, tls_hostname: typing.Optional[builtins.str] = None, timeout: builtins.float = 5.0) -> typing.Any:
+def list_cameras(host: builtins.str, port: builtins.int, token: typing.Optional[builtins.str] = None, tls_ca: typing.Optional[builtins.str] = None, tls_hostname: typing.Optional[builtins.str] = None, timeout: builtins.float = 5.0) -> collections.abc.Awaitable[builtins.list[dict[builtins.str, builtins.object]]]:
     r"""
     Lists the cameras a daemon advertises on the device host.
     

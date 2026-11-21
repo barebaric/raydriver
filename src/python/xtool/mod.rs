@@ -7,10 +7,9 @@ pub(crate) mod session;
 use std::time::Duration;
 
 use pyo3::prelude::*;
-use pyo3::types::PyString;
 use pyo3_stub_gen::derive::gen_stub_pyfunction;
 
-use crate::python::pyfuture::spawn_future;
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::xtool::session::probe_machine_type;
 
 pub(crate) const MODULE_DOC: &str = "\
@@ -30,16 +29,12 @@ pyo3_stub_gen::module_doc!("raydriver.xtool", "{}", MODULE_DOC);
 /// any failure.
 #[gen_stub_pyfunction(module = "raydriver.xtool")]
 #[pyfunction(signature = (host, port, timeout=2.0))]
-#[gen_stub(override_return_type(
-    type_repr = "typing.Awaitable[typing.Optional[str]]",
-    imports = ("typing",)
-))]
 fn query_machine_type<'py>(
     py: Python<'py>,
     host: String,
     port: u16,
     timeout: f64,
-) -> PyResult<Bound<'py, PyAny>> {
+) -> PyResult<PyAwait<'py, Option<String>>> {
     spawn_future(py, async move {
         let machine_type = probe_machine_type(
             &host,
@@ -51,13 +46,7 @@ fn query_machine_type<'py>(
         .filter(|machine_type| {
             machine_type.to_ascii_lowercase().contains("xtool")
         });
-        Python::attach(|py| match machine_type {
-            Some(machine_type) => Ok(PyString::new(py, &machine_type)
-                .to_owned()
-                .into_any()
-                .unbind()),
-            None => Ok(py.None()),
-        })
+        Ok(machine_type)
     })
 }
 

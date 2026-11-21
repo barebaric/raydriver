@@ -6,10 +6,56 @@
 //! non-loop threads.  Nothing here ever blocks the event loop.
 
 use std::future::Future;
+use std::marker::PhantomData;
 
 use pyo3::prelude::*;
+use pyo3::BoundObject;
+use pyo3_stub_gen::TypeInfo;
 
 use super::runtime;
+
+/// The awaitable a Rust async session method returns to Python: the
+/// asyncio future object, typed with the future's resolution type
+/// for the generated stubs (``collections.abc.Awaitable[T]``).
+pub(crate) struct PyAwait<'py, T> {
+    future: Bound<'py, PyAny>,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<'py, T> PyAwait<'py, T> {
+    pub(crate) fn new(future: Bound<'py, PyAny>) -> Self {
+        Self {
+            future,
+            _marker: PhantomData,
+        }
+    }
+}
+
+impl<'py, T> IntoPyObject<'py> for PyAwait<'py, T> {
+    type Target = PyAny;
+    type Output = Bound<'py, PyAny>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, _py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        Ok(self.future)
+    }
+}
+
+impl<T: pyo3_stub_gen::PyStubType> pyo3_stub_gen::PyStubType
+    for PyAwait<'_, T>
+{
+    fn type_output() -> TypeInfo {
+        let inner = T::type_output();
+        let mut import = inner.import.clone();
+        import.insert("collections.abc".into());
+        TypeInfo {
+            name: format!("collections.abc.Awaitable[{}]", inner.name),
+            source_module: None,
+            import,
+            type_refs: inner.type_refs,
+        }
+    }
+}
 
 /// Spawn *fut* on the shared tokio runtime and return an asyncio
 /// future that resolves with its result.
@@ -17,12 +63,13 @@ use super::runtime;
 /// The future must be created while running on the event loop (i.e.
 /// from an async Python call stack), which is the only supported
 /// calling context.
-pub(crate) fn spawn_future<F>(
-    py: Python<'_>,
+pub(crate) fn spawn_future<'py, F, T>(
+    py: Python<'py>,
     fut: F,
-) -> PyResult<Bound<'_, PyAny>>
+) -> PyResult<PyAwait<'py, T>>
 where
-    F: Future<Output = PyResult<Py<PyAny>>> + Send + 'static,
+    F: Future<Output = PyResult<T>> + Send + 'static,
+    T: for<'any> IntoPyObject<'any> + Send + 'static,
 {
     let asyncio = py.import("asyncio")?;
     let loop_ = asyncio.call_method0("get_running_loop")?;
@@ -31,7 +78,15 @@ where
     let future_py: Py<PyAny> = future.clone().unbind();
 
     runtime::handle().spawn(async move {
-        let outcome = fut.await;
+        let outcome = match fut.await {
+            Ok(value) => Python::attach(|py| {
+                value
+                    .into_pyobject(py)
+                    .map(|obj| obj.into_any().unbind())
+                    .map_err(Into::into)
+            }),
+            Err(err) => Err(err),
+        };
         let schedule: PyResult<()> = Python::attach(|py| {
             let loop_bound = loop_py.bind(py);
             // The awaiting loop may be gone or tearing down (e.g. the
@@ -70,7 +125,7 @@ where
             Python::attach(|py| err.print(py));
         }
     });
-    Ok(future)
+    Ok(PyAwait::new(future))
 }
 
 /// Whether *loop* can still receive threadsafe wake-ups: not closed
@@ -85,14 +140,6 @@ pub(crate) fn loop_accepts_callbacks(
         return Ok(false);
     }
     loop_bound.call_method0("is_running")?.is_truthy()
-}
-
-/// A Python `None` as an owned `Py<PyAny>` (created under the GIL).
-pub(crate) fn none_obj(py: Python<'_>) -> Py<PyAny> {
-    ().into_pyobject(py)
-        .expect("None conversion")
-        .unbind()
-        .into_any()
 }
 
 /// Turns a Python awaitable into a Rust future, so Rust async code
