@@ -3,9 +3,9 @@
 //!
 //! Port of Rayforge's `SmoothieDriver` protocol behavior.  Smoothie
 //! speaks Grbl-style `<...>` status reports in response to `?`, so
-//! this session deliberately reuses the GRBL status parser
-//! (`grbl::parser::parse_state`) — the one sanctioned cross-protocol
-//! import.  Commands use the same strict ping-pong as the minimal
+//! this session deliberately reuses the GRBL parser and error
+//! tables — sanctioned cross-protocol imports; see `mod.rs` for
+//! the justification.  Commands use the same strict ping-pong as the minimal
 //! GRBL session: send one line, wait for its `ok`/`error:`
 //! acknowledgement, then send the next.
 //!

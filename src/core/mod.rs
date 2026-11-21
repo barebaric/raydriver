@@ -3,7 +3,8 @@
 //! Everything here is protocol-neutral: byte transports, the device
 //! value types, dialect command-template formatting, the session
 //! event/error primitives, and the transport-level discovery
-//! scanners.  The protocol modules (`grbl`, `smoothie`, `marlin`)
+//! scanners.  The protocol modules (`grbl`, `smoothie`, `marlin`,
+//! and the network-native `esp3d`/`octoprint`/`xtool`)
 //! build their sessions on top of this layer.
 //!
 //! Host-dependent pieces are feature-gated so a wasm build can omit

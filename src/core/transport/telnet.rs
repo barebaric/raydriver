@@ -1,5 +1,5 @@
-//! Raw TCP transport (telnet-style) for network-attached Grbl
-//! devices.
+//! Raw TCP transport (telnet-style) for network-attached devices
+//! that speak a line protocol.
 //!
 //! The open/writer/reader plumbing is shared with the serial
 //! transport via [`super::stream_base`]; dialing goes through

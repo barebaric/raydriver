@@ -114,8 +114,6 @@ pub fn describe(
     }
 }
 
-/// Drops ``ok`` acknowledgements: the parsers match semantic lines
-/// only, and ``ok`` carries no census data.
 /// Drops `ok` acknowledgements: the parsers match semantic
 /// lines only, and `ok` carries no census data.
 pub fn filter_ok_lines(lines: &[String]) -> Vec<String> {
