@@ -134,15 +134,15 @@ class TestMotion:
 
     async def test_move_to_block(self, rig):
         session, emulator, _ = rig
-        await session.move_to(10, 20, None, 600)
+        await session.move_to(600, 10, 20)
         assert len(emulator.blocks) == 1
         block = emulator.blocks[0]
         assert "G1 X10 Y20 F600 S0" in block
         assert "G92" not in block
 
-    async def test_move_to_default_speed(self, rig):
+    async def test_move_to_carries_speed(self, rig):
         session, emulator, _ = rig
-        await session.move_to(5, 6)
+        await session.move_to(1500, 5, 6)
         assert "F1500" in emulator.blocks[0]
 
     async def test_jog_without_deltas_is_a_noop(self, rig):

@@ -197,12 +197,13 @@ class TestCommands:
 
     async def test_move_to_is_absolute(self, rig):
         session, emulator, events = rig
-        await session.move_to(10.0, 5.0, 1.5)
+        await session.move_to(1000.0, 10.0, 5.0, 1.5)
         assert emulator.commands[-1] == {
             "command": "jog",
             "x": 10.0,
             "y": 5.0,
             "z": 1.5,
+            "speed": 1000.0,
             "absolute": True,
         }
 

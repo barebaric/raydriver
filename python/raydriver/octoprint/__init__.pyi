@@ -50,110 +50,99 @@ class OctoPrintSession:
         into the structured census dict. Local and remote sessions
         probe identically.
         """
+    def __repr__(self) -> builtins.str: ...
     def connect(self) -> collections.abc.Awaitable[None]:
         r"""
-        Open the connection and start the background tasks.
+        Open the connection and keep it up until `disconnect`.
         """
     def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
         Stop all background tasks and close the connection.
         """
+    def update_dialect(self, dialect: dict) -> None:
+        r"""
+        Replace the command templates.
+        """
     def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
-        Send a single command and await the server's HTTP
-        acknowledgement.  The API exposes no per-line response text,
-        so the result is always empty.
+        Send one interactive command and return its response
+        lines.
         """
-    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[None]:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
-        Send a single command without awaiting further state.
+        Send one command and return its response lines.
         """
     def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
         r"""
-        Upload a G-code string, start it and await the server's
-        terminal print event.  Every op index in *op_line_map* is
-        reported to *progress_callback* when the job starts (the
-        protocol carries no per-op progress).
+        Stream a G-code job.
         """
     def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
-        Send a raw G-code string as printer commands.
-        """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Home all axes (`axes` is None) or the named axes.
-        """
-    def move_to(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Move to an absolute position (mm); `speed` in mm/min.
-        """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
-        r"""
-        Jog by relative deltas (mm) at `speed` (mm/min).
-        """
-    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
-        r"""
-        Pause (true) or resume (false) the running job.
+        Execute pre-rendered machine code.
         """
     def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
         r"""
         Cancel the running job.
         """
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
+        r"""
+        Pause or resume the running job.
+        """
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: typing.Optional[builtins.str] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Home all axes or the given axes.
+        """
+    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Absolute move in the machine's current coordinate frame.
+        """
+    def jog(self, speed: builtins.float, deltas: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.float]]] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Relative jog by per-axis distances.
+        """
     def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]:
         r"""
-        Select a tool by sending its tool-change command.
+        Select a tool.
         """
     def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
-        Set laser power.  `power` is the absolute S value; `None`
-        (or zero) turns the laser off.
+        Set the laser/spindle power; `None` disables the tool.
         """
     def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
-        Set laser power for focus mode; `None` turns the laser off.
+        Set the laser power used while focusing.
         """
     def clear_alarm(self) -> collections.abc.Awaitable[None]:
         r"""
-        Clear the printer's error state (M999) and reset locally.
+        Clear a device alarm.
         """
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]:
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
         r"""
-        Set a work coordinate offset via a G10 L2 command.  Raises
-        `ValueError` for slots the server model does not know.
-        """
-    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
-        r"""
-        Read the WCS offsets; always empty (the server API exposes
-        none).
-        """
-    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Read the G-code parser state; always `None` (the server API
-        exposes none).
-        """
-    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Run a probe cycle (G38.2); OctoPrint does not report probe
-        results, so the result is always `None`.
+        Write a work-coordinate-system offset.
         """
     def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
         r"""
-        Read the firmware settings; always empty (the server API
-        exposes none).
+        Read the device's firmware settings.
         """
     def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]:
         r"""
-        Raise: the server API cannot write firmware settings.
+        Write one firmware setting.
+        """
+    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
+        r"""
+        Read the work-coordinate-system offsets.
+        """
+    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
+        r"""
+        Read the G-code parser state.
+        """
+    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[tuple[builtins.float, builtins.float, builtins.float]]]:
+        r"""
+        Run a probe cycle; `None` = no trigger reported.
         """
     def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
         r"""
-        The unit system the dialect works in; the server API exposes
-        no unit configuration, so this is always `None`.
+        Detect the device's unit system (`"metric"` or
+        `"imperial"`), or `None` when unknown.
         """
-    def update_dialect(self, dialect: dict) -> None:
-        r"""
-        Accept dialect command templates; commands are sent as
-        structured JSON, so nothing is stored.
-        """
-    def __repr__(self) -> builtins.str: ...
 

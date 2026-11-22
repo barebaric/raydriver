@@ -11,6 +11,7 @@ pub(crate) mod protocols;
 pub(crate) mod pyfuture;
 pub(crate) mod remote;
 pub(crate) mod runtime;
+pub(crate) mod session_api;
 pub(crate) mod smoothie;
 pub(crate) mod xtool;
 

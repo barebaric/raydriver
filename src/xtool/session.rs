@@ -28,10 +28,6 @@ pub const DEFAULT_HTTP_PORT: u16 = 8080;
 pub const DEFAULT_WS_PORT: u16 = 8081;
 
 /// Fixed speed (mm/min) for absolute moves without an explicit one.
-/// Default feed for `move_to` calls that omit a speed.
-#[cfg(feature = "python")]
-pub(crate) const DEFAULT_MOVE_SPEED: f64 = 1500.0;
-
 /// The stop flush block xTool's own software sends after
 /// `/cnc/data?action=stop`: terminate the program and force the
 /// laser output off.

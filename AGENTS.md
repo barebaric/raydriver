@@ -100,6 +100,31 @@ Rust submodules registered with `add_submodule` are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
 name is the package.
 
+## The Uniform Session API
+
+The Python session surface is **exactly** the `SessionLike` protocol
+in Rayforge's `machine/driver/session_driver.py`: one method set with
+one signature per method, implemented once (`python::session_api::
+uniform_session_api!`) and invoked by every session class. Rayforge's
+`SessionDriverBase` relies on this directly — there is no per-driver
+adaptation layer.
+
+Rules:
+
+- Never add or change a session method on one class only. The macro
+  is the single definition; per-class bindings keep only the
+  constructor, protocol-specific extras (`probe_info`,
+  `execute_block`, `start`) and properties.
+- Protocol differences live in the Rust `Session` trait impls: an
+  operation a protocol cannot perform returns
+  `SessionError::Unsupported`, which the bindings surface as
+  `NotImplementedError`. The method is always present.
+- Signatures: `run(gcode, op_line_map=None, op_estimates=None,
+  progress_callback=None)`, `home(axes=None, active_wcs=None)`,
+  `move_to(speed, x, y, z=None)`, `jog(speed, deltas=None)`,
+  `cancel(emergency=False)`, and so on; 3rd-party callers may rely on
+  positional order.
+
 ## Python/Rust Boundary Rules
 
 - No domain model objects cross the Python/Rust boundary — only

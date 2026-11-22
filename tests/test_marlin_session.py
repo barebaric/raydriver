@@ -244,7 +244,7 @@ class TestEmulatorJobs:
         done = []
         text = "\n".join(f"G1 X{i % 50} F90000" for i in range(40))
         op_map = {**{i: 0 for i in range(20)}, 30: 1}
-        await session.run(text, op_map, done.append)
+        await session.run(text, op_map, progress_callback=done.append)
         await events.wait_for(SessionEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 

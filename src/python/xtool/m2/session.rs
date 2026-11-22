@@ -81,28 +81,6 @@ impl PyM2Session {
         let config = crate::python::config::config_dict(config.as_ref())?;
         Ok(Self::build(build_config(config.as_ref())?, event_callback))
     }
-
-    /// Connect and start monitoring the M2.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        self.events.capture_loop(py)?;
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.connect().await?;
-            Ok(())
-        })
-    }
-
-    /// Stop monitoring and close the connection.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        spawn_future(py, async move {
-            core.cleanup().await;
-            events.quiesce();
-            Ok(())
-        })
-    }
-
     /// Start a job already staged on the device.
     fn start<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
@@ -111,80 +89,6 @@ impl PyM2Session {
             Ok(())
         })
     }
-
-    #[pyo3(signature = (hold=true))]
-    /// Pause the current job, or resume it when `hold` is false.
-    fn set_hold<'py>(
-        &self,
-        py: Python<'py>,
-        hold: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_hold(hold).await?;
-            Ok(())
-        })
-    }
-
-    /// Cancel the current job.
-    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.cancel(CancelMode::Graceful).await?;
-            Ok(())
-        })
-    }
-
-    /// Home the laser head.
-    fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.home(None, "").await?;
-            Ok(())
-        })
-    }
-
-    #[pyo3(signature = (x, y, speed=18000.0))]
-    /// Move to an absolute XY coordinate in millimeters.
-    fn move_to<'py>(
-        &self,
-        py: Python<'py>,
-        x: f64,
-        y: f64,
-        speed: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.move_to(speed, x, y, None).await?;
-            Ok(())
-        })
-    }
-
-    #[pyo3(signature = (dx=0.0, dy=0.0, dz=0.0, speed=18000.0))]
-    /// Move by relative XYZ deltas in millimeters.
-    fn jog<'py>(
-        &self,
-        py: Python<'py>,
-        dx: f64,
-        dy: f64,
-        dz: f64,
-        speed: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.jog(
-                speed,
-                &[
-                    ("x".to_string(), dx),
-                    ("y".to_string(), dy),
-                    ("z".to_string(), dz),
-                ],
-            )
-            .await?;
-            Ok(())
-        })
-    }
-
     #[getter]
     /// Current snapshot of the machine state.
     fn state(&self) -> DeviceState {
@@ -218,3 +122,7 @@ impl Drop for PyM2Session {
         self.core.abort_background_tasks_now();
     }
 }
+
+use crate::python::session_api::uniform_session_api;
+
+uniform_session_api!(PyM2Session);
