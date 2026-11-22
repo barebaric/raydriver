@@ -43,6 +43,21 @@ fn build_simple_config(
     if let Some(v) = get_f64(dict, "command_timeout")? {
         config.command_timeout = v;
     }
+    if let Some(v) = get_f64(dict, "homing_timeout")? {
+        config.homing_timeout = v;
+    }
+    if let Some(v) = get_f64(dict, "stall_timeout_min")? {
+        config.stall_timeout_min = v;
+    }
+    if let Some(v) = get_f64(dict, "stall_timeout_max")? {
+        config.stall_timeout_max = v;
+    }
+    if let Some(v) = get_f64(dict, "stall_timeout_safety_factor")? {
+        config.stall_timeout_safety_factor = v;
+    }
+    if let Some(v) = get_f64(dict, "stall_timeout_default")? {
+        config.stall_timeout_default = v;
+    }
     if let Some(v) = get_f64(dict, "handshake_timeout")? {
         config.handshake_timeout = v;
     }

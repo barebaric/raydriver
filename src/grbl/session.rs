@@ -56,6 +56,7 @@ pub struct SessionConfig {
     pub status_poll_interval: f64,
     pub reconnect_delay: f64,
     pub command_timeout: f64,
+    pub homing_timeout: f64,
 }
 
 impl SessionConfig {
@@ -79,6 +80,7 @@ impl SessionConfig {
             status_poll_interval: 0.5,
             reconnect_delay: 5.0,
             command_timeout: 10.0,
+            homing_timeout: 0.0,
         }
     }
 
@@ -1529,6 +1531,54 @@ impl GrblSession {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
+
+    /// Send a queued command and wait up to *timeout* for its
+    /// acknowledgement.  Homing needs a budget measured in minutes on
+    /// large machines, while normal commands must keep the short
+    /// deadlock-detection timeout.
+    async fn execute_command_with_timeout(
+        &self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        // Only clear the cancellation flag once the cancelled job's
+        // sender has fully terminated (issue #428).
+        if !self.job_running.load(Ordering::SeqCst) {
+            let done = self
+                .stream_task
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_none_or(|t| t.is_finished());
+            if done {
+                self.is_cancelled.store(false, Ordering::SeqCst);
+            }
+        }
+        let request = Arc::new(RequestShared::new(&command));
+        self.queued_requests
+            .lock()
+            .unwrap()
+            .push(Arc::downgrade(&request));
+        self.cmd_tx
+            .lock()
+            .unwrap()
+            .send(QueuedCommand {
+                shared: request.clone(),
+            })
+            .map_err(|_| {
+                SessionError::Connection(
+                    "command queue unavailable".to_string(),
+                )
+            })?;
+        match tokio::time::timeout(timeout, request.finished.wait()).await {
+            Ok(()) => Ok(request.lines()),
+            Err(_) => {
+                request.finish();
+                Err(SessionError::Timeout)
+            }
+        }
+    }
 }
 
 /// The session's [`Session`] impl: the single, real implementation
@@ -1616,9 +1666,16 @@ impl Session for GrblSession {
         active_wcs: &str,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
+        let timeout =
+            SessionConfig::secs(if self.config.homing_timeout > 0.0 {
+                self.config.homing_timeout
+            } else {
+                self.config.command_timeout
+            });
         match axes {
             None => {
-                self.execute_command(&dialect.home_all).await?;
+                self.execute_command_with_timeout(&dialect.home_all, timeout)
+                    .await?;
             }
             Some(axes) => {
                 for axis in axes {
@@ -1627,7 +1684,7 @@ impl Session for GrblSession {
                         &[("axis_letter", Arg::Str(axis))],
                     )
                     .map_err(SessionError::Other)?;
-                    self.execute_command(&cmd).await?;
+                    self.execute_command_with_timeout(&cmd, timeout).await?;
                 }
             }
         }
@@ -2047,48 +2104,8 @@ impl Session for GrblSession {
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        let command = command.to_string();
-        // Only clear the cancellation flag once the cancelled job's
-        // sender has fully terminated (issue #428).
-        if !self.job_running.load(Ordering::SeqCst) {
-            let done = self
-                .stream_task
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_none_or(|t| t.is_finished());
-            if done {
-                self.is_cancelled.store(false, Ordering::SeqCst);
-            }
-        }
-        let request = Arc::new(RequestShared::new(&command));
-        self.queued_requests
-            .lock()
-            .unwrap()
-            .push(Arc::downgrade(&request));
-        self.cmd_tx
-            .lock()
-            .unwrap()
-            .send(QueuedCommand {
-                shared: request.clone(),
-            })
-            .map_err(|_| {
-                SessionError::Connection(
-                    "command queue unavailable".to_string(),
-                )
-            })?;
-        match tokio::time::timeout(
-            SessionConfig::secs(self.config.command_timeout),
-            request.finished.wait(),
-        )
-        .await
-        {
-            Ok(()) => Ok(request.lines()),
-            Err(_) => {
-                request.finish();
-                Err(SessionError::Timeout)
-            }
-        }
+        let timeout = SessionConfig::secs(self.config.command_timeout);
+        self.execute_command_with_timeout(command, timeout).await
     }
 
     fn buffer_count(&self) -> usize {

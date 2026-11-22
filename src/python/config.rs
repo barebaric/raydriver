@@ -117,6 +117,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );
@@ -143,6 +144,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );
@@ -169,6 +171,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );
@@ -195,6 +198,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );
@@ -221,6 +225,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );
@@ -251,6 +256,7 @@ config_pyclass!(
         status_poll_interval: f64 = 0.5,
         reconnect_delay: f64 = 5.0,
         command_timeout: f64 = 10.0,
+        homing_timeout: f64 = 0.0,
     ],
     optional: [cached_rx_buffer_size: Option<i64> = None],
 );

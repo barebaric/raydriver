@@ -257,6 +257,69 @@ class TestDeviceOperations:
         lines = await session.execute_command("$H")
         assert lines == ["error:5"]
 
+    async def test_home_uses_homing_timeout(self, mock, events):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_session(
+            mock,
+            events,
+            {"command_timeout": 0.15, "homing_timeout": 2.0},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_home_times_out_with_short_homing_timeout(
+        self, mock, events
+    ):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_session(
+            mock,
+            events,
+            {"command_timeout": 2.0, "homing_timeout": 0.05},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            with pytest.raises(asyncio.TimeoutError):
+                await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_home_without_homing_timeout_uses_command_timeout(
+        self, mock, events
+    ):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_session(
+            mock,
+            events,
+            {"command_timeout": 0.05, "homing_timeout": 0.0},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            with pytest.raises(asyncio.TimeoutError):
+                await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
     async def test_update_dialect(self, rig):
         session, mock, emulator, events = rig
         session.update_dialect({"move_to": "G0 X{x} Y{y}"})
