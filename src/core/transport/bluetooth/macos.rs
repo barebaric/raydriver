@@ -33,16 +33,28 @@ struct MacChannel {
     channel: Retained<IOBluetoothRFCOMMChannel>,
 }
 
+// SAFETY: the channel object itself is only ever touched through
+// `getMTU` and `writeSync`, both of which IOBluetooth documents as
+// callable from any thread (the synchronous calls marshal against
+// the channel's run loop instead of touching shared state from the
+// caller).  The delegate callbacks run exclusively on the link's
+// own run-loop thread and never call back into `MacChannel`, so no
+// data race is introduced by moving or sharing the handle.
 unsafe impl Send for MacChannel {}
 unsafe impl Sync for MacChannel {}
 
 impl MacChannel {
     fn write(&self, data: &[u8]) -> io::Result<()> {
+        // SAFETY: plain foreign method call on a retained object
+        // (see the Send/Sync invariant above); no pointers passed.
         let mtu = unsafe { self.channel.getMTU() };
         let mtu = if mtu == 0 { 1024 } else { usize::from(mtu) };
         for chunk in data.chunks(mtu) {
             let mut chunk = chunk.to_vec();
             let status = unsafe {
+                // SAFETY: the buffer is a live, exclusively owned
+                // allocation of exactly `chunk.len()` bytes for the
+                // duration of the synchronous call.
                 self.channel.writeSync_length(
                     chunk.as_mut_ptr().cast::<c_void>(),
                     chunk.len() as u16,
@@ -81,6 +93,9 @@ define_class!(
             if data.is_null() || length == 0 {
                 return;
             }
+            // SAFETY: the callback receives `length` valid bytes in
+            // `data`; they are copied into an owned `Vec` immediately
+            // and the raw parts are not used afterwards.
             let bytes = unsafe {
                 std::slice::from_raw_parts(data.cast::<u8>(), length)
             };
@@ -100,6 +115,9 @@ impl MacDelegate {
         open: Arc<AtomicBool>,
     ) -> Retained<Self> {
         let this = Self::alloc().set_ivars(MacDelegateIvars { tx, open });
+        // SAFETY: `this` is a fresh, uninitialized allocation handed
+        // out by `define_class!`'s alloc path; `init` is the
+        // superclass initializer that must run exactly once here.
         unsafe { msg_send![super(this), init] }
     }
 }
@@ -185,6 +203,8 @@ fn run_loop_thread(
     stop: Arc<AtomicBool>,
     result_tx: std_mpsc::SyncSender<Result<Arc<MacChannel>, String>>,
 ) {
+    // SAFETY: creating the pool at the top of the thread; it is
+    // drained on every exit path below.
     let pool = unsafe { NSAutoreleasePool::new() };
     let delegate = MacDelegate::new(tx, open.clone());
 
@@ -211,6 +231,8 @@ fn run_loop_thread(
         }
     }
 
+    // SAFETY: the channel is retained until here; closing it before
+    // draining the pool releases any objects the callbacks enqueued.
     unsafe {
         channel.channel.closeChannel();
         pool.drain();
@@ -224,6 +246,8 @@ fn open_channel(
     delegate: &Retained<MacDelegate>,
 ) -> Result<MacChannel, String> {
     let ns_address = NSString::from_str(address);
+    // SAFETY: foreign constructor returning a retained object; the
+    // address string is retained for the call.
     let device = unsafe {
         IOBluetoothDevice::deviceWithAddressString(Some(&ns_address))
     }
@@ -231,6 +255,10 @@ fn open_channel(
 
     let channel_id = sdp_channel(&device).unwrap_or(requested_channel);
     let mut channel: Option<Retained<IOBluetoothRFCOMMChannel>> = None;
+    // SAFETY: the delegate pointer stays valid for the whole
+    // channel lifetime: `run_loop_thread` owns the `Retained` and
+    // closes the channel before dropping it (the run loop exits and
+    // drains after the channel is closed).
     let delegate = Retained::as_ptr(delegate).cast::<AnyObject>();
     let status = unsafe {
         device.openRFCOMMChannelSync_withChannelID_delegate(
@@ -251,9 +279,12 @@ fn open_channel(
 }
 
 fn sdp_channel(device: &IOBluetoothDevice) -> Option<u8> {
+    // SAFETY: plain foreign calls on retained objects; `channel` is
+    // an initialized out-parameter owned by this frame.
     let uuid = unsafe { IOBluetoothSDPUUID::uuid16(SPP_SERVICE_ID) }?;
     let record = unsafe { device.getServiceRecordForUUID(Some(&uuid)) }?;
     let mut channel: u8 = 0;
+    // SAFETY: as above; the out-pointer receives the channel number.
     if unsafe { record.getRFCOMMChannelID(&mut channel) } == 0 {
         Some(channel)
     } else {

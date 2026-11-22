@@ -1,8 +1,15 @@
 //! Protocol registry: what each hosted session protocol speaks.
 //!
-//! The daemon validates a call against the specific protocol's
-//! surface, and `protocol/list` serves this metadata to clients so
-//! they never hardcode protocol knowledge.
+//! [`ProtocolInfo`] describes one protocol's surface; the daemon
+//! validates calls against it and `protocol/list` serves the
+//! metadata to clients so they never hardcode protocol knowledge.
+//!
+//! Core stays protocol-neutral: the *set* of hostable protocols —
+//! and their auto-detection fingerprints — is supplied by the
+//! embedding application as a [`Registry`] at daemon construction.
+//! In this crate the Python bindings build the concrete table (see
+//! `python::protocols::protocol_registry`); a pure-Rust embedder
+//! builds its own from the same primitives.
 
 use std::collections::BTreeSet;
 
@@ -18,6 +25,19 @@ pub struct ProtocolInfo {
     pub config_keys: &'static [&'static str],
     pub methods: BTreeSet<&'static str>,
     pub properties: BTreeSet<&'static str>,
+    /// Command + response signature used to auto-detect a device
+    /// speaking this protocol (daemon device probing).  `None` = the
+    /// protocol is not auto-detectable.
+    pub probe: Option<ProbeFingerprint>,
+}
+
+/// A protocol's auto-detection fingerprint.
+#[derive(Debug, Clone)]
+pub struct ProbeFingerprint {
+    /// The interactive command sent to the device.
+    pub command: &'static str,
+    /// A marker expected in the response.
+    pub signature: &'static str,
 }
 
 impl ProtocolInfo {
@@ -48,7 +68,9 @@ impl ProtocolInfo {
     }
 }
 
-fn methods(extra: &[&'static str]) -> BTreeSet<&'static str> {
+/// The method surface every hosted session implements, plus the
+/// protocol's extras.
+pub fn methods(extra: &[&'static str]) -> BTreeSet<&'static str> {
     let mut set: BTreeSet<&'static str> = [
         "connect",
         "disconnect",
@@ -72,140 +94,59 @@ fn methods(extra: &[&'static str]) -> BTreeSet<&'static str> {
     set
 }
 
-fn common_properties() -> BTreeSet<&'static str> {
+/// The property surface every hosted session implements.
+pub fn common_properties() -> BTreeSet<&'static str> {
     ["state", "job_running", "resource_uri"]
         .into_iter()
         .collect()
 }
 
-fn buffer_properties() -> BTreeSet<&'static str> {
+/// The property surface for protocols with RX-buffer accounting.
+pub fn buffer_properties() -> BTreeSet<&'static str> {
     let mut set = common_properties();
     set.extend(["buffer_count", "rx_buffer_size", "pending_commands"]);
     set
 }
 
-const GRBL_EXTRA: &[&str] = &[
-    "set_hold",
-    "read_settings",
-    "write_setting",
-    "read_wcs_offsets",
-    "read_parser_state",
-    "run_probe_cycle",
-    "detect_unit_system",
-    "probe_device",
-];
+/// The set of protocols a daemon can host, supplied by the embedding
+/// application at daemon construction.
+#[derive(Debug, Clone, Default)]
+pub struct Registry {
+    protocols: Vec<ProtocolInfo>,
+}
 
-fn build(name: &str) -> ProtocolInfo {
-    match name {
-        "grbl" => ProtocolInfo {
-            name: "grbl",
-            label: "GRBL",
-            dialect_family: "grbl",
-            connection: "serial_or_telnet_or_bluetooth",
-            config_keys: &[
-                "port", "baudrate", "host", "tcp_port", "address", "channel",
-            ],
-            methods: methods(GRBL_EXTRA),
-            properties: buffer_properties(),
-        },
-        "grbl_simple" => ProtocolInfo {
-            name: "grbl_simple",
-            label: "GRBL (simple)",
-            dialect_family: "grbl",
-            connection: "serial_or_telnet_or_bluetooth",
-            config_keys: &[
-                "port", "baudrate", "host", "tcp_port", "address", "channel",
-            ],
-            methods: methods(GRBL_EXTRA),
-            properties: common_properties(),
-        },
-        "esp3d" => ProtocolInfo {
-            name: "esp3d",
-            label: "FluidNC / ESP3D",
-            dialect_family: "grbl",
-            connection: "network",
-            config_keys: &["host", "http_port", "ws_port", "protocol"],
-            methods: methods(GRBL_EXTRA),
-            properties: common_properties(),
-        },
-        "smoothie" => ProtocolInfo {
-            name: "smoothie",
-            label: "Smoothieware",
-            dialect_family: "smoothieware",
-            connection: "telnet",
-            config_keys: &["host", "tcp_port"],
-            methods: methods(&["set_hold", "clear_alarm", "probe_device"]),
-            properties: common_properties(),
-        },
-        "octoprint" => ProtocolInfo {
-            name: "octoprint",
-            label: "OctoPrint",
-            dialect_family: "grbl",
-            connection: "network",
-            config_keys: &["host", "port", "path", "api_key"],
-            // The session implements the uniform surface, but the
-            // server API cannot back settings or unit claims and
-            // returns empty results for them, so those methods are
-            // not advertised as remote-callable.
-            methods: methods(&[
-                "clear_alarm",
-                "probe_device",
-                "probe_info",
-                "read_wcs_offsets",
-                "read_parser_state",
-                "run_probe_cycle",
-                "set_hold",
-            ]),
-            properties: common_properties(),
-        },
-        _ => ProtocolInfo {
-            name: "marlin",
-            label: "Marlin",
-            dialect_family: "marlin",
-            connection: "serial",
-            config_keys: &["port", "baudrate"],
-            methods: methods(&[
-                "clear_alarm",
-                "detect_unit_system",
-                "probe_device",
-            ]),
-            properties: common_properties(),
-        },
+impl Registry {
+    /// Build a registry from the protocol table, in serving order.
+    pub fn new(protocols: Vec<ProtocolInfo>) -> Self {
+        Self { protocols }
     }
-}
 
-/// The protocols the daemon can host.
-pub fn names() -> [&'static str; 6] {
-    [
-        "grbl",
-        "grbl_simple",
-        "esp3d",
-        "smoothie",
-        "octoprint",
-        "marlin",
-    ]
-}
-
-pub fn is_known(name: &str) -> bool {
-    names().contains(&name)
-}
-
-/// Look up a protocol's metadata.
-pub fn protocol_info(name: &str) -> Option<ProtocolInfo> {
-    if is_known(name) {
-        Some(build(name))
-    } else {
-        None
+    /// True when *name* is hostable.
+    pub fn is_known(&self, name: &str) -> bool {
+        self.protocols.iter().any(|info| info.name == name)
     }
-}
 
-/// The `protocol/list` payload: every protocol's metadata.
-pub fn protocols_payload() -> Value {
-    json!({
-        "protocols": names()
-            .into_iter()
-            .filter_map(protocol_info)
-            .map(|info| info.to_json())
-            .collect::<Vec<_>>(),
-    })
+    /// Look up a protocol's metadata.
+    pub fn protocol_info(&self, name: &str) -> Option<ProtocolInfo> {
+        self.protocols
+            .iter()
+            .find(|info| info.name == name)
+            .cloned()
+    }
+
+    /// The protocol table, in serving order.
+    pub fn protocols(&self) -> &[ProtocolInfo] {
+        &self.protocols
+    }
+
+    /// The `protocol/list` payload: every protocol's metadata.
+    pub fn protocols_payload(&self) -> Value {
+        json!({
+            "protocols": self
+                .protocols
+                .iter()
+                .map(|info| info.to_json())
+                .collect::<Vec<_>>(),
+        })
+    }
 }

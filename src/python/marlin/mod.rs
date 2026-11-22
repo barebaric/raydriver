@@ -20,7 +20,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     marlin_mod.setattr("__doc__", MODULE_DOC)?;
     marlin_mod.add("__all__", vec!["MarlinSession", "parser", "probe"])?;
-    marlin_mod.add_class::<session::MarlinSession>()?;
+    marlin_mod.add_class::<session::PyMarlinSession>()?;
 
     let parser_mod = PyModule::new(py, "parser")?;
     parser::register(&parser_mod)?;

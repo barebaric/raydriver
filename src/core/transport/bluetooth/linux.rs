@@ -46,6 +46,10 @@ impl Link for LinuxLink {
         while written < data.len() {
             let remaining = &data[written..];
             let result = unsafe {
+                // SAFETY: `fd` is a valid open socket for the
+                // lifetime of the link (owned `OwnedFd`); the pointer
+                // and length describe `remaining`.  MSG_NOSIGNAL
+                // avoids SIGPIPE on a closed connection.
                 libc::send(
                     self.fd.as_raw_fd(),
                     remaining.as_ptr().cast(),
@@ -69,6 +73,8 @@ impl Link for LinuxLink {
 
     fn close(&self) {
         unsafe {
+            // SAFETY: `fd` is a valid open socket; shutdown only
+            // queues a disconnect, it does not invalidate the fd.
             libc::shutdown(self.fd.as_raw_fd(), libc::SHUT_RDWR);
         }
         if let Some(handle) = self.reader.lock().unwrap().take() {
@@ -86,12 +92,17 @@ pub(crate) fn connect(
     let octets = address_octets(address)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e))?;
 
+    // SAFETY: plain syscall with constant arguments; ownership of
+    // the returned descriptor is taken below only after the < 0
+    // check.
     let raw_fd = unsafe {
         libc::socket(libc::AF_BLUETOOTH, libc::SOCK_STREAM, BTPROTO_RFCOMM)
     };
     if raw_fd < 0 {
         return Err(io::Error::last_os_error());
     }
+    // SAFETY: `raw_fd` is a valid, freshly created socket we now own
+    // exclusively; `OwnedFd` closes it on drop.
     let fd = unsafe { OwnedFd::from_raw_fd(raw_fd) };
 
     let sockaddr = SockaddrRc {
@@ -100,6 +111,9 @@ pub(crate) fn connect(
         rc_channel: channel,
     };
     let result = unsafe {
+        // SAFETY: `fd` is valid; `sockaddr` is a `#[repr(C)]` struct
+        // laid out exactly like `sockaddr_rc` (family, 6-byte
+        // address, channel) and outlives the call.
         libc::connect(
             fd.as_raw_fd(),
             (&sockaddr as *const SockaddrRc).cast(),
@@ -132,26 +146,18 @@ fn reader_loop(
     tx: mpsc::UnboundedSender<Vec<u8>>,
     open: Arc<AtomicBool>,
 ) {
-    let mut buf = [0u8; 1024];
-    loop {
-        let read = unsafe {
+    super::rfcomm_reader_loop(
+        |buf| unsafe {
+            // SAFETY: the fd is valid for the whole reader thread
+            // (the link keeps the `OwnedFd` alive and `close`
+            // shuts the socket down before joining this thread);
+            // the pointer/len describe `buf`, which is never
+            // aliased.
             libc::recv(fd.as_raw_fd(), buf.as_mut_ptr().cast(), buf.len(), 0)
-        };
-        if read > 0 {
-            if tx.send(buf[..read as usize].to_vec()).is_err() {
-                break;
-            }
-        } else if read == 0 {
-            break;
-        } else {
-            let err = io::Error::last_os_error();
-            if err.kind() != io::ErrorKind::Interrupted {
-                log::debug!("Bluetooth RFCOMM read error: {err}");
-                break;
-            }
-        }
-    }
-    open.store(false, Ordering::SeqCst);
+        },
+        &tx,
+        &open,
+    );
 }
 
 pub(crate) fn list_paired_devices() -> io::Result<Vec<BluetoothDeviceInfo>> {

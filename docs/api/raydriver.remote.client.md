@@ -187,27 +187,36 @@ home(
 ### `jog()`
 
 ```python
-jog(speed: float, deltas: Sequence[tuple[str, float]]) -> Awaitable[None]
+jog(
+    speed: float,
+    deltas: Optional[Sequence[tuple[str, float]]] = None,
+) -> Awaitable[None]
 ```
 
-| Parameter | Type                          | Description |
-| --------- | ----------------------------- | ----------- |
-| `speed`   | `float`                       |             |
-| `deltas`  | `Sequence[tuple[str, float]]` |             |
-| _Returns_ | `Awaitable[None]`             |             |
+| Parameter | Type                                           | Description |
+| --------- | ---------------------------------------------- | ----------- |
+| `speed`   | `float`                                        |             |
+| `deltas`  | `Optional[Sequence[tuple[str, float]]] = None` |             |
+| _Returns_ | `Awaitable[None]`                              |             |
 
 ### `move_to()`
 
 ```python
-move_to(speed: float, x: float, y: float) -> Awaitable[None]
+move_to(
+    speed: float,
+    x: float,
+    y: float,
+    z: Optional[float] = None,
+) -> Awaitable[None]
 ```
 
-| Parameter | Type              | Description |
-| --------- | ----------------- | ----------- |
-| `speed`   | `float`           |             |
-| `x`       | `float`           |             |
-| `y`       | `float`           |             |
-| _Returns_ | `Awaitable[None]` |             |
+| Parameter | Type                     | Description |
+| --------- | ------------------------ | ----------- |
+| `speed`   | `float`                  |             |
+| `x`       | `float`                  |             |
+| `y`       | `float`                  |             |
+| `z`       | `Optional[float] = None` |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `probe_device()`
 
@@ -353,17 +362,17 @@ set_wcs_offset(
     wcs_slot: str,
     x: float,
     y: float,
-    z: Optional[float],
+    z: Optional[float] = None,
 ) -> Awaitable[None]
 ```
 
-| Parameter  | Type              | Description |
-| ---------- | ----------------- | ----------- |
-| `wcs_slot` | `str`             |             |
-| `x`        | `float`           |             |
-| `y`        | `float`           |             |
-| `z`        | `Optional[float]` |             |
-| _Returns_  | `Awaitable[None]` |             |
+| Parameter  | Type                     | Description |
+| ---------- | ------------------------ | ----------- |
+| `wcs_slot` | `str`                    |             |
+| `x`        | `float`                  |             |
+| `y`        | `float`                  |             |
+| `z`        | `Optional[float] = None` |             |
+| _Returns_  | `Awaitable[None]`        |             |
 
 ### `update_dialect()`
 

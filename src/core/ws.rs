@@ -1,24 +1,55 @@
 //! Minimal RFC 6455 WebSocket client for device notification
 //! channels.
 //!
-//! Hand-rolled over a tokio `TcpStream` (no TLS: the local device
-//! APIs it serves use plain-text WebSocket on the LAN).  Only what
-//! the protocols need is implemented: the opening handshake,
-//! unbounded server text messages, client-to-server control frames,
-//! and ping/pong/close handling.  Outgoing data frames are never
-//! sent — these WebSockets are one-way notification channels.
+//! Hand-rolled (no TLS: the local device APIs it serves use
+//! plain-text WebSocket on the LAN).  Only what the protocols need is
+//! implemented: the opening handshake, unbounded server text
+//! messages, client-to-server control frames, and ping/pong/close
+//! handling.  Outgoing data frames are never sent — these WebSockets
+//! are one-way notification channels.
+//!
+//! The codec is generic over the byte stream ([`WsStream`]); the
+//! dialing goes through [`crate::core::connector::dial`], so the
+//! client ([`WsClient`]) and every session built on it compile and
+//! run on all targets, including wasm — native hosts dial plain TCP,
+//! embedders without TCP sockets install a connector.
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpStream;
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf,
+    WriteHalf,
+};
 
+use crate::core::connector::DynStream;
 use crate::core::session::SessionError;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
+/// Guard against hostile peers sending unbounded frames.
+const MAX_FRAME_BYTES: u64 = 16 * 1024 * 1024;
+/// Guard against oversized handshake responses.
+const MAX_HANDSHAKE_BYTES: usize = 16 * 1024;
+
 /// Handshake failed or the connection broke mid-frame.
-pub struct WsError(pub String);
+#[derive(Debug)]
+pub struct WsError(String);
+
+impl WsError {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+
+    pub fn into_inner(self) -> String {
+        self.0
+    }
+}
+
+impl std::fmt::Display for WsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 impl From<std::io::Error> for WsError {
     fn from(err: std::io::Error) -> Self {
@@ -32,47 +63,19 @@ impl From<WsError> for SessionError {
     }
 }
 
-/// A connected WebSocket.  Receive-only from the session's point of
-/// view; pongs are answered transparently while waiting for the
-/// next message.
-pub struct WsClient {
-    reader: BufReader<tokio::net::tcp::OwnedReadHalf>,
-    writer: tokio::net::tcp::OwnedWriteHalf,
+/// A connected WebSocket over any byte stream.  Receive-only from
+/// the session's point of view; pongs are answered transparently
+/// while waiting for the next message.
+pub struct WsStream<S> {
+    reader: BufReader<ReadHalf<S>>,
+    writer: WriteHalf<S>,
 }
 
-impl WsClient {
-    /// Open the TCP connection, perform the RFC 6455 handshake and
-    /// return the established client.
-    pub async fn connect(
-        host: &str,
-        port: u16,
-        origin: Option<&str>,
-        timeout: Duration,
-    ) -> Result<Self, SessionError> {
-        Self::connect_path(host, port, "/", origin, timeout).await
-    }
+/// The WebSocket client used by the device sessions (dialed through
+/// the [`crate::core::connector`] seam).
+pub type WsClient = WsStream<DynStream>;
 
-    /// Like [`connect`], but requests a specific server path (e.g.
-    /// an API mounted under a URL prefix).
-    pub async fn connect_path(
-        host: &str,
-        port: u16,
-        path: &str,
-        origin: Option<&str>,
-        timeout: Duration,
-    ) -> Result<Self, SessionError> {
-        tokio::time::timeout(timeout, async {
-            let stream = TcpStream::connect((host, port))
-                .await
-                .map_err(|e| WsError(e.to_string()))?;
-            handshake(stream, host, port, path, origin)
-                .await
-                .map_err(|e| SessionError::Connection(e.0))
-        })
-        .await
-        .map_err(|_| SessionError::Timeout)?
-    }
-
+impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
     /// Send a text message to the server.
     pub async fn send_text(&mut self, text: &str) -> Result<(), SessionError> {
         self.send_frame(0x1, text.as_bytes()).await
@@ -155,14 +158,48 @@ impl WsClient {
     }
 }
 
+impl WsStream<DynStream> {
+    /// Dial through the connector seam, perform the RFC 6455
+    /// handshake and return the established client.
+    pub async fn connect(
+        host: &str,
+        port: u16,
+        origin: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Self, SessionError> {
+        Self::connect_path(host, port, "/", origin, timeout).await
+    }
+
+    /// Like [`connect`], but requests a specific server path (e.g.
+    /// an API mounted under a URL prefix).
+    pub async fn connect_path(
+        host: &str,
+        port: u16,
+        path: &str,
+        origin: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Self, SessionError> {
+        tokio::time::timeout(timeout, async {
+            let stream = crate::core::connector::dial(host, port)
+                .await
+                .map_err(|e| WsError(e.to_string()))?;
+            handshake(stream, host, port, path, origin)
+                .await
+                .map_err(|e| SessionError::Connection(e.0))
+        })
+        .await
+        .map_err(|_| SessionError::Timeout)?
+    }
+}
+
 struct Frame {
     fin: bool,
     opcode: u8,
     payload: Vec<u8>,
 }
 
-async fn read_frame(
-    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
+async fn read_frame<S: AsyncRead + Unpin>(
+    reader: &mut BufReader<ReadHalf<S>>,
 ) -> Result<Frame, WsError> {
     let header = read_exact_n(reader, 2).await?;
     let fin = header[0] & 0x80 != 0;
@@ -181,7 +218,7 @@ async fn read_frame(
         ),
         n => u64::from(n),
     };
-    if length > 16 * 1024 * 1024 {
+    if length > MAX_FRAME_BYTES {
         return Err(WsError("websocket frame too large".to_string()));
     }
     let mask = if masked {
@@ -202,8 +239,8 @@ async fn read_frame(
     })
 }
 
-async fn read_exact_n(
-    reader: &mut BufReader<tokio::net::tcp::OwnedReadHalf>,
+async fn read_exact_n<S: AsyncRead + Unpin>(
+    reader: &mut BufReader<ReadHalf<S>>,
     n: usize,
 ) -> Result<Vec<u8>, WsError> {
     let mut buf = vec![0u8; n];
@@ -214,13 +251,13 @@ async fn read_exact_n(
     Ok(buf)
 }
 
-async fn handshake(
-    mut stream: TcpStream,
+async fn handshake<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
     host: &str,
     port: u16,
     path: &str,
     origin: Option<&str>,
-) -> Result<WsClient, WsError> {
+) -> Result<WsStream<S>, WsError> {
     let key = random_key();
     let mut req = format!("GET {path} HTTP/1.1\r\nHost: {host}:{port}\r\n");
     req.push_str("Upgrade: websocket\r\nConnection: Upgrade\r\n");
@@ -230,6 +267,7 @@ async fn handshake(
         req.push_str(&format!("Origin: {origin}\r\n"));
     }
     req.push_str("\r\n");
+    let mut stream = stream;
     stream.write_all(req.as_bytes()).await?;
     stream.flush().await?;
 
@@ -246,7 +284,7 @@ async fn handshake(
         if response.ends_with(b"\r\n\r\n") {
             break;
         }
-        if response.len() > 16 * 1024 {
+        if response.len() > MAX_HANDSHAKE_BYTES {
             return Err(WsError(
                 "oversized websocket handshake response".to_string(),
             ));
@@ -266,8 +304,8 @@ async fn handshake(
             "device did not complete the websocket handshake".to_string(),
         ));
     }
-    let (reader, writer) = stream.into_split();
-    Ok(WsClient {
+    let (reader, writer) = tokio::io::split(stream);
+    Ok(WsStream {
         reader: BufReader::new(reader),
         writer,
     })

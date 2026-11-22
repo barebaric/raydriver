@@ -12,7 +12,7 @@ pub(crate) mod session;
 use pyo3::prelude::*;
 use pyo3::types::PySet;
 
-use crate::core::remote::registry;
+use crate::python::protocols::protocol_registry;
 
 pub(crate) const MODULE_DOC: &str = "\
 Remote sessions: a device-host daemon, a client proxy and the \
@@ -210,15 +210,15 @@ fn add_protocol_constants(protocol: &Bound<'_, PyModule>) -> PyResult<()> {
         request_types.add(name)?;
     }
     protocol.add("REQUEST_TYPES", request_types)?;
-    let names = registry::names();
-    protocol.add("PROTOCOLS", names.to_vec())?;
+    let registry = protocol_registry();
+    let names: Vec<&str> =
+        registry.protocols().iter().map(|info| info.name).collect();
+    protocol.add("PROTOCOLS", names)?;
     let mut methods: Vec<&str> = Vec::new();
     let mut properties: Vec<&str> = Vec::new();
-    for name in names {
-        if let Some(info) = registry::protocol_info(name) {
-            methods.extend(info.methods);
-            properties.extend(info.properties);
-        }
+    for info in registry.protocols() {
+        methods.extend(info.methods.iter().copied());
+        properties.extend(info.properties.iter().copied());
     }
     methods.sort_unstable();
     methods.dedup();

@@ -112,20 +112,29 @@ pub async fn query_cameras(
     tls_ca: Option<&str>,
     tls_hostname: Option<&str>,
     timeout: Duration,
-) -> Result<Vec<DaemonCamera>, String> {
+) -> Result<Vec<DaemonCamera>, std::io::Error> {
     if token.is_some() && tls_ca.is_none() && !is_loopback(host) {
-        return Err("refusing to send a token without TLS".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "refusing to send a token without TLS",
+        ));
     }
     let mut stream =
         connect_stream(host, port, tls_ca, tls_hostname, timeout).await?;
     let welcome = read_message(&mut stream, timeout).await?;
     if welcome.get("type").and_then(Value::as_str) != Some("welcome") {
-        return Err("daemon did not send welcome".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "daemon did not send welcome",
+        ));
     }
     let payload = welcome.get("payload").unwrap_or(&Value::Null);
     if payload.get("protocol").and_then(Value::as_i64) != Some(PROTOCOL_VERSION)
     {
-        return Err("unsupported daemon protocol version".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unsupported daemon protocol version",
+        ));
     }
     let auth_required = payload
         .get("auth_required")
@@ -133,7 +142,10 @@ pub async fn query_cameras(
         .unwrap_or(false);
     if auth_required {
         let Some(token) = token else {
-            return Err("daemon requires authentication".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "daemon requires authentication",
+            ));
         };
         let auth = json!({
             "id": 0,
@@ -143,7 +155,10 @@ pub async fn query_cameras(
         write_frame(&mut stream, &auth).await?;
         let reply = read_message(&mut stream, timeout).await?;
         if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-            return Err("daemon authentication failed".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "daemon authentication failed",
+            ));
         }
     }
 
@@ -156,7 +171,7 @@ pub async fn query_cameras(
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
             .unwrap_or("device/list failed");
-        return Err(message.to_string());
+        return Err(std::io::Error::other(message.to_string()));
     }
     Ok(parse_cameras(
         reply
@@ -271,10 +286,7 @@ async fn query_inner(
 }
 
 /// A control-protocol stream, plain TCP or TLS.
-pub trait ControlStream: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send> ControlStream for T {}
-
-pub type BoxedStream = Box<dyn ControlStream>;
+pub type BoxedStream = Box<dyn crate::core::connector::ByteStream>;
 
 pub async fn connect_stream(
     host: &str,
@@ -282,11 +294,21 @@ pub async fn connect_stream(
     tls_ca: Option<&str>,
     tls_hostname: Option<&str>,
     timeout: Duration,
-) -> Result<BoxedStream, String> {
+) -> Result<BoxedStream, std::io::Error> {
     let tcp = tokio::time::timeout(timeout, TcpStream::connect((host, port)))
         .await
-        .map_err(|_| format!("connecting to {host}:{port} timed out"))?
-        .map_err(|err| format!("cannot connect to {host}:{port}: {err}"))?;
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("connecting to {host}:{port} timed out"),
+            )
+        })?
+        .map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("cannot connect to {host}:{port}: {err}"),
+            )
+        })?;
     let Some(ca_path) = tls_ca else {
         return Ok(Box::new(tcp));
     };
@@ -295,36 +317,69 @@ pub async fn connect_stream(
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|err| format!("TLS configuration failed: {err}"))?
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("TLS configuration failed: {err}"),
+            )
+        })?
         .with_root_certificates(roots)
         .with_no_client_auth();
     let connector = TlsConnector::from(Arc::new(config));
     let name = tls_hostname.unwrap_or(host);
-    let server_name = ServerName::try_from(name.to_string())
-        .map_err(|_| format!("invalid TLS server name {name:?}"))?;
+    let server_name = ServerName::try_from(name.to_string()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid TLS server name {name:?}"),
+        )
+    })?;
     let stream =
         tokio::time::timeout(timeout, connector.connect(server_name, tcp))
             .await
-            .map_err(|_| "TLS handshake timed out".to_string())?
-            .map_err(|err| format!("TLS handshake failed: {err}"))?;
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "TLS handshake timed out",
+                )
+            })?
+            .map_err(|err| {
+                std::io::Error::new(
+                    err.kind(),
+                    format!("TLS handshake failed: {err}"),
+                )
+            })?;
     Ok(Box::new(stream))
 }
 
-fn load_roots(path: &str) -> Result<RootCertStore, String> {
-    let certificates = CertificateDer::pem_file_iter(path)
-        .map_err(|err| format!("cannot read TLS CA {path}: {err}"))?;
+fn load_roots(path: &str) -> Result<RootCertStore, std::io::Error> {
+    let certificates = CertificateDer::pem_file_iter(path).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot read TLS CA {path}: {err}"),
+        )
+    })?;
     let mut roots = RootCertStore::empty();
     let mut added = 0;
     for certificate in certificates {
-        let certificate = certificate
-            .map_err(|err| format!("invalid TLS CA {path}: {err}"))?;
-        roots
-            .add(certificate)
-            .map_err(|err| format!("invalid TLS CA {path}: {err}"))?;
+        let certificate = certificate.map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid TLS CA {path}: {err}"),
+            )
+        })?;
+        roots.add(certificate).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid TLS CA {path}: {err}"),
+            )
+        })?;
         added += 1;
     }
     if added == 0 {
-        return Err(format!("no certificates in TLS CA {path}"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("no certificates in TLS CA {path}"),
+        ));
     }
     Ok(roots)
 }
@@ -342,7 +397,7 @@ pub fn is_loopback(host: &str) -> bool {
 pub async fn read_message<S: AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
-) -> Result<Value, String> {
+) -> Result<Value, std::io::Error> {
     loop {
         let msg = read_frame(stream, timeout).await?;
         if msg.get("type").and_then(Value::as_str) == Some("ping") {
@@ -355,39 +410,65 @@ pub async fn read_message<S: AsyncRead + Unpin>(
 pub async fn read_frame<S: AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
-) -> Result<Value, String> {
+) -> Result<Value, std::io::Error> {
     let mut prefix = [0u8; 4];
     tokio::time::timeout(timeout, stream.read_exact(&mut prefix))
         .await
-        .map_err(|_| "timed out reading frame header".to_string())?
-        .map_err(|err| format!("failed reading frame header: {err}"))?;
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out reading frame header",
+            )
+        })?
+        .map_err(|err| io_context(err, "failed reading frame header"))?;
     let size = u32::from_be_bytes(prefix);
     if size > MAX_FRAME_BYTES {
-        return Err(format!("frame of {size} bytes exceeds the limit"));
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("frame of {size} bytes exceeds the limit"),
+        ));
     }
     let mut payload = vec![0u8; size as usize];
     tokio::time::timeout(timeout, stream.read_exact(&mut payload))
         .await
-        .map_err(|_| "timed out reading frame payload".to_string())?
-        .map_err(|err| format!("failed reading frame payload: {err}"))?;
-    serde_json::from_slice(&payload)
-        .map_err(|err| format!("frame is not valid JSON: {err}"))
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out reading frame payload",
+            )
+        })?
+        .map_err(|err| io_context(err, "failed reading frame payload"))?;
+    serde_json::from_slice(&payload).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("frame is not valid JSON: {err}"),
+        )
+    })
+}
+
+/// Wraps an I/O error with context, preserving its error kind.
+fn io_context(err: std::io::Error, context: &str) -> std::io::Error {
+    std::io::Error::new(err.kind(), format!("{context}: {err}"))
 }
 
 pub async fn write_frame<S: AsyncWrite + Unpin>(
     stream: &mut S,
     message: &Value,
-) -> Result<(), String> {
-    let payload = serde_json::to_vec(message)
-        .map_err(|err| format!("cannot encode frame: {err}"))?;
+) -> Result<(), std::io::Error> {
+    let payload = serde_json::to_vec(message).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot encode frame: {err}"),
+        )
+    })?;
     let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
     frame.extend_from_slice(&payload);
     stream
         .write_all(&frame)
         .await
-        .map_err(|err| format!("failed writing frame: {err}"))?;
+        .map_err(|err| io_context(err, "failed writing frame"))?;
     stream
         .flush()
         .await
-        .map_err(|err| format!("failed flushing frame: {err}"))
+        .map_err(|err| io_context(err, "failed flushing frame"))
 }

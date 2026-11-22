@@ -1,4 +1,4 @@
-.PHONY: build dev stubs format format-rust format-python lint lint-rust lint-python test check doc docs install-docs-deps venv
+.PHONY: build dev stubs format format-rust format-python lint lint-rust lint-python test check check-wasm check-targets doc docs install-docs-deps venv
 
 build:
 	maturin build --release --out dist
@@ -43,6 +43,22 @@ test:
 	pytest -v
 
 check: lint test
+
+# The wasm target builds with no features at all — and keeps
+# everything a browser can drive: session logic, HTTP/WS clients,
+# telnet transport, esp3d/octoprint/xtool sessions (dialing via the
+# connector seam, see docs/wasm.md).  Requires `rustup target add
+# wasm32-unknown-unknown`.
+check-wasm:
+	cargo check --no-default-features
+	cargo check --target wasm32-unknown-unknown --no-default-features
+
+# Cross-check the platform-gated code (bluetooth backends etc.) that
+# a linux build never compiles.  Requires the rustup targets; ring
+# is not part of these checks, so no C cross-toolchain is needed.
+check-targets:
+	cargo check --target x86_64-pc-windows-gnu --no-default-features
+	cargo check --target aarch64-apple-darwin --no-default-features
 
 doc docs: install-docs-deps
 	python -m tools.cli all

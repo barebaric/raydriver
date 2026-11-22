@@ -12,6 +12,8 @@
 - `make format-python` — format Python only (ruff handles formatting and import sorting)
 - `make test` — run the full test suite. make sure to "make dev" before you test
 - `make check` — lint + test
+- `make check-wasm` — `cargo check` for the pure-Rust core on the
+  native target and on `wasm32-unknown-unknown` (no features)
 - `make docs` — generate the API reference from the `.pyi` stubs
 - `make build` — build the wheel (release)
 
@@ -57,19 +59,26 @@ The crate is split into layers that depend only downward:
 
 ```
 core (transports, value types, dialects, session primitives)
-  →  grbl | smoothie | marlin (protocol sessions)
+  →  grbl | smoothie | marlin | esp3d | octoprint | xtool  (protocol sessions)
   →  python (PyO3 bindings)
 ```
 
 - `src/core/` is protocol-neutral and pure Rust: byte transports,
-  device value types, dialect command-template formatting, and the
-  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives.
-- `src/grbl/`, `src/smoothie/`, `src/marlin/` hold the protocol
+  device value types, dialect command-template formatting, the
+  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives,
+  the shared ping-pong line-session skeleton (`core::line_session`),
+  and the transport-level discovery scanners. Protocol knowledge
+  does not live here: the remote daemon's protocol table and device
+  fingerprints are supplied by the embedder (`core::remote::registry::Registry`).
+- `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
+  `src/octoprint/`, `src/xtool/` (with `m2`) hold the protocol
   sessions; they must not depend on PyO3 or any Python types. They
   may use `src/core/` freely. Cross-protocol imports between
   protocol modules need an explicit justification in the importing
-  module's docs (e.g. the Smoothie session reuses the GRBL status
-  parser because Smoothie emits Grbl-style reports).
+  module's `mod.rs` docs (e.g. the Smoothie session reuses the GRBL
+  parser and error tables because Smoothie emits Grbl-style
+  reports; esp3d is a transport that the Python binding wires to the
+  GRBL session).
 - `src/python/` contains all PyO3 bindings and may use `src/core/`
   and the protocol modules freely, never the other way around.
 
@@ -94,9 +103,43 @@ def __getattr__(name):
     return getattr(_raydriver.grbl, name)
 ```
 
-Rust submodules registered with `add_submodule` are intentionally NOT
+Sanctioned exceptions: `python/raydriver/esp3d/__init__.py` re-exports
+the GRBL session as `Esp3dSession` (ESP3D is a transport, not a
+separate protocol), and `python/raydriver/remote/__init__.py` binds
+its submodule attributes eagerly.
+
+Rust *parent* modules (`grbl`, `core`, ...) are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
-name is the package.
+name is the package. Rust *leaf* submodules (`grbl.probe`,
+`protocols`, `core.discovery.*`, ...) ARE registered via
+`attach_submodule`, so imports like
+`from raydriver.grbl.probe import describe` resolve to the compiled
+module and must not be shadowed by a same-named Python file.
+
+## The Uniform Session API
+
+The Python session surface is **exactly** the `SessionLike` protocol
+in Rayforge's `machine/driver/session_driver.py`: one method set with
+one signature per method, implemented once (`python::session_api::
+uniform_session_api!`) and invoked by every session class. Rayforge's
+`SessionDriverBase` relies on this directly — there is no per-driver
+adaptation layer.
+
+Rules:
+
+- Never add or change a session method on one class only. The macro
+  is the single definition; per-class bindings keep only the
+  constructor, protocol-specific extras (`probe_info`,
+  `execute_block`, `start`) and properties.
+- Protocol differences live in the Rust `Session` trait impls: an
+  operation a protocol cannot perform returns
+  `SessionError::Unsupported`, which the bindings surface as
+  `NotImplementedError`. The method is always present.
+- Signatures: `run(gcode, op_line_map=None, op_estimates=None,
+  progress_callback=None)`, `home(axes=None, active_wcs=None)`,
+  `move_to(speed, x, y, z=None)`, `jog(speed, deltas=None)`,
+  `cancel(emergency=False)`, and so on; 3rd-party callers may rely on
+  positional order.
 
 ## Python/Rust Boundary Rules
 
@@ -116,3 +159,42 @@ Dialects remain data owned by Rayforge. This crate receives resolved
 command templates (a plain dict of format strings) and only needs the
 subset used for interactive commands. Formatting supports the Python
 `str.format` subset `{name}` and `{name:.Nf}`.
+
+## Build Features and WASM
+
+The crate compiles for hosts *and* for `wasm32-unknown-unknown` —
+and wasm keeps everything a browser can plausibly drive: session
+logic, the HTTP/WS clients, the telnet transport and the
+esp3d/octoprint/xtool sessions all run there, with dialing going
+through the injectable `core::connector` seam (see docs/wasm.md).
+Cargo features exist only for what a browser physically cannot do;
+verify with `make check-wasm`.
+
+| Feature | Gates | Why it cannot run on wasm |
+|---|---|---|
+| `net` | `discovery::{daemon,probe,subnet}`, `remote::{client,inspect}` | raw TCP/UDP sockets (device-facing dialing is deliberately **not** gated — it uses the connector seam) |
+| `mdns` | `discovery::mdns`, `remote::mdns` | UDP multicast + OS threads |
+| `serial` | tokio-serial transport impl | OS file descriptors (Web Serial replaces it; port *enumeration* via `serialport` stays available without the feature) |
+| `remote-daemon` | `remote::daemon` | TCP listener, TLS certs from the filesystem; implies `net` |
+| `m2` | `xtool::m2` | tokio-tungstenite has no wasm build; implies `net` |
+| `python` | `src/python/` | Implies all desktop features + tokio `rt-multi-thread` |
+
+Rules:
+
+- `default = ["net", "mdns", "serial", "remote-daemon", "m2"]`; a
+  wasm build is `--no-default-features` with **no** features.
+- Device-facing network code (HTTP/WS clients, telnet transport,
+  esp3d/octoprint/xtool sessions) dials through
+  `core::connector::dial` and must compile unconditionally; on hosts
+  without TCP sockets the embedder installs a `StreamConnector`.
+  Never reintroduce `tokio::net::TcpStream` there.
+- Feature-gated transports keep their canonical module path in every
+  build (`#[path = "..._unsupported.rs"]` stubs fail at runtime), so
+  `TransportKind::build` needs no cfg arms.
+- `tokio::net` / `rt-multi-thread` / `spawn_blocking` on the wasm
+  path, or new wasm-hostile dependencies (`mio`, `socket2`,
+  `getrandom`) — all forbidden without a cfg gate and an
+  `unsupported` fallback (see `transport/bluetooth/` for the
+  pattern: platform-gated backends + `is_supported()`).
+- New host-only code goes behind one of the features above;
+  everything else compiles everywhere.

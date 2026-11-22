@@ -15,10 +15,17 @@ use crate::core::discovery::daemon::{
 };
 use crate::core::remote::inspect;
 use crate::core::remote::protocol::{self, WireEvent};
-use crate::core::remote::registry;
 use crate::core::types::DeviceState;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bounded wait for a reply; a silently-dead daemon (power loss,
+/// partition without RST) must not hang requests forever.  Generous
+/// enough for slow handshakes inside `session_open`.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// No-frame deadline on the reader loop; the daemon pings every
+/// [`protocol::DEFAULT_KEEPALIVE_INTERVAL`] seconds, so silence well
+/// past a few missed keepalives means the connection is gone.
+const READER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 pub struct RemoteEndpoint {
@@ -177,7 +184,8 @@ impl RemoteSession {
             endpoint.tls_hostname.as_deref(),
             CONNECT_TIMEOUT,
         )
-        .await?;
+        .await
+        .map_err(|err| err.to_string())?;
         let welcome = protocol::read_frame(&mut stream)
             .await
             .map_err(|err| err.to_string())?;
@@ -326,8 +334,14 @@ impl RemoteSession {
     fn apply_snapshot(&self, snapshot: &Value) {
         if let Some(name) = snapshot.get("protocol").and_then(Value::as_str) {
             *self.protocol.lock().unwrap() = Some(name.to_string());
-            *self.metadata.lock().unwrap() =
-                registry::protocol_info(name).map(|info| info.to_json());
+        }
+        // The daemon owns the protocol registry; the metadata rides
+        // on the snapshot instead of the client resolving it locally.
+        match snapshot.get("metadata") {
+            Some(metadata) if !metadata.is_null() => {
+                *self.metadata.lock().unwrap() = Some(metadata.clone());
+            }
+            _ => *self.metadata.lock().unwrap() = None,
         }
         if let Some(state) = snapshot.get("state") {
             if let Ok(state) = protocol::decode_state(state) {
@@ -461,7 +475,11 @@ impl RemoteSession {
             self.pending.lock().unwrap().remove(&id);
             return Err(err);
         }
-        rx.await.map_err(|_| "connection lost".to_string())
+        match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(_)) => Err("connection lost".to_string()),
+            Err(_) => Err("timed out waiting for the daemon reply".to_string()),
+        }
     }
 
     fn enqueue_without_reply(
@@ -488,10 +506,21 @@ impl RemoteSession {
 
     async fn reader_loop(self: Arc<Self>, mut reader: ReadHalf<BoxedStream>) {
         loop {
-            let message = match protocol::read_frame(&mut reader).await {
-                Ok(message) => message,
-                Err(err) => {
+            let message = match tokio::time::timeout(
+                READER_IDLE_TIMEOUT,
+                protocol::read_frame(&mut reader),
+            )
+            .await
+            {
+                Ok(Ok(message)) => message,
+                Ok(Err(err)) => {
                     self.on_disconnect(&err.to_string());
+                    return;
+                }
+                Err(_) => {
+                    self.on_disconnect(
+                        "no frames from the daemon (keepalive timeout)",
+                    );
                     return;
                 }
             };
@@ -729,8 +758,9 @@ impl RemoteSession {
         speed: f64,
         x: f64,
         y: f64,
+        z: Option<f64>,
     ) -> Result<(), String> {
-        self.command("move_to", json!({"speed": speed, "x": x, "y": y}))
+        self.command("move_to", json!({"speed": speed, "x": x, "y": y, "z": z}))
             .await
             .map(|_| ())
     }
@@ -879,7 +909,8 @@ pub async fn list_devices(
         endpoint.tls_hostname.as_deref(),
         &requests,
     )
-    .await?;
+    .await
+    .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Err(reply
@@ -910,7 +941,8 @@ pub async fn list_protocols(
         endpoint.tls_hostname.as_deref(),
         &requests,
     )
-    .await?;
+    .await
+    .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Err("protocol/list failed".to_string());

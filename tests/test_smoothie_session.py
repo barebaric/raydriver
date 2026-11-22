@@ -187,7 +187,7 @@ class TestEmulatorJobs:
         done = []
         text = "\n".join(f"G1 X{i % 50} F6000" for i in range(40))
         op_map = {**{i: 0 for i in range(20)}, 30: 1}
-        await session.run(text, op_map, done.append)
+        await session.run(text, op_map, progress_callback=done.append)
         await events.wait_for(SessionEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 
@@ -214,7 +214,7 @@ class TestEmulatorJobs:
                 session.run(
                     "G1 X1 F1000\nG1 X2 F1000\n",
                     {0: 0, 1: 1},
-                    done.append,
+                    progress_callback=done.append,
                 )
             )
             await wait_until(lambda: len(gcode_sends(mock)) >= 2)

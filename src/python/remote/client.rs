@@ -386,29 +386,32 @@ impl RemoteSession {
         })
     }
 
+    #[pyo3(signature = (speed, x, y, z=None))]
     fn move_to<'py>(
         &self,
         py: Python<'py>,
         speed: f64,
         x: f64,
         y: f64,
+        z: Option<f64>,
     ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
-            inner.move_to(speed, x, y).await.map_err(connection)?;
+            inner.move_to(speed, x, y, z).await.map_err(connection)?;
             Ok(())
         })
     }
 
+    #[pyo3(signature = (speed, deltas=None))]
     fn jog<'py>(
         &self,
         py: Python<'py>,
         speed: f64,
-        deltas: Vec<(String, f64)>,
+        deltas: Option<Vec<(String, f64)>>,
     ) -> PyResult<PyAwait<'py, ()>> {
         let inner = self.inner.clone();
         spawn_future(py, async move {
-            let deltas = serde_json::to_value(deltas)
+            let deltas = serde_json::to_value(deltas.unwrap_or_default())
                 .map_err(|err| PyValueError::new_err(err.to_string()))?;
             inner.jog(speed, deltas).await.map_err(connection)?;
             Ok(())
@@ -503,6 +506,7 @@ impl RemoteSession {
         })
     }
 
+    #[pyo3(signature = (wcs_slot, x, y, z=None))]
     fn set_wcs_offset<'py>(
         &self,
         py: Python<'py>,
