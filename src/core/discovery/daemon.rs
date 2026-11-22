@@ -18,15 +18,11 @@ use rustls::pki_types::pem::PemObject;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::RootCertStore;
 use serde_json::{json, Value};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
-/// One frame = 4-byte big-endian length + UTF-8 JSON payload.
-const MAX_FRAME_BYTES: u32 = 16 * 1024 * 1024;
-
-/// The only control-protocol version this crate speaks.
-const PROTOCOL_VERSION: i64 = 1;
+use crate::core::remote::protocol;
 
 /// Why a daemon could not be enumerated, for the daemon-level row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,7 +125,8 @@ pub async fn query_cameras(
         ));
     }
     let payload = welcome.get("payload").unwrap_or(&Value::Null);
-    if payload.get("protocol").and_then(Value::as_i64) != Some(PROTOCOL_VERSION)
+    if payload.get("protocol").and_then(Value::as_i64)
+        != Some(protocol::PROTOCOL_VERSION)
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -411,64 +408,27 @@ pub async fn read_frame<S: AsyncRead + Unpin>(
     stream: &mut S,
     timeout: Duration,
 ) -> Result<Value, std::io::Error> {
-    let mut prefix = [0u8; 4];
-    tokio::time::timeout(timeout, stream.read_exact(&mut prefix))
+    tokio::time::timeout(timeout, protocol::read_frame(stream))
         .await
         .map_err(|_| {
             std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
-                "timed out reading frame header",
+                "timed out reading frame",
             )
         })?
-        .map_err(|err| io_context(err, "failed reading frame header"))?;
-    let size = u32::from_be_bytes(prefix);
-    if size > MAX_FRAME_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("frame of {size} bytes exceeds the limit"),
-        ));
-    }
-    let mut payload = vec![0u8; size as usize];
-    tokio::time::timeout(timeout, stream.read_exact(&mut payload))
-        .await
-        .map_err(|_| {
+        .map_err(|err| {
             std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "timed out reading frame payload",
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
             )
-        })?
-        .map_err(|err| io_context(err, "failed reading frame payload"))?;
-    serde_json::from_slice(&payload).map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("frame is not valid JSON: {err}"),
-        )
-    })
-}
-
-/// Wraps an I/O error with context, preserving its error kind.
-fn io_context(err: std::io::Error, context: &str) -> std::io::Error {
-    std::io::Error::new(err.kind(), format!("{context}: {err}"))
+        })
 }
 
 pub async fn write_frame<S: AsyncWrite + Unpin>(
     stream: &mut S,
     message: &Value,
 ) -> Result<(), std::io::Error> {
-    let payload = serde_json::to_vec(message).map_err(|err| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("cannot encode frame: {err}"),
-        )
-    })?;
-    let mut frame = (payload.len() as u32).to_be_bytes().to_vec();
-    frame.extend_from_slice(&payload);
-    stream
-        .write_all(&frame)
+    protocol::write_frame(stream, message)
         .await
-        .map_err(|err| io_context(err, "failed writing frame"))?;
-    stream
-        .flush()
-        .await
-        .map_err(|err| io_context(err, "failed flushing frame"))
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }

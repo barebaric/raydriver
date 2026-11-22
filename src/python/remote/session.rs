@@ -6,6 +6,9 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use pyo3::exceptions::{
+    PyConnectionError, PyNotImplementedError, PyTimeoutError,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
@@ -24,6 +27,18 @@ use crate::python::remote::bridge::{
 use crate::python::remote::events::{event_to_wire, extract_event};
 
 type BoxFuture = Pin<Box<dyn Future<Output = PyResult<Py<PyAny>>> + Send>>;
+
+fn classify(py: Python<'_>, err: &PyErr) -> SessionError {
+    if err.is_instance_of::<PyTimeoutError>(py) {
+        SessionError::Timeout(err.to_string())
+    } else if err.is_instance_of::<PyNotImplementedError>(py) {
+        SessionError::Unsupported(err.to_string())
+    } else if err.is_instance_of::<PyConnectionError>(py) {
+        SessionError::Connection(err.to_string())
+    } else {
+        SessionError::Other(err.to_string())
+    }
+}
 
 #[pyclass(module = "raydriver.remote")]
 pub(crate) struct EventCallback {
@@ -68,7 +83,7 @@ impl PySessionAdapter {
         method: &str,
         args: Vec<Py<PyAny>>,
         kwargs: Option<Py<PyAny>>,
-    ) -> Result<Py<PyAny>, String> {
+    ) -> Result<Py<PyAny>, SessionError> {
         let future: BoxFuture = Python::attach(|py| {
             let session = self.session.clone_ref(py);
             let loop_ = self.loop_.clone_ref(py);
@@ -82,15 +97,17 @@ impl PySessionAdapter {
             )?;
             Ok::<_, PyErr>(Box::pin(future))
         })
-        .map_err(|err| err.to_string())?;
-        future.await.map_err(|err| err.to_string())
+        .map_err(|err| Python::attach(|py| classify(py, &err)))?;
+        future
+            .await
+            .map_err(|err| Python::attach(|py| classify(py, &err)))
     }
 
     fn call_sync(
         &self,
         method: &str,
         kwargs: Option<Py<PyAny>>,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, SessionError> {
         let result: PyResult<Value> = Python::attach(|py| {
             let session = self.session.bind(py);
             let kwargs = kwargs.as_ref().map(|kwargs| kwargs.bind(py));
@@ -110,10 +127,10 @@ impl PySessionAdapter {
             let result = session.call_method(method, (), kwargs.as_ref())?;
             py_to_json(&result)
         });
-        result.map_err(|err| err.to_string())
+        result.map_err(|err| Python::attach(|py| classify(py, &err)))
     }
 
-    fn config_kwargs(&self, args: &Value) -> Result<Py<PyAny>, String> {
+    fn config_kwargs(&self, args: &Value) -> Result<Py<PyAny>, SessionError> {
         Python::attach(|py| -> PyResult<Py<PyAny>> {
             let dict = PyDict::new(py);
             if let Some(entries) = args.as_object() {
@@ -123,7 +140,7 @@ impl PySessionAdapter {
             }
             Ok(dict.unbind().into_any())
         })
-        .map_err(|err| err.to_string())
+        .map_err(|err| Python::attach(|py| classify(py, &err)))
     }
 }
 
@@ -201,14 +218,12 @@ impl HostedSession for PySessionAdapter {
         self.call_async("connect", Vec::new(), None)
             .await
             .map(|_| ())
-            .map_err(SessionError::Other)
     }
 
     async fn disconnect(&self) -> Result<(), SessionError> {
         self.call_async("disconnect", Vec::new(), None)
             .await
             .map(|_| ())
-            .map_err(SessionError::Other)
     }
 
     async fn execute(
@@ -216,18 +231,13 @@ impl HostedSession for PySessionAdapter {
         method: &str,
         args: Value,
     ) -> Result<Value, SessionError> {
-        let kwargs = self.config_kwargs(&args).map_err(SessionError::Other)?;
+        let kwargs = self.config_kwargs(&args)?;
         if method == "update_dialect" {
-            return self
-                .call_sync(method, Some(kwargs))
-                .map_err(SessionError::Other);
+            return self.call_sync(method, Some(kwargs));
         }
-        let result = self
-            .call_async(method, Vec::new(), Some(kwargs))
-            .await
-            .map_err(SessionError::Other)?;
+        let result = self.call_async(method, Vec::new(), Some(kwargs)).await?;
         Python::attach(|py| py_to_json(result.bind(py)))
-            .map_err(|err| SessionError::Other(err.to_string()))
+            .map_err(|err| Python::attach(|py| classify(py, &err)))
     }
 
     async fn run(
@@ -256,11 +266,10 @@ impl HostedSession for PySessionAdapter {
             dict.set_item("progress_callback", callback)?;
             Ok::<_, PyErr>(dict.unbind().into_any())
         })
-        .map_err(|err| SessionError::Other(err.to_string()))?;
+        .map_err(|err| Python::attach(|py| classify(py, &err)))?;
         self.call_async("run", Vec::new(), Some(kwargs))
             .await
             .map(|_| ())
-            .map_err(SessionError::Other)
     }
 }
 

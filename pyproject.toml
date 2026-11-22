@@ -7,25 +7,24 @@ name = "raydriver"
 dynamic = ["version"]
 description = "Rust-native machine drivers for Rayforge, with Python bindings."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = [
-    "zeroconf",
-]
+dependencies = []
 
 [project.optional-dependencies]
-# Kept for backward compatibility; daemon support (zeroconf) is now a
-# default dependency, so plain `pip install raydriver` includes it.
+# Kept for backward compatibility; daemon support has no extra
+# Python dependencies now that mDNS is implemented in Rust.
 daemon = []
 test = [
     "pytest",
     "pytest-asyncio",
     "pytest-timeout",
+    "zeroconf",
 ]
 docs = [
     "mdformat",

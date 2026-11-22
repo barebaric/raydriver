@@ -24,6 +24,9 @@ pub(crate) fn event_to_wire(event: &SessionEvent) -> WireEvent {
             }
         }
         SessionEvent::JobFinished {} => WireEvent::JobFinished,
+        SessionEvent::JobError { message } => WireEvent::JobError {
+            message: message.clone(),
+        },
         SessionEvent::ProbeStatusChanged { message } => {
             WireEvent::ProbeStatus {
                 message: message.clone(),
@@ -71,6 +74,9 @@ pub(crate) fn extract_event(
                 }
             }
             SessionEvent::JobFinished {} => SessionEvent::JobFinished {},
+            SessionEvent::JobError { message } => SessionEvent::JobError {
+                message: message.clone(),
+            },
             SessionEvent::ProbeStatusChanged { message } => {
                 SessionEvent::ProbeStatusChanged {
                     message: message.clone(),
@@ -117,6 +123,10 @@ pub(crate) fn wire_to_py_event(
         WireEvent::JobFinished => {
             let cls = base.getattr("JobFinished")?;
             Ok(Some(cls.call0()?.unbind()))
+        }
+        WireEvent::JobError { message } => {
+            let cls = base.getattr("JobError")?;
+            Ok(Some(cls.call1((message.clone(),))?.unbind()))
         }
         WireEvent::ProbeStatus { message } => {
             let cls = base.getattr("ProbeStatusChanged")?;

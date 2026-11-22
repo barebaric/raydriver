@@ -116,6 +116,12 @@ name is the package. Rust *leaf* submodules (`grbl.probe`,
 `from raydriver.grbl.probe import describe` resolve to the compiled
 module and must not be shadowed by a same-named Python file.
 
+The `probe` modules are native (`grbl`, `marlin`, `smoothie`,
+`octoprint`). Each exports the protocol's census class, `describe()`
+and a `probe_device(session)` compatibility wrapper that forwards to
+the session's native `probe_device()` method. Do not add a Python
+`probe.py` next to them: it would shadow the compiled module.
+
 ## The Uniform Session API
 
 The Python session surface is **exactly** the `SessionLike` protocol
@@ -150,8 +156,13 @@ Rules:
   the tokio side via `call_soon_threadsafe` on the caller's event
   loop. Never block the loop inside a binding.
 - Events emitted by the session are delivered to the Python
-  `event_callback(name: str, payload)` on the event loop thread.
-  Bindings must not call the callback from a foreign thread directly.
+  `event_callback(SessionEvent)` on the event loop thread. Core
+  sessions build one `core::session::SessionEvent`; the bindings
+  convert it to the Python enum and the remote wire event. Bindings
+  must not call the callback from a foreign thread directly.
+- Cancelling the asyncio future returned by `run()`/`run_raw()`
+  aborts the Rust future and invokes the session cancel path; it is
+  not equivalent to merely dropping the Python task.
 
 ## Dialects
 

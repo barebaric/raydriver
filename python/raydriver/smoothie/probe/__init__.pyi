@@ -2,10 +2,12 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "SmoothieDeviceInfo",
     "describe",
+    "probe_device",
 ]
 
 @typing.final
@@ -46,5 +48,11 @@ def describe(version_lines: typing.Sequence[builtins.str], alpha_max_lines: typi
     response lines. ``ok`` acknowledgements and ``<...>`` status
     reports are dropped, and non-numeric ``config-get`` replies
     yield ``None`` fields.
+    """
+
+def probe_device(session: typing.Any) -> collections.abc.Awaitable[SmoothieDeviceInfo]:
+    r"""
+    Runs the device census over *session* and resolves to
+    [`SmoothieDeviceInfo`].
     """
 

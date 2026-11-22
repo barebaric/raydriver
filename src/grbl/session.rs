@@ -961,7 +961,10 @@ impl GrblSession {
         let gcode = gcode.to_string();
         if let Err(err) = self
             .run_streaming_job(async move {
-                if let Err(err) = core.transport.run_network_job(&gcode).await {
+                let Some(runner) = core.transport.network_job_runner() else {
+                    return;
+                };
+                if let Err(err) = runner.run_network_job(&gcode).await {
                     if core.is_cancelled() {
                         return;
                     }
@@ -1575,7 +1578,7 @@ impl GrblSession {
             Ok(()) => Ok(request.lines()),
             Err(_) => {
                 request.finish();
-                Err(SessionError::Timeout)
+                Err(SessionError::Timeout("operation timed out".to_string()))
             }
         }
     }
@@ -1929,7 +1932,7 @@ impl Session for GrblSession {
         op_estimates: &[f64],
     ) -> Result<(), SessionError> {
         self.start_job().await;
-        if self.transport.supports_network_job() {
+        if self.transport.network_job_runner().is_some() {
             self.run_network_job(gcode, Some(op_map)).await;
             return Ok(());
         }
@@ -1967,7 +1970,7 @@ impl Session for GrblSession {
         if machine_code.trim().is_empty() {
             return Ok(());
         }
-        if self.transport.supports_network_job() {
+        if self.transport.network_job_runner().is_some() {
             self.start_job().await;
             self.run_network_job(machine_code, None).await;
             return Ok(());
@@ -2069,7 +2072,9 @@ impl Session for GrblSession {
                 .await
                 {
                     Ok(()) => Ok(()),
-                    Err(_) => Err(SessionError::Timeout),
+                    Err(_) => Err(SessionError::Timeout(
+                        "operation timed out".to_string(),
+                    )),
                 }
             }
             .await;

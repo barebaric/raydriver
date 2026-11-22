@@ -2,12 +2,14 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import enum
 import typing
 __all__ = [
     "GrblDeviceInfo",
     "GrblFlavor",
     "describe",
+    "probe_device",
 ]
 
 @typing.final
@@ -70,5 +72,11 @@ def describe(build_info: typing.Sequence[builtins.str], settings_lines: typing.S
     Pure data transformation with no I/O; the caller is responsible
     for communicating with the device and passing the collected
     response lines.
+    """
+
+def probe_device(session: typing.Any) -> collections.abc.Awaitable[GrblDeviceInfo]:
+    r"""
+    Runs the device census over *session* and resolves to
+    [`GrblDeviceInfo`].
     """
 

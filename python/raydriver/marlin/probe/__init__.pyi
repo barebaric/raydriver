@@ -2,10 +2,12 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "MarlinDeviceInfo",
     "describe",
+    "probe_device",
 ]
 
 @typing.final
@@ -42,5 +44,12 @@ def describe(m115_lines: typing.Sequence[builtins.str], m211_lines: typing.Seque
     response lines. `boot_lines` are startup messages observed
     before the handshake; a version found there is more specific
     than the `FIRMWARE_NAME` token M115 reports.
+    """
+
+def probe_device(session: typing.Any, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[MarlinDeviceInfo]:
+    r"""
+    Runs the device census over *session* and resolves to
+    [`MarlinDeviceInfo`]. *boot_lines* are the startup lines the
+    caller observed.
     """
 

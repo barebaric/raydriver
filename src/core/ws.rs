@@ -188,7 +188,7 @@ impl WsStream<DynStream> {
                 .map_err(|e| SessionError::Connection(e.0))
         })
         .await
-        .map_err(|_| SessionError::Timeout)?
+        .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
     }
 }
 

@@ -2,10 +2,12 @@
 # ruff: noqa: E501, F401, F403, F405
 
 import builtins
+import collections.abc
 import typing
 __all__ = [
     "OctoPrintDeviceInfo",
     "describe",
+    "probe_device",
 ]
 
 @typing.final
@@ -33,5 +35,11 @@ def describe(version_info: typing.Optional[dict[builtins.str, builtins.object]] 
     for the HTTP requests. *version_info* is the `GET /api/version`
     response, *printer_info* the `GET /api/printer` response
     (either may be `None` when the request failed).
+    """
+
+def probe_device(session: typing.Any) -> collections.abc.Awaitable[OctoPrintDeviceInfo]:
+    r"""
+    Runs the device census over *session* and resolves to
+    [`OctoPrintDeviceInfo`].
     """
 

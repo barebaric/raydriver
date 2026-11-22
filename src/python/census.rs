@@ -5,6 +5,7 @@
 //! hosted protocol produces, typed as their union.
 
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use pyo3_stub_gen::{ImportRef, PyStubType, TypeInfo};
 use serde_json::Value;
 
@@ -12,6 +13,28 @@ use crate::python::grbl::probe::GrblDeviceInfo;
 use crate::python::marlin::probe::MarlinDeviceInfo;
 use crate::python::octoprint::probe::OctoPrintDeviceInfo;
 use crate::python::smoothie::probe::SmoothieDeviceInfo;
+
+/// Runs the native `probe_device()` method on *session* and returns
+/// its awaitable. Rayforge imports module-level `probe_device()`
+/// helpers; keeping the call in Rust avoids a Python shim module that
+/// would shadow the native `probe` module.
+pub(crate) fn call_session_probe(
+    py: Python<'_>,
+    session: &Bound<'_, PyAny>,
+    boot_lines: Option<Vec<String>>,
+) -> PyResult<Py<PyAny>> {
+    let has_boot_lines = boot_lines.is_some();
+    let kwargs = PyDict::new(py);
+    if let Some(lines) = boot_lines {
+        kwargs.set_item("boot_lines", lines)?;
+    }
+    let awaitable = if has_boot_lines {
+        session.call_method("probe_device", (), Some(&kwargs))?
+    } else {
+        session.call_method0("probe_device")?
+    };
+    Ok(awaitable.unbind())
+}
 
 /// The census a session's ``probe_device`` returns: the concrete
 /// type depends on the session's protocol.
@@ -29,8 +52,8 @@ impl<'py> IntoPyObject<'py> for DeviceCensus {
 
 impl PyStubType for DeviceCensus {
     fn type_output() -> TypeInfo {
-        // Qualified through each protocol's package, so the four
-        // `probe` submodules cannot collide on one import name.
+        // Qualified through each protocol's package, so the census
+        // classes cannot collide on one import name.
         TypeInfo {
             name: "grbl.probe.GrblDeviceInfo \
                    | marlin.probe.MarlinDeviceInfo \

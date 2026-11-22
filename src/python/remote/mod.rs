@@ -85,6 +85,10 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     daemon.add_class::<daemon::DaemonConfig>()?;
     daemon.add_class::<daemon::Daemon>()?;
     daemon.add_class::<daemon::ClientQueue>()?;
+    daemon.add_function(wrap_pyfunction!(
+        daemon::validate_bind_policy,
+        &daemon
+    )?)?;
     remote.add_submodule(&daemon)?;
 
     let client = PyModule::new(py, "client")?;

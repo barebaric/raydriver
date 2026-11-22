@@ -411,7 +411,7 @@ impl XtoolSession {
                     ));
                 }
                 _ = &mut timer => {
-                    return Err(SessionError::Timeout);
+                    return Err(SessionError::Timeout("operation timed out".to_string()));
                 }
             }
             let state = self.state();

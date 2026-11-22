@@ -27,6 +27,54 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// past a few missed keepalives means the connection is gone.
 const READER_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// The class of a remote RPC failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteErrorKind {
+    Timeout,
+    Connection,
+    Device,
+    Unsupported,
+    Internal,
+}
+
+/// A typed failure from a remote call.
+#[derive(Debug, Clone)]
+pub struct RemoteError {
+    pub kind: RemoteErrorKind,
+    pub code: Option<String>,
+    pub message: String,
+}
+
+impl RemoteError {
+    fn new(kind: RemoteErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            kind,
+            code: None,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for RemoteError {
+    fn from(message: String) -> Self {
+        Self::new(RemoteErrorKind::Connection, message)
+    }
+}
+
+impl From<&str> for RemoteError {
+    fn from(message: &str) -> Self {
+        Self::from(message.to_string())
+    }
+}
+
+impl std::fmt::Display for RemoteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for RemoteError {}
+
 #[derive(Debug, Clone)]
 pub struct RemoteEndpoint {
     pub host: String,
@@ -65,7 +113,7 @@ pub struct RemoteSession {
     closing: AtomicBool,
     connect_lock: tokio::sync::Mutex<()>,
     events: Arc<dyn RemoteEvents>,
-    job_done: Mutex<Option<oneshot::Sender<Result<(), String>>>>,
+    job_done: Mutex<Option<oneshot::Sender<Result<(), RemoteError>>>>,
 }
 
 impl RemoteSession {
@@ -154,7 +202,7 @@ impl RemoteSession {
 
     // -- connection lifecycle -----------------------------------------
 
-    pub async fn ensure_connected(self: &Arc<Self>) -> Result<(), String> {
+    pub async fn ensure_connected(self: &Arc<Self>) -> Result<(), RemoteError> {
         if self.connected.load(Ordering::SeqCst) {
             return Ok(());
         }
@@ -165,17 +213,17 @@ impl RemoteSession {
         self.open_connection().await
     }
 
-    pub async fn attach(self: &Arc<Self>) -> Result<(), String> {
+    pub async fn attach(self: &Arc<Self>) -> Result<(), RemoteError> {
         self.ensure_connected().await
     }
 
-    async fn open_connection(self: &Arc<Self>) -> Result<(), String> {
+    async fn open_connection(self: &Arc<Self>) -> Result<(), RemoteError> {
         let endpoint = &self.endpoint;
         if endpoint.token.is_some()
             && endpoint.tls_ca.is_none()
             && !is_loopback(&endpoint.host)
         {
-            return Err("refusing to send a token without TLS".to_string());
+            return Err("refusing to send a token without TLS".into());
         }
         let mut stream = connect_stream(
             &endpoint.host,
@@ -192,7 +240,7 @@ impl RemoteSession {
         if welcome.get("type").and_then(Value::as_str)
             != Some(protocol::WELCOME)
         {
-            return Err("daemon did not send welcome".to_string());
+            return Err("daemon did not send welcome".into());
         }
         let payload = welcome.get("payload").cloned().unwrap_or(Value::Null);
         if payload.get("protocol").and_then(Value::as_i64)
@@ -201,7 +249,8 @@ impl RemoteSession {
             return Err(format!(
                 "unsupported daemon protocol version {:?}",
                 payload.get("protocol")
-            ));
+            )
+            .into());
         }
         if payload
             .get("auth_required")
@@ -220,7 +269,7 @@ impl RemoteSession {
                 .await
                 .map_err(|err| err.to_string())?;
             if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-                return Err("daemon authentication failed".to_string());
+                return Err("daemon authentication failed".into());
             }
         }
 
@@ -276,7 +325,7 @@ impl RemoteSession {
         Ok(())
     }
 
-    async fn reattach(&self) -> Result<(), String> {
+    async fn reattach(&self) -> Result<(), RemoteError> {
         let session_id = self
             .session_id
             .lock()
@@ -372,7 +421,7 @@ impl RemoteSession {
         }
     }
 
-    async fn refresh_properties(&self) -> Result<(), String> {
+    async fn refresh_properties(&self) -> Result<(), RemoteError> {
         for name in [
             "resource_uri",
             "buffer_count",
@@ -453,21 +502,21 @@ impl RemoteSession {
 
     // -- wire plumbing --------------------------------------------------
 
-    fn enqueue(&self, frame: Value) -> Result<(), String> {
+    fn enqueue(&self, frame: Value) -> Result<(), RemoteError> {
         let outgoing = self.outgoing.lock().unwrap();
         let Some(outgoing) = outgoing.as_ref() else {
-            return Err("connection lost".to_string());
+            return Err("connection lost".into());
         };
         outgoing
             .send(frame)
-            .map_err(|_| "connection lost".to_string())
+            .map_err(|_| "connection lost".to_string().into())
     }
 
     async fn request(
         &self,
         type_: &str,
         payload: Value,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, RemoteError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
@@ -477,8 +526,10 @@ impl RemoteSession {
         }
         match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
             Ok(Ok(reply)) => Ok(reply),
-            Ok(Err(_)) => Err("connection lost".to_string()),
-            Err(_) => Err("timed out waiting for the daemon reply".to_string()),
+            Ok(Err(_)) => Err("connection lost".into()),
+            Err(_) => {
+                Err("timed out waiting for the daemon reply".to_string().into())
+            }
         }
     }
 
@@ -486,7 +537,7 @@ impl RemoteSession {
         &self,
         type_: &str,
         payload: Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         self.enqueue(protocol::request(id, type_, payload))
     }
@@ -567,8 +618,17 @@ impl RemoteSession {
         if event.get("kind").and_then(Value::as_str)
             == Some(protocol::KIND_JOB_ERROR)
         {
+            let message = event
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             self.job_running.store(false, Ordering::SeqCst);
-            self.finish_job(Ok(()));
+            self.finish_job(Err(RemoteError::new(
+                RemoteErrorKind::Device,
+                message.clone(),
+            )));
+            self.emit(WireEvent::JobError { message });
             return;
         }
         if event.get("kind").and_then(Value::as_str)
@@ -596,7 +656,7 @@ impl RemoteSession {
         self.events.event(event);
     }
 
-    fn finish_job(&self, result: Result<(), String>) {
+    fn finish_job(&self, result: Result<(), RemoteError>) {
         if let Some(sender) = self.job_done.lock().unwrap().take() {
             let _ = sender.send(result);
         }
@@ -615,7 +675,7 @@ impl RemoteSession {
                 "error": {"code": "internal", "message": message},
             }));
         }
-        self.finish_job(Err(message.to_string()));
+        self.finish_job(Err(message.to_string().into()));
         self.emit(WireEvent::ConnectionStatus {
             status: "SLEEPING".to_string(),
             message: Some(message.to_string()),
@@ -628,7 +688,7 @@ impl RemoteSession {
         self: &Arc<Self>,
         method: &str,
         args: Value,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, RemoteError> {
         self.ensure_connected().await?;
         let reply = self
             .request(
@@ -649,11 +709,11 @@ impl RemoteSession {
             .unwrap_or(Value::Null))
     }
 
-    pub async fn connect(self: &Arc<Self>) -> Result<(), String> {
+    pub async fn connect(self: &Arc<Self>) -> Result<(), RemoteError> {
         self.command("connect", json!({})).await.map(|_| ())
     }
 
-    pub async fn disconnect(self: &Arc<Self>) -> Result<(), String> {
+    pub async fn disconnect(self: &Arc<Self>) -> Result<(), RemoteError> {
         self.aclose().await;
         Ok(())
     }
@@ -661,7 +721,7 @@ impl RemoteSession {
     pub async fn execute_interactive_command(
         self: &Arc<Self>,
         command: &str,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, RemoteError> {
         self.command("execute_interactive_command", json!({"command": command}))
             .await
     }
@@ -669,7 +729,7 @@ impl RemoteSession {
     pub async fn execute_command(
         self: &Arc<Self>,
         command: &str,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, RemoteError> {
         self.command("execute_command", json!({"command": command}))
             .await
     }
@@ -679,7 +739,7 @@ impl RemoteSession {
         gcode: &str,
         op_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.ensure_connected().await?;
         let (tx, rx) = oneshot::channel();
         *self.job_done.lock().unwrap() = Some(tx);
@@ -715,20 +775,24 @@ impl RemoteSession {
             return check_reply(&reply);
         }
         self.job_running.store(true, Ordering::SeqCst);
-        rx.await.map_err(|_| "connection lost".to_string())??;
+        rx.await
+            .map_err(|_| RemoteError::from("connection lost"))??;
         Ok(())
     }
 
     pub async fn run_raw(
         self: &Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("run_raw", json!({"machine_code": machine_code}))
             .await
             .map(|_| ())
     }
 
-    pub async fn set_hold(self: &Arc<Self>, hold: bool) -> Result<(), String> {
+    pub async fn set_hold(
+        self: &Arc<Self>,
+        hold: bool,
+    ) -> Result<(), RemoteError> {
         self.command("set_hold", json!({"hold": hold}))
             .await
             .map(|_| ())
@@ -737,7 +801,7 @@ impl RemoteSession {
     pub async fn cancel(
         self: &Arc<Self>,
         emergency: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("cancel", json!({"emergency": emergency}))
             .await
             .map(|_| ())
@@ -747,7 +811,7 @@ impl RemoteSession {
         self: &Arc<Self>,
         axes: Option<Vec<String>>,
         active_wcs: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("home", json!({"axes": axes, "active_wcs": active_wcs}))
             .await
             .map(|_| ())
@@ -759,7 +823,7 @@ impl RemoteSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("move_to", json!({"speed": speed, "x": x, "y": y, "z": z}))
             .await
             .map(|_| ())
@@ -769,7 +833,7 @@ impl RemoteSession {
         self: &Arc<Self>,
         speed: f64,
         deltas: Value,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("jog", json!({"speed": speed, "deltas": deltas}))
             .await
             .map(|_| ())
@@ -778,7 +842,7 @@ impl RemoteSession {
     pub async fn select_tool(
         self: &Arc<Self>,
         tool_number: i64,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("select_tool", json!({"tool_number": tool_number}))
             .await
             .map(|_| ())
@@ -787,7 +851,7 @@ impl RemoteSession {
     pub async fn set_power(
         self: &Arc<Self>,
         power: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("set_power", json!({"power": power}))
             .await
             .map(|_| ())
@@ -796,13 +860,13 @@ impl RemoteSession {
     pub async fn set_focus_power(
         self: &Arc<Self>,
         power: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("set_focus_power", json!({"power": power}))
             .await
             .map(|_| ())
     }
 
-    pub async fn read_settings(self: &Arc<Self>) -> Result<Value, String> {
+    pub async fn read_settings(self: &Arc<Self>) -> Result<Value, RemoteError> {
         self.command("read_settings", json!({})).await
     }
 
@@ -810,7 +874,7 @@ impl RemoteSession {
         self: &Arc<Self>,
         key: &str,
         value: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command("write_setting", json!({"key": key, "value": value}))
             .await
             .map(|_| ())
@@ -822,7 +886,7 @@ impl RemoteSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), String> {
+    ) -> Result<(), RemoteError> {
         self.command(
             "set_wcs_offset",
             json!({"wcs_slot": wcs_slot, "x": x, "y": y, "z": z}),
@@ -831,11 +895,15 @@ impl RemoteSession {
         .map(|_| ())
     }
 
-    pub async fn read_wcs_offsets(self: &Arc<Self>) -> Result<Value, String> {
+    pub async fn read_wcs_offsets(
+        self: &Arc<Self>,
+    ) -> Result<Value, RemoteError> {
         self.command("read_wcs_offsets", json!({})).await
     }
 
-    pub async fn read_parser_state(self: &Arc<Self>) -> Result<Value, String> {
+    pub async fn read_parser_state(
+        self: &Arc<Self>,
+    ) -> Result<Value, RemoteError> {
         self.command("read_parser_state", json!({})).await
     }
 
@@ -844,7 +912,7 @@ impl RemoteSession {
         axis_letter: &str,
         max_travel: f64,
         feed_rate: f64,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, RemoteError> {
         self.command(
             "run_probe_cycle",
             json!({
@@ -856,11 +924,13 @@ impl RemoteSession {
         .await
     }
 
-    pub async fn detect_unit_system(self: &Arc<Self>) -> Result<Value, String> {
+    pub async fn detect_unit_system(
+        self: &Arc<Self>,
+    ) -> Result<Value, RemoteError> {
         self.command("detect_unit_system", json!({})).await
     }
 
-    pub async fn clear_alarm(self: &Arc<Self>) -> Result<(), String> {
+    pub async fn clear_alarm(self: &Arc<Self>) -> Result<(), RemoteError> {
         self.command("clear_alarm", json!({})).await.map(|_| ())
     }
 
@@ -884,22 +954,41 @@ impl RemoteSession {
     }
 }
 
-fn check_reply(reply: &Value) -> Result<(), String> {
+fn check_reply(reply: &Value) -> Result<(), RemoteError> {
     if reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         return Ok(());
     }
-    Err(reply
-        .get("error")
+    let error = reply.get("error");
+    let message = error
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
         .unwrap_or("remote command failed")
-        .to_string())
+        .to_string();
+    let code = error
+        .and_then(|error| error.get("code"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let kind = match error
+        .and_then(|error| error.get("kind"))
+        .and_then(Value::as_str)
+    {
+        Some("timeout") => RemoteErrorKind::Timeout,
+        Some("connection") => RemoteErrorKind::Connection,
+        Some("device") => RemoteErrorKind::Device,
+        Some("unsupported") => RemoteErrorKind::Unsupported,
+        _ => RemoteErrorKind::Internal,
+    };
+    Err(RemoteError {
+        kind,
+        code,
+        message,
+    })
 }
 
 /// The devices a daemon knows about.
 pub async fn list_devices(
     endpoint: &RemoteEndpoint,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<Value>, RemoteError> {
     let requests = [(protocol::DEVICE_LIST, json!({}))];
     let (_, replies) = inspect::daemon_rpc(
         &endpoint.host,
@@ -918,7 +1007,8 @@ pub async fn list_devices(
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
             .unwrap_or("device/list failed")
-            .to_string());
+            .to_string()
+            .into());
     }
     Ok(reply
         .get("payload")
@@ -931,7 +1021,7 @@ pub async fn list_devices(
 /// The daemon's protocol metadata.
 pub async fn list_protocols(
     endpoint: &RemoteEndpoint,
-) -> Result<Vec<Value>, String> {
+) -> Result<Vec<Value>, RemoteError> {
     let requests = [(protocol::PROTOCOL_LIST, json!({}))];
     let (_, replies) = inspect::daemon_rpc(
         &endpoint.host,
@@ -945,7 +1035,7 @@ pub async fn list_protocols(
     .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-        return Err("protocol/list failed".to_string());
+        return Err("protocol/list failed".to_string().into());
     }
     Ok(reply
         .get("payload")

@@ -187,6 +187,7 @@ impl ClientQueue {
 struct Client {
     id: String,
     address: String,
+    connected_at: f64,
     queue: Arc<ClientQueue>,
     authenticated: AtomicBool,
     closed: AtomicBool,
@@ -413,6 +414,7 @@ impl Daemon {
         let client = Arc::new(Client {
             id: uuid::Uuid::new_v4().simple().to_string()[..12].to_string(),
             address: peer.to_string(),
+            connected_at: unix_time(),
             queue: Arc::new(ClientQueue::new(SEND_QUEUE_LIMIT)),
             authenticated: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -521,7 +523,7 @@ impl Daemon {
             .unwrap_or_default();
         let is_auth =
             message.get("type").and_then(Value::as_str) == Some(protocol::AUTH);
-        if !is_auth || supplied != token {
+        if !is_auth || !tokens_equal(supplied, &token) {
             let reply = protocol::error_response(
                 id,
                 protocol::AUTH_FAILED,
@@ -605,7 +607,12 @@ impl Daemon {
         };
         Some(match result {
             Ok(payload) => protocol::response(id, payload),
-            Err(err) => protocol::error_response(id, &err.code, &err.message),
+            Err(err) => protocol::error_response_with_kind(
+                id,
+                &err.code,
+                &err.message,
+                err.kind,
+            ),
         })
     }
 
@@ -714,7 +721,7 @@ impl Daemon {
                     "address": client.address,
                     "authenticated":
                         client.authenticated.load(Ordering::SeqCst),
-                    "connected_at": unix_time(),
+                    "connected_at": client.connected_at,
                     "roles": client.roles.lock().unwrap().clone(),
                 })
             })
@@ -1439,8 +1446,28 @@ fn require_control(
     Ok(())
 }
 
+/// Constant-time token comparison. Hashing first gives fixed-length
+/// inputs, so neither contents nor length influence the comparison.
+fn tokens_equal(supplied: &str, expected: &str) -> bool {
+    use sha1::{Digest, Sha1};
+    let supplied = Sha1::digest(supplied.as_bytes());
+    let expected = Sha1::digest(expected.as_bytes());
+    let mut difference = 0u8;
+    for (a, b) in supplied.iter().zip(expected.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
+}
+
 fn internal(err: SessionError) -> ProtocolError {
-    ProtocolError::new(protocol::INTERNAL, err.to_string())
+    let kind = match err {
+        SessionError::Timeout(_) => "timeout",
+        SessionError::Connection(_) => "connection",
+        SessionError::Device(_) | SessionError::BufferStall(_) => "device",
+        SessionError::Unsupported(_) => "unsupported",
+        SessionError::Other(_) => "internal",
+    };
+    ProtocolError::new(protocol::INTERNAL, err.to_string()).with_kind(kind)
 }
 
 fn device_ref(config: &Value) -> String {

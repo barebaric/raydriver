@@ -9,6 +9,7 @@ use std::future::Future;
 use std::marker::PhantomData;
 
 use pyo3::prelude::*;
+use pyo3::types::{PyCFunction, PyTuple};
 use pyo3::BoundObject;
 use pyo3_stub_gen::TypeInfo;
 
@@ -71,13 +72,40 @@ where
     F: Future<Output = PyResult<T>> + Send + 'static,
     T: for<'any> IntoPyObject<'any> + Send + 'static,
 {
+    spawn_future_inner(py, fut, None)
+}
+
+/// Like [`spawn_future`], but runs *on_cancel* when the awaiting
+/// Python task is cancelled. The Rust future is aborted either way.
+pub(crate) fn spawn_future_with_cancel<'py, F, T, C>(
+    py: Python<'py>,
+    fut: F,
+    on_cancel: C,
+) -> PyResult<PyAwait<'py, T>>
+where
+    F: Future<Output = PyResult<T>> + Send + 'static,
+    T: for<'any> IntoPyObject<'any> + Send + 'static,
+    C: FnOnce() + Send + 'static,
+{
+    spawn_future_inner(py, fut, Some(Box::new(on_cancel)))
+}
+
+fn spawn_future_inner<'py, F, T>(
+    py: Python<'py>,
+    fut: F,
+    on_cancel: Option<Box<dyn FnOnce() + Send>>,
+) -> PyResult<PyAwait<'py, T>>
+where
+    F: Future<Output = PyResult<T>> + Send + 'static,
+    T: for<'any> IntoPyObject<'any> + Send + 'static,
+{
     let asyncio = py.import("asyncio")?;
     let loop_ = asyncio.call_method0("get_running_loop")?;
     let future = loop_.call_method1("create_future", ())?;
     let loop_py: Py<PyAny> = loop_.unbind();
     let future_py: Py<PyAny> = future.clone().unbind();
 
-    runtime::handle().spawn(async move {
+    let handle = runtime::handle().spawn(async move {
         let outcome = match fut.await {
             Ok(value) => Python::attach(|py| {
                 value
@@ -125,6 +153,25 @@ where
             Python::attach(|py| err.print(py));
         }
     });
+    let abort = handle.abort_handle();
+    let on_cancel = std::sync::Mutex::new(on_cancel);
+    let callback = PyCFunction::new_closure(
+        py,
+        None,
+        None,
+        move |args: &Bound<'_, PyTuple>, _kwargs| -> PyResult<Py<PyAny>> {
+            let py = args.py();
+            let future = args.get_item(0)?;
+            if future.call_method0("cancelled")?.is_truthy()? {
+                abort.abort();
+                if let Some(on_cancel) = on_cancel.lock().unwrap().take() {
+                    on_cancel();
+                }
+            }
+            Ok(py.None())
+        },
+    )?;
+    future.call_method1("add_done_callback", (callback,))?;
     Ok(PyAwait::new(future))
 }
 

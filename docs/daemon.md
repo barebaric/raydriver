@@ -4,8 +4,11 @@ The daemon hosts raydriver sessions next to the hardware (e.g. on
 a Raspberry Pi in the workshop) while Rayforge — or any raydriver
 consumer — runs elsewhere on the LAN. Jobs run daemon-side and
 survive client disconnects; reattaching clients resync progress
-exactly. The daemon hosts *sessions*, not machines: machine
-configs and dialects stay client-side.
+exactly. The daemon hosts *sessions*, not machines: device
+connection configs live in `daemon.json`, and clients send the
+command dialect with each session open. A `daemon.json` entry may
+pin a dialect for an auto-opened session; the client's dialect wins
+for interactive opens.
 
 Everything here works on Linux, macOS and Windows. The daemon,
 client proxy, wire codec and mDNS helpers are implemented in Rust;
@@ -68,9 +71,11 @@ raydriver list                       # configured devices + live state
 
 `add` upserts by serial port and creates the config with a
 generated token when none exists; `--protocol` is one of `grbl`,
-`grbl_simple`, `smoothie`, `marlin`. ESP3D and FluidNC sessions are
-network-attached, so they are configured in `daemon.json` with a
-`host`, `http_port`, `ws_port` and optional `protocol` variant.
+`grbl_simple`, `smoothie`, `marlin`, `octoprint`. ESP3D and FluidNC
+sessions are network-attached, so they are configured in
+`daemon.json` with a `host`, `http_port`, `ws_port` and optional
+`protocol` variant. xTool network sessions are local-only and are
+not hosted by the daemon.
 Configured sessions open at daemon start, so restart the daemon to
 apply changes. The config can also be edited by hand — see the
 reference below.

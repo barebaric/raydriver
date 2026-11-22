@@ -105,17 +105,30 @@ macro_rules! uniform_session_api {
                 let events = self.events.clone();
                 let op_map = op_line_map.unwrap_or_default();
                 let estimates = op_estimates.unwrap_or_default();
-                spawn_future(py, async move {
-                    events.set_progress_callback(progress_callback);
-                    $crate::core::session::Session::run(
-                        core,
-                        &gcode,
-                        &op_map,
-                        &estimates,
-                    )
-                    .await?;
-                    Ok(())
-                })
+                let cancel_core = core.clone();
+                $crate::python::pyfuture::spawn_future_with_cancel(
+                    py,
+                    async move {
+                        events.set_progress_callback(progress_callback);
+                        $crate::core::session::Session::run(
+                            core,
+                            &gcode,
+                            &op_map,
+                            &estimates,
+                        )
+                        .await?;
+                        Ok(())
+                    },
+                    move || {
+                        $crate::python::runtime::handle().spawn(async move {
+                            let _ = $crate::core::session::Session::cancel(
+                                &*cancel_core,
+                                $crate::core::session::CancelMode::Graceful,
+                            )
+                            .await;
+                        });
+                    },
+                )
             }
 
             /// Execute pre-rendered machine code.
@@ -125,11 +138,27 @@ macro_rules! uniform_session_api {
                 machine_code: String,
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
-                spawn_future(py, async move {
-                    $crate::core::session::Session::run_raw(core, &machine_code)
+                let cancel_core = core.clone();
+                $crate::python::pyfuture::spawn_future_with_cancel(
+                    py,
+                    async move {
+                        $crate::core::session::Session::run_raw(
+                            core,
+                            &machine_code,
+                        )
                         .await?;
-                    Ok(())
-                })
+                        Ok(())
+                    },
+                    move || {
+                        $crate::python::runtime::handle().spawn(async move {
+                            let _ = $crate::core::session::Session::cancel(
+                                &*cancel_core,
+                                $crate::core::session::CancelMode::Graceful,
+                            )
+                            .await;
+                        });
+                    },
+                )
             }
 
             /// Cancel the running job.

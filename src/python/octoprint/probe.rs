@@ -6,6 +6,7 @@ use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
 
+use crate::python::census::call_session_probe;
 use crate::python::core::json::{py_to_value, value_to_py};
 
 /// The structured result of probing an OctoPrint server: server
@@ -75,12 +76,25 @@ fn describe(
     })
 }
 
+/// Runs the device census over *session* and resolves to
+/// [`OctoPrintDeviceInfo`].
+#[gen_stub_pyfunction(module = "raydriver.octoprint.probe")]
+#[gen_stub(override_return_type(
+    type_repr = "collections.abc.Awaitable[OctoPrintDeviceInfo]",
+    imports = ("collections.abc",)
+))]
+#[pyfunction]
+fn probe_device(py: Python<'_>, session: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    call_session_probe(py, session.bind(py), None)
+}
+
 pub fn register(octoprint_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = octoprint_mod.py();
     let module = PyModule::new(py, "probe")?;
     module.setattr("__doc__", "Device census for OctoPrint servers.")?;
     module.add_class::<OctoPrintDeviceInfo>()?;
     module.add_function(wrap_pyfunction!(describe, &module)?)?;
+    module.add_function(wrap_pyfunction!(probe_device, &module)?)?;
     crate::python::core::discovery::helpers::attach_submodule(
         octoprint_mod,
         &module,

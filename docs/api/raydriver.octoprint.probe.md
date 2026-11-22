@@ -60,3 +60,16 @@ Pure data transformation with no I/O; the caller is responsible for the HTTP req
 | `version_info` | `Optional[dict[str, object]] = None` |             |
 | `printer_info` | `Optional[dict[str, object]] = None` |             |
 | _Returns_      | `OctoPrintDeviceInfo`                |             |
+
+### `probe_device()`
+
+```python
+probe_device(session: Any) -> Awaitable[OctoPrintDeviceInfo]
+```
+
+Runs the device census over *session* and resolves to \[`OctoPrintDeviceInfo`\].
+
+| Parameter | Type                             | Description |
+| --------- | -------------------------------- | ----------- |
+| `session` | `Any`                            |             |
+| _Returns_ | `Awaitable[OctoPrintDeviceInfo]` |             |

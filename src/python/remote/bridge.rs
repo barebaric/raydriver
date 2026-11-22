@@ -44,9 +44,28 @@ where
             let Some(make) = make.lock().unwrap().take() else {
                 return Ok(py.None());
             };
-            let awaitable = make(py)?;
-            let asyncio = py.import("asyncio")?;
-            let task = asyncio.call_method1("ensure_future", (awaitable,))?;
+            // Complete the waiting Rust future with the error instead
+            // of raising it into the asyncio exception handler: the
+            // caller must see a failed request, not a silent hang.
+            let fail = |err: PyErr| -> PyResult<Py<PyAny>> {
+                if let Some(tx) = tx.lock().unwrap().take() {
+                    let _ = tx.send(Err(err));
+                }
+                Ok(py.None())
+            };
+            let awaitable = match make(py) {
+                Ok(awaitable) => awaitable,
+                Err(err) => return fail(err),
+            };
+            let asyncio = match py.import("asyncio") {
+                Ok(asyncio) => asyncio,
+                Err(err) => return fail(err),
+            };
+            let task = match asyncio.call_method1("ensure_future", (awaitable,))
+            {
+                Ok(task) => task,
+                Err(err) => return fail(err),
+            };
             let tx = tx.clone();
             let done = PyCFunction::new_closure(
                 py,
@@ -70,7 +89,9 @@ where
                     Ok(py.None())
                 },
             )?;
-            task.call_method1("add_done_callback", (done,))?;
+            if let Err(err) = task.call_method1("add_done_callback", (done,)) {
+                return fail(err);
+            }
             Ok(py.None())
         },
     )?;

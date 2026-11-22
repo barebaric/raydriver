@@ -57,6 +57,7 @@ pub const KIND_LEASE: &str = "lease";
 pub struct ProtocolError {
     pub code: String,
     pub message: String,
+    pub kind: Option<&'static str>,
 }
 
 impl ProtocolError {
@@ -64,11 +65,24 @@ impl ProtocolError {
         Self {
             code: code.into(),
             message: message.into(),
+            kind: None,
         }
     }
 
+    pub fn with_kind(mut self, kind: &'static str) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
     pub fn payload(&self) -> Value {
-        json!({"code": self.code, "message": self.message})
+        let mut payload = json!({
+            "code": self.code,
+            "message": self.message,
+        });
+        if let Some(kind) = self.kind {
+            payload["kind"] = json!(kind);
+        }
+        payload
     }
 }
 
@@ -192,10 +206,23 @@ pub fn response(id: i64, payload: Value) -> Value {
 }
 
 pub fn error_response(id: i64, code: &str, message: &str) -> Value {
+    error_response_with_kind(id, code, message, None)
+}
+
+pub fn error_response_with_kind(
+    id: i64,
+    code: &str,
+    message: &str,
+    kind: Option<&str>,
+) -> Value {
+    let mut error = json!({"code": code, "message": message});
+    if let Some(kind) = kind {
+        error["kind"] = json!(kind);
+    }
     json!({
         "id": id,
         "ok": false,
-        "error": {"code": code, "message": message},
+        "error": error,
     })
 }
 

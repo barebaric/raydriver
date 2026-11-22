@@ -28,7 +28,7 @@ jobs:
 
       - name: Run pyright
         run: |
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio zeroconf
           pip install mdformat mdformat-frontmatter mdformat-tables
           npx --yes pyright --pythonpath $(which python) python/raydriver tests tools
 
@@ -80,7 +80,7 @@ jobs:
 
       - name: Install test dependencies
         shell: bash
-        run: pip install pytest pytest-asyncio pytest-timeout
+        run: pip install pytest pytest-asyncio pytest-timeout zeroconf
 
       - name: Run tests
         shell: bash

@@ -9,6 +9,7 @@ from conftest import (
     make_session,
     sent_bytes,
     start_device,
+    wait_until,
 )
 
 from raydriver.core import SessionEvent
@@ -242,6 +243,23 @@ class TestCancel:
         await session.cancel(emergency=True)
         await asyncio.sleep(0.1)
         assert b"M112\n" in sent_bytes(mock)
+
+    async def test_cancelling_the_python_task_stops_the_job(self, rig):
+        """Cancelling await session.run() runs the safety shutdown."""
+        session, mock, emulator, events = rig
+        emulator.speed_factor = 2
+        job = asyncio.ensure_future(session.run(slow_gcode(200)))
+        await events.wait_for(
+            SessionEvent.StateChanged,
+            lambda e: e.state.status.name == "RUN",
+        )
+        await asyncio.sleep(0.2)
+        job.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await job
+        await wait_until(lambda: not session.job_running, timeout=5)
+        await wait_until(lambda: b"M5\n" in sent_bytes(mock), timeout=5)
+        assert b"\x18" in sent_bytes(mock)
 
     async def test_cancelled_sender_does_not_resurrect(self, rig):
         """Issue #428 regression: after cancel(), a sender parked on a

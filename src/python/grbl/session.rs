@@ -29,7 +29,7 @@ impl From<SessionError> for PyErr {
     fn from(err: SessionError) -> Self {
         match err {
             SessionError::Connection(msg) => PyConnectionError::new_err(msg),
-            SessionError::Timeout => PyTimeoutError::new_err(err.to_string()),
+            SessionError::Timeout(message) => PyTimeoutError::new_err(message),
             SessionError::Device(msg) => PyRuntimeError::new_err(msg),
             SessionError::BufferStall(msg) => {
                 PyConnectionError::new_err(format!("buffer stall: {msg}"))

@@ -165,3 +165,25 @@ getsockname() -> tuple[str, int]
 ```python
 sockets: tuple[SocketInfo, ...]
 ```
+
+## Functions
+
+### `validate_bind_policy()`
+
+```python
+validate_bind_policy(
+    host: str,
+    token: Optional[str],
+    tls_cert: Optional[str],
+) -> None
+```
+
+Raise **raydriver.errors.InsecureListenerError** unless *host* is loopback or both *token* and
+*tls_cert* are configured.
+
+| Parameter  | Type            | Description |
+| ---------- | --------------- | ----------- |
+| `host`     | `str`           |             |
+| `token`    | `Optional[str]` |             |
+| `tls_cert` | `Optional[str]` |             |
+| _Returns_  | `None`          |             |

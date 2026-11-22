@@ -351,7 +351,9 @@ impl LineSessionBase {
                 .await?;
             match tokio::time::timeout(timeout, pending.finished.wait()).await {
                 Ok(()) => Ok(()),
-                Err(_) => Err(SessionError::Timeout),
+                Err(_) => Err(SessionError::Timeout(
+                    "operation timed out".to_string(),
+                )),
             }
         }
         .await;

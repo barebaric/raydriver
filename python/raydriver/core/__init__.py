@@ -2,7 +2,8 @@
 events.
 
 The protocol namespaces (``raydriver.grbl``, ``raydriver.smoothie``,
-``raydriver.marlin``) build on these.
+``raydriver.marlin``, ``raydriver.esp3d``, ``raydriver.octoprint``,
+``raydriver.xtool``) build on these.
 """
 
 import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]

@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex};
 use pyo3::exceptions::{PyOverflowError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use pyo3_stub_gen::derive::{
+    gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
+};
 use serde_json::Value;
 
 use crate::core::remote::daemon::{
@@ -292,21 +294,37 @@ impl Daemon {
     }
 }
 
+fn insecure_error(message: String) -> PyErr {
+    Python::attach(|py| {
+        let result: PyResult<PyErr> = (|| {
+            let module = py.import("raydriver.errors")?;
+            let cls = module.getattr("InsecureListenerError")?;
+            let value = cls.call1((message,))?;
+            Ok(PyErr::from_value(value))
+        })();
+        result.unwrap_or_else(|_| {
+            pyo3::exceptions::PyValueError::new_err("insecure listener")
+        })
+    })
+}
+
 fn core_error(err: DaemonError) -> PyErr {
     match err {
-        DaemonError::Insecure(message) => Python::attach(|py| {
-            let result: PyResult<PyErr> = (|| {
-                let module = py.import("raydriver.analyzer.listener")?;
-                let cls = module.getattr("InsecureListenerError")?;
-                let value = cls.call1((message,))?;
-                Ok(PyErr::from_value(value))
-            })();
-            result.unwrap_or_else(|_| {
-                pyo3::exceptions::PyValueError::new_err("insecure listener")
-            })
-        }),
+        DaemonError::Insecure(message) => insecure_error(message),
         other => pyo3::exceptions::PyRuntimeError::new_err(other.to_string()),
     }
+}
+
+/// Raise :class:`raydriver.errors.InsecureListenerError` unless
+/// *host* is loopback or both *token* and *tls_cert* are configured.
+#[gen_stub_pyfunction(module = "raydriver.remote.daemon")]
+#[pyfunction]
+pub(crate) fn validate_bind_policy(
+    host: &str,
+    token: Option<&str>,
+    tls_cert: Option<&str>,
+) -> PyResult<()> {
+    core::validate_bind_policy(host, token, tls_cert).map_err(core_error)
 }
 
 #[gen_stub_pyclass]

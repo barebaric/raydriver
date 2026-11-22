@@ -43,6 +43,12 @@ handshake_poll_interval: float
 handshake_timeout: float
 ```
 
+### `homing_timeout`
+
+```python
+homing_timeout: float
+```
+
 ### `host`
 
 ```python
@@ -203,6 +209,12 @@ handshake_poll_interval: float
 handshake_timeout: float
 ```
 
+### `homing_timeout`
+
+```python
+homing_timeout: float
+```
+
 ### `poll_response_attempts`
 
 ```python
@@ -325,6 +337,12 @@ handshake_poll_interval: float
 
 ```python
 handshake_timeout: float
+```
+
+### `homing_timeout`
+
+```python
+homing_timeout: float
 ```
 
 ### `poll_response_attempts`
@@ -451,6 +469,12 @@ handshake_poll_interval: float
 handshake_timeout: float
 ```
 
+### `homing_timeout`
+
+```python
+homing_timeout: float
+```
+
 ### `poll_response_attempts`
 
 ```python
@@ -575,6 +599,12 @@ handshake_poll_interval: float
 handshake_timeout: float
 ```
 
+### `homing_timeout`
+
+```python
+homing_timeout: float
+```
+
 ### `poll_response_attempts`
 
 ```python
@@ -697,6 +727,12 @@ handshake_poll_interval: float
 
 ```python
 handshake_timeout: float
+```
+
+### `homing_timeout`
+
+```python
+homing_timeout: float
 ```
 
 ### `host`

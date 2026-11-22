@@ -317,7 +317,7 @@ impl M2Connection {
             connect_async_tls_with_config(request, None, false, connector),
         )
         .await
-        .map_err(|_| SessionError::Timeout)?
+        .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
         .map_err(|err| SessionError::Connection(err.to_string()))?;
         let (writer, reader) = socket.split();
         let connection = Arc::new(Self {
@@ -420,7 +420,7 @@ impl M2Connection {
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout
+                SessionError::Timeout("operation timed out".to_string())
             })?
             .map_err(|_| {
                 SessionError::Connection("connection closed".into())
@@ -489,7 +489,7 @@ impl M2Connection {
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout
+                SessionError::Timeout("operation timed out".to_string())
             })?
             .map_err(|_| {
                 SessionError::Connection("connection closed".into())

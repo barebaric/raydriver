@@ -7,6 +7,7 @@ use pyo3_stub_gen::derive::{
     gen_stub_pymethods,
 };
 
+use crate::python::census::call_session_probe;
 use crate::python::core::json::value_to_py;
 
 /// The firmware family a device identifies itself as.
@@ -146,6 +147,18 @@ fn describe(
     }
 }
 
+/// Runs the device census over *session* and resolves to
+/// [`GrblDeviceInfo`].
+#[gen_stub_pyfunction(module = "raydriver.grbl.probe")]
+#[gen_stub(override_return_type(
+    type_repr = "collections.abc.Awaitable[GrblDeviceInfo]",
+    imports = ("collections.abc",)
+))]
+#[pyfunction]
+fn probe_device(py: Python<'_>, session: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    call_session_probe(py, session.bind(py), None)
+}
+
 pub fn register(grbl_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = grbl_mod.py();
     let module = PyModule::new(py, "probe")?;
@@ -153,6 +166,7 @@ pub fn register(grbl_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<GrblFlavor>()?;
     module.add_class::<GrblDeviceInfo>()?;
     module.add_function(wrap_pyfunction!(describe, &module)?)?;
+    module.add_function(wrap_pyfunction!(probe_device, &module)?)?;
     crate::python::core::discovery::helpers::attach_submodule(
         grbl_mod,
         &module,

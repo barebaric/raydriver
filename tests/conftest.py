@@ -34,9 +34,6 @@ def _arm_freeze_watchdog():
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
 _arm_freeze_watchdog()
 
 FAST_TIMINGS = {

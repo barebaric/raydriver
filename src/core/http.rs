@@ -209,7 +209,7 @@ async fn request(
         .map_err(|e| SessionError::Connection(e.to_string()))
     })
     .await
-    .map_err(|_| SessionError::Timeout)?
+    .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
 }
 
 /// Run a single HTTP exchange over an existing byte stream.

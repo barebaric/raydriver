@@ -68,10 +68,11 @@ discovers it automatically — no manual network setup.
 
 Defaults are GRBL at 115200 baud; for other firmware use
 `raydriver daemon add PORT --protocol smoothie --baudrate 115200`
-(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`; ESP3D and
-FluidNC sessions are configured in `daemon.json` with their host and
-HTTP/WebSocket ports). `raydriver daemon remove PORT` unconfigures a
-device.
+(protocols: `grbl`, `grbl_simple`, `smoothie`, `marlin`,
+`octoprint`; ESP3D and FluidNC sessions are configured in
+`daemon.json` with their host and HTTP/WebSocket ports). xTool
+network sessions are local-only and are not hosted by the daemon.
+`raydriver daemon remove PORT` unconfigures a device.
 
 ### 2. Run the daemon
 

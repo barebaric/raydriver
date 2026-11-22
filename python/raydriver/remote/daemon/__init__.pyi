@@ -14,6 +14,7 @@ __all__ = [
     "SEND_QUEUE_LIMIT",
     "SocketInfo",
     "StartedServer",
+    "validate_bind_policy",
 ]
 
 DEFAULT_LEASE_GRACE: builtins.float
@@ -94,4 +95,10 @@ class SocketInfo:
 class StartedServer:
     @property
     def sockets(self) -> tuple[SocketInfo, ...]: ...
+
+def validate_bind_policy(host: builtins.str, token: typing.Optional[builtins.str], tls_cert: typing.Optional[builtins.str]) -> None:
+    r"""
+    Raise :class:`raydriver.errors.InsecureListenerError` unless
+    *host* is loopback or both *token* and *tls_cert* are configured.
+    """
 

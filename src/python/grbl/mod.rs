@@ -39,9 +39,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     parser::register(&parser_mod)?;
     grbl_mod.add_submodule(&parser_mod)?;
 
-    let probe_mod = PyModule::new(py, "probe")?;
-    probe::register(&probe_mod)?;
-    grbl_mod.add_submodule(&probe_mod)?;
+    probe::register(&grbl_mod)?;
 
     m.add_submodule(&grbl_mod)?;
     // Note: raydriver.grbl is intentionally NOT registered in
