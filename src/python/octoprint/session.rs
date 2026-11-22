@@ -15,7 +15,9 @@ use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_f64, get_i64, get_str};
 use crate::python::octoprint::probe::OctoPrintDeviceInfo;
-use crate::python::pyfuture::{spawn_future, PyAwait};
+use crate::python::pyfuture::{
+    spawn_future, spawn_future_with_cancel, PyAwait,
+};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
     let host = dict
@@ -213,11 +215,20 @@ impl OctoPrintSession {
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
         let estimates = op_estimates.unwrap_or_default();
-        spawn_future(py, async move {
-            events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map, estimates).await?;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                events.set_progress_callback(progress_callback);
+                core.run(&gcode, op_map, estimates).await?;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Send a raw G-code string as printer commands.
@@ -227,10 +238,19 @@ impl OctoPrintSession {
         machine_code: String,
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            core.run_raw(&machine_code).await?;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                core.run_raw(&machine_code).await?;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Home all axes (`axes` is None) or the named axes.

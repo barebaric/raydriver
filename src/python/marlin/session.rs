@@ -16,7 +16,9 @@ use crate::python::grbl::session::{
     get_bool, get_f64, parse_dialect, transport_kind_from_config,
 };
 use crate::python::marlin::probe::MarlinDeviceInfo;
-use crate::python::pyfuture::{spawn_future, PyAwait};
+use crate::python::pyfuture::{
+    spawn_future, spawn_future_with_cancel, PyAwait,
+};
 
 fn build_marlin_config(
     kind: TransportKind,
@@ -215,11 +217,20 @@ impl MarlinSession {
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
         let estimates = op_estimates.unwrap_or_default();
-        spawn_future(py, async move {
-            events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map, estimates).await;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                events.set_progress_callback(progress_callback);
+                core.run(&gcode, op_map, estimates).await;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Execute a raw G-code string line by line.
@@ -229,10 +240,19 @@ impl MarlinSession {
         machine_code: String,
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            core.run_raw(&machine_code).await;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                core.run_raw(&machine_code).await;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Abort the running job: M410 quick stop and safety shutdown.

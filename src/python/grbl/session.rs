@@ -23,7 +23,9 @@ use crate::python::core::mock::MockTransport;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::probe::GrblDeviceInfo;
-use crate::python::pyfuture::{spawn_future, PyAwait};
+use crate::python::pyfuture::{
+    spawn_future, spawn_future_with_cancel, PyAwait,
+};
 
 impl From<SessionError> for PyErr {
     fn from(err: SessionError) -> Self {
@@ -377,16 +379,25 @@ impl GrblSession {
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
         let estimates = op_estimates.unwrap_or_default();
-        spawn_future(py, async move {
-            // The callback stays installed after the run returns:
-            // the final command_done events are marshaled from the
-            // reader task and may be delivered moments later (the
-            // Python driver keeps _on_command_done until its stream
-            // finally-block too). The next run replaces it.
-            events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map, estimates).await;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                // The callback stays installed after the run returns:
+                // the final command_done events are marshaled from the
+                // reader task and may be delivered moments later (the
+                // Python driver keeps _on_command_done until its stream
+                // finally-block too). The next run replaces it.
+                events.set_progress_callback(progress_callback);
+                core.run(&gcode, op_map, estimates).await;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Execute a raw G-code string; GRBL realtime commands (?, ~, !)
@@ -397,10 +408,19 @@ impl GrblSession {
         machine_code: String,
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            core.run_raw(&machine_code).await;
-            Ok(())
-        })
+        let cancel_core = core.clone();
+        spawn_future_with_cancel(
+            py,
+            async move {
+                core.run_raw(&machine_code).await;
+                Ok(())
+            },
+            move || {
+                crate::python::runtime::handle().spawn(async move {
+                    let _ = cancel_core.cancel(false).await;
+                });
+            },
+        )
     }
 
     /// Pause (feed hold) or resume the device.

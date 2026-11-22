@@ -51,24 +51,19 @@ pub trait Transport: Send + Sync {
         TransportStatus::Error
     }
 
-    /// True when the device accepts whole jobs instead of a streamed
-    /// G-code body (e.g. ESP3D uploads a file and starts execution
-    /// over HTTP).
-    fn supports_network_job(&self) -> bool {
-        false
+    /// The job-upload capability, when the device accepts whole jobs
+    /// instead of a streamed G-code body (e.g. ESP3D uploads a file
+    /// and starts execution over HTTP).
+    fn network_job_runner(&self) -> Option<&dyn NetworkJobRunner> {
+        None
     }
+}
 
-    /// Upload and start a complete G-code job.  Only implemented by
-    /// transports whose [`supports_network_job`](Self::supports_network_job)
-    /// returns true.
-    async fn run_network_job(
-        &self,
-        _gcode: &str,
-    ) -> Result<(), TransportError> {
-        Err(TransportError::Connection(
-            "the transport does not support network jobs".to_string(),
-        ))
-    }
+/// Upload-and-run capability for network devices that do not stream
+/// G-code line by line.
+#[async_trait]
+pub trait NetworkJobRunner: Send + Sync {
+    async fn run_network_job(&self, gcode: &str) -> Result<(), TransportError>;
 }
 
 /// Which physical transport to use.

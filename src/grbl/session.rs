@@ -1118,7 +1118,7 @@ impl SessionCore {
         op_estimates: Vec<f64>,
     ) {
         self.start_job().await;
-        if self.transport.supports_network_job() {
+        if self.transport.network_job_runner().is_some() {
             self.run_network_job(gcode, Some(&op_map)).await;
             return;
         }
@@ -1165,7 +1165,10 @@ impl SessionCore {
         let gcode = gcode.to_string();
         if let Err(err) = self
             .run_streaming_job(async move {
-                if let Err(err) = core.transport.run_network_job(&gcode).await {
+                let Some(runner) = core.transport.network_job_runner() else {
+                    return;
+                };
+                if let Err(err) = runner.run_network_job(&gcode).await {
                     if core.is_cancelled() {
                         return;
                     }
@@ -1205,7 +1208,7 @@ impl SessionCore {
         if machine_code.trim().is_empty() {
             return;
         }
-        if self.transport.supports_network_job() {
+        if self.transport.network_job_runner().is_some() {
             self.start_job().await;
             self.run_network_job(machine_code, None).await;
             return;

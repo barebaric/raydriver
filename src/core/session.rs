@@ -7,45 +7,118 @@ use std::sync::Mutex;
 use crate::core::transport::TransportError;
 use crate::core::types::{DeviceState, TransportStatus};
 
-/// Notifications emitted by a device session, implemented by the
-/// Python bindings (or by embedders).
-pub trait SessionEvents: Send + Sync {
-    fn state_changed(&self, state: &DeviceState);
-    fn connection_status(&self, status: TransportStatus, message: Option<&str>);
-    fn command_status(&self, status: TransportStatus, message: Option<&str>);
-    fn job_finished(&self);
-    fn probe_status(&self, message: &str);
-    fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>);
-    fn config_changed(&self, key: &str, value: i64);
-    fn command_done(&self, op_index: i64);
-
+/// One notification from a device session.
+#[derive(Debug, Clone)]
+pub enum SessionEvent {
+    StateChanged(DeviceState),
+    ConnectionStatus {
+        status: TransportStatus,
+        message: Option<String>,
+    },
+    CommandStatus {
+        status: TransportStatus,
+        message: Option<String>,
+    },
+    JobFinished,
+    JobError {
+        message: String,
+    },
+    ProbeStatus {
+        message: String,
+    },
+    WcsUpdated {
+        offsets: HashMap<String, (f64, f64, f64)>,
+    },
+    ConfigChanged {
+        key: String,
+        value: i64,
+    },
+    CommandDone(i64),
     /// A complete line received from the device, including status
     /// reports, `ok`/`error:` acknowledgements and `$` replies.
-    fn raw_rx(&self, _line: &str) {}
-
+    RawRx(String),
     /// A complete line sent to the device (interactive commands and
     /// realtime bytes; not bulk job streaming).
-    fn raw_tx(&self, _line: &str) {}
+    RawTx(String),
+}
+
+/// Notifications emitted by a device session, implemented by the
+/// Python bindings (or by embedders).
+///
+/// [`emit`](Self::emit) is the canonical entry point; the named
+/// helpers below are adapters so session code stays readable.
+pub trait SessionEvents: Send + Sync {
+    fn emit(&self, event: SessionEvent);
+
+    fn state_changed(&self, state: &DeviceState) {
+        self.emit(SessionEvent::StateChanged(state.clone()));
+    }
+
+    fn connection_status(
+        &self,
+        status: TransportStatus,
+        message: Option<&str>,
+    ) {
+        self.emit(SessionEvent::ConnectionStatus {
+            status,
+            message: message.map(str::to_string),
+        });
+    }
+
+    fn command_status(&self, status: TransportStatus, message: Option<&str>) {
+        self.emit(SessionEvent::CommandStatus {
+            status,
+            message: message.map(str::to_string),
+        });
+    }
+
+    fn job_finished(&self) {
+        self.emit(SessionEvent::JobFinished);
+    }
+
+    fn job_error(&self, message: &str) {
+        self.emit(SessionEvent::JobError {
+            message: message.to_string(),
+        });
+    }
+
+    fn probe_status(&self, message: &str) {
+        self.emit(SessionEvent::ProbeStatus {
+            message: message.to_string(),
+        });
+    }
+
+    fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>) {
+        self.emit(SessionEvent::WcsUpdated {
+            offsets: offsets.clone(),
+        });
+    }
+
+    fn config_changed(&self, key: &str, value: i64) {
+        self.emit(SessionEvent::ConfigChanged {
+            key: key.to_string(),
+            value,
+        });
+    }
+
+    fn command_done(&self, op_index: i64) {
+        self.emit(SessionEvent::CommandDone(op_index));
+    }
+
+    fn raw_rx(&self, line: &str) {
+        self.emit(SessionEvent::RawRx(line.to_string()));
+    }
+
+    fn raw_tx(&self, line: &str) {
+        self.emit(SessionEvent::RawTx(line.to_string()));
+    }
 }
 
 /// No-op event sink.
 pub struct NoopEvents;
 
 impl SessionEvents for NoopEvents {
-    fn state_changed(&self, _state: &DeviceState) {}
-    fn connection_status(
-        &self,
-        _status: TransportStatus,
-        _message: Option<&str>,
-    ) {
-    }
-    fn command_status(&self, _status: TransportStatus, _message: Option<&str>) {
-    }
-    fn job_finished(&self) {}
-    fn probe_status(&self, _message: &str) {}
-    fn wcs_updated(&self, _offsets: &HashMap<String, (f64, f64, f64)>) {}
-    fn config_changed(&self, _key: &str, _value: i64) {}
-    fn command_done(&self, _op_index: i64) {}
+    fn emit(&self, _event: SessionEvent) {}
 }
 
 #[derive(thiserror::Error, Debug)]

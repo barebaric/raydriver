@@ -16,7 +16,7 @@ use tokio::task::JoinHandle;
 
 use crate::core::http;
 use crate::core::session::SessionError;
-use crate::core::transport::{Transport, TransportError};
+use crate::core::transport::{NetworkJobRunner, Transport, TransportError};
 use crate::core::ws::WsClient;
 
 /// Firmware flavour behind the same web API.
@@ -281,10 +281,13 @@ impl Transport for Esp3dTransport {
         ))
     }
 
-    fn supports_network_job(&self) -> bool {
-        true
+    fn network_job_runner(&self) -> Option<&dyn NetworkJobRunner> {
+        Some(self)
     }
+}
 
+#[async_trait]
+impl NetworkJobRunner for Esp3dTransport {
     async fn run_network_job(&self, gcode: &str) -> Result<(), TransportError> {
         self.upload(gcode)
             .await

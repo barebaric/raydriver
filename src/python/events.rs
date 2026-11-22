@@ -15,8 +15,7 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyclass_complex_enum;
 
-use crate::core::session::SessionEvents;
-use crate::core::types::{DeviceState as CoreDeviceState, TransportStatus};
+use crate::core::session::{SessionEvent as CoreEvent, SessionEvents};
 
 use crate::python::core::types::DeviceState as PyDeviceState;
 
@@ -74,6 +73,11 @@ pub(crate) struct PyEvents {
     schedule_lock: Mutex<()>,
 }
 
+/// Upper bound for events waiting on the event loop. Raw RX/TX
+/// events are dropped first; without a bound, a long job that emits
+/// every line can outrun the loop and grow without limit.
+const EVENT_QUEUE_LIMIT: usize = 4096;
+
 /// Events waiting to be delivered on the loop thread, plus a flag
 /// telling whether a drain call is already scheduled on the loop.
 #[derive(Default)]
@@ -87,6 +91,21 @@ impl EventQueue {
     /// a drain (only the caller that flips the flag schedules).
     fn push(&self, event: QueuedEvent) -> bool {
         let mut pending = self.pending.lock().unwrap();
+        if pending.len() >= EVENT_QUEUE_LIMIT {
+            let raw = pending.iter().position(|event| {
+                matches!(
+                    event,
+                    QueuedEvent::Session(
+                        SessionEvent::RawRx { .. } | SessionEvent::RawTx { .. }
+                    )
+                )
+            });
+            if let Some(index) = raw {
+                pending.remove(index);
+            } else {
+                pending.remove(0);
+            }
+        }
         pending.push(event);
         !self.scheduled.swap(true, Ordering::SeqCst)
     }
@@ -282,67 +301,50 @@ impl PyEvents {
 }
 
 impl SessionEvents for PyEvents {
-    fn state_changed(&self, state: &CoreDeviceState) {
-        self.schedule(SessionEvent::StateChanged {
-            state: PyDeviceState::new(state.clone()),
-        });
-    }
-
-    fn connection_status(
-        &self,
-        status: TransportStatus,
-        message: Option<&str>,
-    ) {
-        self.schedule(SessionEvent::ConnectionStatusChanged {
-            status: status.name().to_string(),
-            message: message.map(str::to_string),
-        });
-    }
-
-    fn command_status(&self, status: TransportStatus, message: Option<&str>) {
-        self.schedule(SessionEvent::CommandStatusChanged {
-            status: status.name().to_string(),
-            message: message.map(str::to_string),
-        });
-    }
-
-    fn job_finished(&self) {
-        self.schedule(SessionEvent::JobFinished {});
-    }
-
-    fn probe_status(&self, message: &str) {
-        self.schedule(SessionEvent::ProbeStatusChanged {
-            message: message.to_string(),
-        });
-    }
-
-    fn wcs_updated(&self, offsets: &HashMap<String, (f64, f64, f64)>) {
-        self.schedule(SessionEvent::WcsUpdated {
-            offsets: offsets.clone(),
-        });
-    }
-
-    fn config_changed(&self, key: &str, value: i64) {
-        self.schedule(SessionEvent::ConfigChanged {
-            key: key.to_string(),
-            value,
-        });
-    }
-
-    fn command_done(&self, op_index: i64) {
-        self.schedule_progress(op_index);
-    }
-
-    fn raw_rx(&self, line: &str) {
-        self.schedule(SessionEvent::RawRx {
-            line: line.to_string(),
-        });
-    }
-
-    fn raw_tx(&self, line: &str) {
-        self.schedule(SessionEvent::RawTx {
-            line: line.to_string(),
-        });
+    fn emit(&self, event: CoreEvent) {
+        match event {
+            CoreEvent::StateChanged(state) => {
+                self.schedule(SessionEvent::StateChanged {
+                    state: PyDeviceState::new(state),
+                });
+            }
+            CoreEvent::ConnectionStatus { status, message } => {
+                self.schedule(SessionEvent::ConnectionStatusChanged {
+                    status: status.name().to_string(),
+                    message,
+                });
+            }
+            CoreEvent::CommandStatus { status, message } => {
+                self.schedule(SessionEvent::CommandStatusChanged {
+                    status: status.name().to_string(),
+                    message,
+                });
+            }
+            CoreEvent::JobFinished => {
+                self.schedule(SessionEvent::JobFinished {});
+            }
+            CoreEvent::JobError { message } => {
+                self.schedule(SessionEvent::JobError { message });
+            }
+            CoreEvent::ProbeStatus { message } => {
+                self.schedule(SessionEvent::ProbeStatusChanged { message });
+            }
+            CoreEvent::WcsUpdated { offsets } => {
+                self.schedule(SessionEvent::WcsUpdated { offsets });
+            }
+            CoreEvent::ConfigChanged { key, value } => {
+                self.schedule(SessionEvent::ConfigChanged { key, value });
+            }
+            CoreEvent::CommandDone(op_index) => {
+                self.schedule_progress(op_index);
+            }
+            CoreEvent::RawRx(line) => {
+                self.schedule(SessionEvent::RawRx { line });
+            }
+            CoreEvent::RawTx(line) => {
+                self.schedule(SessionEvent::RawTx { line });
+            }
+        }
     }
 }
 
