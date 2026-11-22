@@ -8,9 +8,12 @@
 
 pub mod dialect;
 pub mod discovery;
+pub mod gcode;
 pub mod http;
+pub mod pingpong;
 pub mod remote;
 pub mod session;
+pub mod session_ops;
 pub mod transport;
 pub mod types;
 pub mod ws;

@@ -2,12 +2,15 @@
 //! Smoothieware over telnet or serial.
 //!
 //! Port of Rayforge's `SmoothieDriver` protocol behavior.  Smoothie
-//! speaks Grbl-style `<...>` status reports in response to `?`, so
-//! this session deliberately reuses the GRBL status parser
-//! (`grbl::parser::parse_state`) — the one sanctioned cross-protocol
-//! import.  Commands use the same strict ping-pong as the minimal
-//! GRBL session: send one line, wait for its `ok`/`error:`
-//! acknowledgement, then send the next.
+//! speaks Grbl-style `<...>` status reports in response to `?` and
+//! uses the GRBL error/alarm vocabulary, so this session deliberately
+//! reuses three GRBL helpers: `parser::parse_state` for status
+//! reports, `parser::get_error` for `error:` lines, and
+//! `grbl::errors::alarm_code_to_device_error` for `ALARM:` lines.
+//! G-code text helpers live in `core::gcode` and are not a
+//! cross-protocol import.  Commands use the same strict ping-pong as
+//! the minimal GRBL session: send one line, wait for its
+//! `ok`/`error:` acknowledgement, then send the next.
 //!
 //! Differences from the GRBL sessions: the connection is considered
 //! established as soon as the transport answers a status poll (the
@@ -22,7 +25,8 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::core::dialect::{format_template, Arg, Dialect};
+use crate::core::dialect::Dialect;
+use crate::core::pingpong::PendingCommand;
 use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
 use crate::core::transport::{Transport, TransportKind};
 use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
@@ -61,33 +65,6 @@ impl SmoothieConfig {
     }
 }
 
-/// One sent command awaiting its acknowledgement.
-struct PendingCmd {
-    lines: Mutex<Vec<String>>,
-    finished: AsyncEvent,
-}
-
-impl PendingCmd {
-    fn new() -> Self {
-        Self {
-            lines: Mutex::new(Vec::new()),
-            finished: AsyncEvent::new(),
-        }
-    }
-
-    fn add_line(&self, line: &str) {
-        self.lines.lock().unwrap().push(line.to_string());
-    }
-
-    fn finish(&self) {
-        self.finished.set();
-    }
-
-    fn lines(&self) -> Vec<String> {
-        self.lines.lock().unwrap().clone()
-    }
-}
-
 /// The Smoothie session: connection lifecycle, status polling and
 /// ping-pong command exchange.
 pub struct SmoothieCore {
@@ -102,7 +79,7 @@ pub struct SmoothieCore {
     is_holding: AtomicBool,
     handshake_received: AsyncEvent,
     line_buffer: Mutex<Vec<u8>>,
-    pending: Mutex<Option<Arc<PendingCmd>>>,
+    pending: Mutex<Option<Arc<PendingCommand>>>,
     job_exception: Mutex<Option<SessionError>>,
     last_reported_op_index: Mutex<i64>,
     cmd_lock: tokio::sync::Mutex<()>,
@@ -386,13 +363,13 @@ impl SmoothieCore {
         }
         self.events.raw_rx(line);
         if let Some(pending) = self.pending_slot() {
-            if !pending.finished.is_set() {
+            if !pending.is_finished() {
                 pending.add_line(line);
             }
         }
     }
 
-    fn pending_slot(&self) -> Option<Arc<PendingCmd>> {
+    fn pending_slot(&self) -> Option<Arc<PendingCommand>> {
         self.pending.lock().unwrap().clone()
     }
 
@@ -401,7 +378,7 @@ impl SmoothieCore {
     /// ping-pong until it takes over.
     fn finish_pending(&self, last_line: Option<&str>) {
         if let Some(pending) = self.pending_slot() {
-            if !pending.finished.is_set() {
+            if !pending.is_finished() {
                 if let Some(line) = last_line {
                     pending.add_line(line);
                 }
@@ -514,7 +491,7 @@ impl SmoothieCore {
                 "Transport not connected".to_string(),
             ));
         }
-        let pending = Arc::new(PendingCmd::new());
+        let pending = Arc::new(PendingCommand::new());
         *self.pending.lock().unwrap() = Some(pending.clone());
         self.events.raw_tx(command);
         let result = async {
@@ -523,7 +500,7 @@ impl SmoothieCore {
                 .await?;
             match tokio::time::timeout(
                 SmoothieConfig::secs(self.config.command_timeout),
-                pending.finished.wait(),
+                pending.wait(),
             )
             .await
             {
@@ -602,7 +579,7 @@ impl SmoothieCore {
                 break;
             }
 
-            let line = parser::strip_gcode_comments(raw_line);
+            let line = crate::core::gcode::strip_gcode_comments(raw_line);
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -698,13 +675,10 @@ impl SmoothieCore {
     /// so a cancelled or aborted job cannot leave persistent PWM
     /// outputs energized.  Fire-and-forget: responses are ignored.
     async fn send_safety_shutdown(&self, emergency: bool) {
-        let dialect = self.dialect();
-        let mut commands = dialect.safety_off_commands.clone();
-        if emergency {
-            if let Some(cmd) = dialect.emergency_stop.clone() {
-                commands.push(cmd);
-            }
-        }
+        let commands = crate::core::session_ops::safety_shutdown_commands(
+            &self.dialect(),
+            emergency,
+        );
         if commands.is_empty() || !self.transport.is_open() {
             return;
         }
@@ -766,20 +740,12 @@ impl SmoothieCore {
         _active_wcs: &str,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
-                }
-            }
+        for command in crate::core::session_ops::home_commands(
+            &dialect,
+            axes.as_deref(),
+            None,
+        )? {
+            self.execute_command(command).await?;
         }
         let snapshot = {
             let mut state = self.state.lock().unwrap();
@@ -797,15 +763,9 @@ impl SmoothieCore {
         pos_y: f64,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.move_to,
-            &[
-                ("speed", Arg::Speed(speed)),
-                ("x", Arg::Length(pos_x)),
-                ("y", Arg::Length(pos_y)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
+        let cmd = crate::core::session_ops::move_to_command(
+            &dialect, speed, pos_x, pos_y,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -816,22 +776,11 @@ impl SmoothieCore {
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let head =
-            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-                .map_err(SessionError::Other)?;
-        let mut cmd_parts = vec![head];
-        for (axis_name, distance) in deltas {
-            cmd_parts.push(format!(
-                "{}{}",
-                axis_name.to_uppercase(),
-                crate::core::dialect::python_float_repr(*distance)
-            ));
+        if let Some(cmd) =
+            crate::core::session_ops::jog_command(&dialect, speed, deltas)?
+        {
+            self.execute_command(cmd).await?;
         }
-        if cmd_parts.len() == 1 {
-            return Ok(());
-        }
-        let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
         Ok(())
     }
 
@@ -840,11 +789,10 @@ impl SmoothieCore {
         tool_number: i64,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.tool_change,
-            &[("tool_number", Arg::Int(tool_number))],
-        )
-        .map_err(SessionError::Other)?;
+        let cmd = crate::core::session_ops::select_tool_command(
+            &dialect,
+            tool_number,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -870,13 +818,8 @@ impl SmoothieCore {
         power: Option<f64>,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => {
-                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
-            }
-            _ => dialect.laser_off.clone(),
-        };
+        let cmd =
+            crate::core::session_ops::power_command(&dialect, power, false)?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -886,14 +829,8 @@ impl SmoothieCore {
         power: Option<f64>,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => format_template(
-                &dialect.focus_laser_on,
-                &[("power", Arg::Length(p))],
-            )
-            .map_err(SessionError::Other)?,
-            _ => dialect.laser_off.clone(),
-        };
+        let cmd =
+            crate::core::session_ops::power_command(&dialect, power, true)?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -905,11 +842,10 @@ impl SmoothieCore {
         y: f64,
         z: Option<f64>,
     ) -> Result<(), SessionError> {
-        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-        })?;
         let dialect = self.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        let cmd = crate::core::session_ops::wcs_offset_command(
+            &dialect, wcs_slot, x, y, z,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }

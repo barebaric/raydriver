@@ -28,7 +28,8 @@ use std::collections::VecDeque;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use crate::core::dialect::{format_template, Arg, Dialect};
+use crate::core::dialect::Dialect;
+use crate::core::pingpong::PendingCommand;
 use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
 use crate::core::transport::{Transport, TransportKind};
 use crate::core::types::{
@@ -71,33 +72,6 @@ impl MarlinConfig {
     }
 }
 
-/// One sent command awaiting its acknowledgement.
-struct PendingCmd {
-    lines: Mutex<Vec<String>>,
-    finished: AsyncEvent,
-}
-
-impl PendingCmd {
-    fn new() -> Self {
-        Self {
-            lines: Mutex::new(Vec::new()),
-            finished: AsyncEvent::new(),
-        }
-    }
-
-    fn add_line(&self, line: &str) {
-        self.lines.lock().unwrap().push(line.to_string());
-    }
-
-    fn finish(&self) {
-        self.finished.set();
-    }
-
-    fn lines(&self) -> Vec<String> {
-        self.lines.lock().unwrap().clone()
-    }
-}
-
 /// The Marlin session: connection lifecycle, M114 position polling
 /// and ping-pong command exchange.
 pub struct MarlinCore {
@@ -112,7 +86,7 @@ pub struct MarlinCore {
     handshake_received: AsyncEvent,
     connected: AsyncEvent,
     line_buffer: Mutex<Vec<u8>>,
-    pending_queue: Mutex<VecDeque<Arc<PendingCmd>>>,
+    pending_queue: Mutex<VecDeque<Arc<PendingCommand>>>,
     job_exception: Mutex<Option<SessionError>>,
     last_reported_op_index: Mutex<i64>,
     cmd_lock: tokio::sync::Mutex<()>,
@@ -412,7 +386,7 @@ impl MarlinCore {
     fn collect_for_pending(&self, line: &str) {
         let front = self.pending_queue.lock().unwrap().front().cloned();
         if let Some(pending) = front {
-            if !pending.finished.is_set() {
+            if !pending.is_finished() {
                 pending.add_line(line);
             }
         }
@@ -426,7 +400,7 @@ impl MarlinCore {
     fn finish_pending(&self, last_line: Option<&str>) {
         let front = self.pending_queue.lock().unwrap().front().cloned();
         if let Some(pending) = front {
-            if !pending.finished.is_set() {
+            if !pending.is_finished() {
                 if let Some(line) = last_line {
                     pending.add_line(line);
                 }
@@ -550,7 +524,7 @@ impl MarlinCore {
                 "Serial transport not connected".to_string(),
             ));
         }
-        let pending = Arc::new(PendingCmd::new());
+        let pending = Arc::new(PendingCommand::new());
         self.pending_queue
             .lock()
             .unwrap()
@@ -562,7 +536,7 @@ impl MarlinCore {
                 .await?;
             match tokio::time::timeout(
                 MarlinConfig::secs(self.config.command_timeout),
-                pending.finished.wait(),
+                pending.wait(),
             )
             .await
             {
@@ -733,13 +707,10 @@ impl MarlinCore {
     /// so a cancelled or aborted job cannot leave persistent PWM
     /// outputs energized.  Fire-and-forget: responses are ignored.
     async fn send_safety_shutdown(&self, emergency: bool) {
-        let dialect = self.dialect();
-        let mut commands = dialect.safety_off_commands.clone();
-        if emergency {
-            if let Some(cmd) = dialect.emergency_stop.clone() {
-                commands.push(cmd);
-            }
-        }
+        let commands = crate::core::session_ops::safety_shutdown_commands(
+            &self.dialect(),
+            emergency,
+        );
         for command in commands {
             if !self.transport.is_open() {
                 break;
@@ -764,20 +735,12 @@ impl MarlinCore {
         _active_wcs: &str,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
-                }
-            }
+        for command in crate::core::session_ops::home_commands(
+            &dialect,
+            axes.as_deref(),
+            None,
+        )? {
+            self.execute_command(command).await?;
         }
         let snapshot = {
             let mut state = self.state.lock().unwrap();
@@ -795,15 +758,9 @@ impl MarlinCore {
         pos_y: f64,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.move_to,
-            &[
-                ("speed", Arg::Speed(speed)),
-                ("x", Arg::Length(pos_x)),
-                ("y", Arg::Length(pos_y)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
+        let cmd = crate::core::session_ops::move_to_command(
+            &dialect, speed, pos_x, pos_y,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -814,22 +771,11 @@ impl MarlinCore {
         deltas: &[(String, f64)],
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let head =
-            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-                .map_err(SessionError::Other)?;
-        let mut cmd_parts = vec![head];
-        for (axis_name, distance) in deltas {
-            cmd_parts.push(format!(
-                "{}{}",
-                axis_name.to_uppercase(),
-                crate::core::dialect::python_float_repr(*distance)
-            ));
+        if let Some(cmd) =
+            crate::core::session_ops::jog_command(&dialect, speed, deltas)?
+        {
+            self.execute_command(cmd).await?;
         }
-        if cmd_parts.len() == 1 {
-            return Ok(());
-        }
-        let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
         Ok(())
     }
 
@@ -838,11 +784,10 @@ impl MarlinCore {
         tool_number: i64,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.tool_change,
-            &[("tool_number", Arg::Int(tool_number))],
-        )
-        .map_err(SessionError::Other)?;
+        let cmd = crate::core::session_ops::select_tool_command(
+            &dialect,
+            tool_number,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -868,13 +813,8 @@ impl MarlinCore {
         power: Option<f64>,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => {
-                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
-            }
-            _ => dialect.laser_off.clone(),
-        };
+        let cmd =
+            crate::core::session_ops::power_command(&dialect, power, false)?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -884,14 +824,8 @@ impl MarlinCore {
         power: Option<f64>,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => format_template(
-                &dialect.focus_laser_on,
-                &[("power", Arg::Length(p))],
-            )
-            .map_err(SessionError::Other)?,
-            _ => dialect.laser_off.clone(),
-        };
+        let cmd =
+            crate::core::session_ops::power_command(&dialect, power, true)?;
         self.execute_command(cmd).await?;
         Ok(())
     }
@@ -903,12 +837,10 @@ impl MarlinCore {
         y: f64,
         z: Option<f64>,
     ) -> Result<(), SessionError> {
-        let p_num = crate::grbl::parser::gcode_to_p_number(wcs_slot)
-            .ok_or_else(|| {
-                SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-            })?;
         let dialect = self.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
+        let cmd = crate::core::session_ops::wcs_offset_command(
+            &dialect, wcs_slot, x, y, z,
+        )?;
         self.execute_command(cmd).await?;
         Ok(())
     }
