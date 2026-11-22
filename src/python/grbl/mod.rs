@@ -27,7 +27,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let grbl_mod = PyModule::new(py, "grbl")?;
 
     grbl_mod.setattr("__doc__", MODULE_DOC)?;
-    grbl_mod.add("__all__", vec!["GrblSession", "parser", "probe"])?;
+    grbl_mod.add("__all__", vec!["GrblSession", "census", "parser"])?;
 
     grbl_mod.add_class::<session::GrblSession>()?;
 
@@ -39,9 +39,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     parser::register(&parser_mod)?;
     grbl_mod.add_submodule(&parser_mod)?;
 
-    let probe_mod = PyModule::new(py, "probe")?;
-    probe::register(&probe_mod)?;
-    grbl_mod.add_submodule(&probe_mod)?;
+    probe::register(&grbl_mod)?;
 
     m.add_submodule(&grbl_mod)?;
     // Note: raydriver.grbl is intentionally NOT registered in

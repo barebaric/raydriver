@@ -1,4 +1,4 @@
-//! The `raydriver.grbl.probe` submodule: the device census.
+//! The `raydriver.grbl.census` submodule: the device census.
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -11,7 +11,7 @@ use crate::python::core::json::value_to_py;
 
 /// The firmware family a device identifies itself as.
 #[gen_stub_pyclass_enum]
-#[pyclass(eq, skip_from_py_object, module = "raydriver.grbl.probe")]
+#[pyclass(eq, skip_from_py_object, module = "raydriver.grbl.census")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrblFlavor {
     #[pyo3(name = "STOCK")]
@@ -39,7 +39,7 @@ impl GrblFlavor {
 /// identity, compile flags, flavor classification and the semantic
 /// values applications need.
 #[gen_stub_pyclass]
-#[pyclass(frozen, module = "raydriver.grbl.probe")]
+#[pyclass(frozen, module = "raydriver.grbl.census")]
 pub struct GrblDeviceInfo {
     pub(crate) inner: crate::grbl::probe::GrblCensus,
 }
@@ -135,7 +135,7 @@ impl GrblDeviceInfo {
 /// Pure data transformation with no I/O; the caller is responsible
 /// for communicating with the device and passing the collected
 /// response lines.
-#[gen_stub_pyfunction(module = "raydriver.grbl.probe")]
+#[gen_stub_pyfunction(module = "raydriver.grbl.census")]
 #[pyfunction]
 fn describe(
     build_info: Vec<String>,
@@ -148,7 +148,7 @@ fn describe(
 
 pub fn register(grbl_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = grbl_mod.py();
-    let module = PyModule::new(py, "probe")?;
+    let module = PyModule::new(py, "census")?;
     module.setattr("__doc__", "Device census for GRBL controllers.")?;
     module.add_class::<GrblFlavor>()?;
     module.add_class::<GrblDeviceInfo>()?;
@@ -156,7 +156,7 @@ pub fn register(grbl_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     crate::python::core::discovery::helpers::attach_submodule(
         grbl_mod,
         &module,
-        "raydriver.grbl.probe",
+        "raydriver.grbl.census",
     )?;
     Ok(())
 }

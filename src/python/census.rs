@@ -30,11 +30,11 @@ impl<'py> IntoPyObject<'py> for DeviceCensus {
 
 impl PyStubType for DeviceCensus {
     fn type_output() -> TypeInfo {
-        // Qualified through each protocol's package, so the four
-        // `probe` submodules cannot collide on one import name.
+        // Qualified through each protocol's package, so the census
+        // classes cannot collide on one import name.
         TypeInfo {
-            name: "grbl.probe.GrblDeviceInfo \
-                   | marlin.probe.MarlinDeviceInfo \
+            name: "grbl.census.GrblDeviceInfo \
+                   | marlin.census.MarlinDeviceInfo \
                    | smoothie.probe.SmoothieDeviceInfo \
                    | octoprint.probe.OctoPrintDeviceInfo"
                 .to_string(),

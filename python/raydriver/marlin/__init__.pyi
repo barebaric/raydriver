@@ -11,12 +11,12 @@ from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
 import typing
+from . import census
 from . import parser
-from . import probe
 __all__ = [
     "MarlinSession",
+    "census",
     "parser",
-    "probe",
 ]
 
 @typing.final
@@ -47,7 +47,7 @@ class MarlinSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[probe.MarlinDeviceInfo]:
+    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[census.MarlinDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
         Run the device census: query M115, M211, M503 and M149,
@@ -69,7 +69,7 @@ class MarlinSession:
         Queue a command and await its response (identical to
         `execute_interactive_command`).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None, *, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the ping-pong protocol.
         
@@ -84,7 +84,7 @@ class MarlinSession:
         r"""
         Abort the running job: M410 quick stop and safety shutdown.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes (e.g.
         `["X"]`).

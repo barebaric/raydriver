@@ -1,4 +1,4 @@
-//! The `raydriver.marlin.probe` submodule: the device census.
+//! The `raydriver.marlin.census` submodule: the device census.
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -11,7 +11,7 @@ use crate::python::core::json::value_to_py;
 /// The structured result of probing a Marlin device: firmware
 /// identity, software-endstop travel and motion limits.
 #[gen_stub_pyclass]
-#[pyclass(frozen, module = "raydriver.marlin.probe")]
+#[pyclass(frozen, module = "raydriver.marlin.census")]
 pub struct MarlinDeviceInfo {
     pub(crate) inner: crate::marlin::probe::MarlinCensus,
 }
@@ -68,7 +68,7 @@ impl MarlinDeviceInfo {
 /// response lines. `boot_lines` are startup messages observed
 /// before the handshake; a version found there is more specific
 /// than the `FIRMWARE_NAME` token M115 reports.
-#[gen_stub_pyfunction(module = "raydriver.marlin.probe")]
+#[gen_stub_pyfunction(module = "raydriver.marlin.census")]
 #[pyfunction]
 #[pyo3(signature = (m115_lines, m211_lines, m503_lines, m149_lines,
                     boot_lines=None))]
@@ -92,14 +92,14 @@ fn describe(
 
 pub fn register(marlin_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = marlin_mod.py();
-    let module = PyModule::new(py, "probe")?;
+    let module = PyModule::new(py, "census")?;
     module.setattr("__doc__", "Device census for Marlin controllers.")?;
     module.add_class::<MarlinDeviceInfo>()?;
     module.add_function(wrap_pyfunction!(describe, &module)?)?;
     crate::python::core::discovery::helpers::attach_submodule(
         marlin_mod,
         &module,
-        "raydriver.marlin.probe",
+        "raydriver.marlin.census",
     )?;
     Ok(())
 }
