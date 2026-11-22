@@ -559,6 +559,21 @@ pub trait PingPongSession: Send + Sync + 'static {
         command: &str,
     ) -> Result<Vec<String>, SessionError>;
 
+    /// Send one command and wait up to *timeout* for its
+    /// acknowledgement.  Sessions that can honour a per-command
+    /// timeout override this; the default ignores it.
+    async fn ping_pong_with_timeout(
+        &self,
+        command: &str,
+        _timeout: Duration,
+    ) -> Result<Vec<String>, SessionError> {
+        self.ping_pong(command).await
+    }
+
+    /// Acknowledgement budget for one streamed line, derived from the
+    /// line's estimated execution time when available.
+    fn line_timeout(&self, estimate: Option<f64>) -> Duration;
+
     /// Firmware label used in the job streaming log lines.
     fn job_log_label(&self) -> &'static str;
 
@@ -621,6 +636,7 @@ pub async fn stream_job<S: PingPongSession>(
     session: &S,
     gcode: &str,
     op_map: &HashMap<usize, i64>,
+    op_estimates: &[f64],
 ) {
     let base = session.base();
     base.start_job();
@@ -653,7 +669,11 @@ pub async fn stream_job<S: PingPongSession>(
 
         base.fire_op_progress(op_map, line_idx);
 
-        match session.ping_pong(&line).await {
+        let estimate = op_map
+            .get(&line_idx)
+            .and_then(|op| op_estimates.get(*op as usize).copied());
+        let timeout = session.line_timeout(estimate);
+        match session.ping_pong_with_timeout(&line, timeout).await {
             Ok(_) => {
                 if base.job_exception.lock().unwrap().is_some() {
                     break;
@@ -696,7 +716,7 @@ pub async fn run_raw<S: PingPongSession>(session: &S, machine_code: &str) {
     if lines.is_empty() {
         return;
     }
-    stream_job(session, &lines.join("\n"), &HashMap::new()).await;
+    stream_job(session, &lines.join("\n"), &HashMap::new(), &[]).await;
 }
 
 /// The shared command path: clear a finished job's cancellation
@@ -709,6 +729,20 @@ pub async fn execute_command<S: PingPongSession>(
         session.base().is_cancelled.store(false, Ordering::SeqCst);
     }
     session.ping_pong(command).await
+}
+
+/// Like [`execute_command`], but with an explicit acknowledgement
+/// budget for operations such as homing that outlast the ordinary
+/// ping-pong timeout.
+pub async fn execute_command_with_timeout<S: PingPongSession>(
+    session: &S,
+    command: &str,
+    timeout: Duration,
+) -> Result<Vec<String>, SessionError> {
+    if !session.base().job_running.load(Ordering::SeqCst) {
+        session.base().is_cancelled.store(false, Ordering::SeqCst);
+    }
+    session.ping_pong_with_timeout(command, timeout).await
 }
 
 /// The shared cancel sequence: mark the job cancelled, resolve the

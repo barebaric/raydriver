@@ -146,6 +146,9 @@ pub(crate) fn build_config(
     if let Some(v) = get_f64(dict, "command_timeout")? {
         config.command_timeout = v;
     }
+    if let Some(v) = get_f64(dict, "homing_timeout")? {
+        config.homing_timeout = v;
+    }
     Ok(config)
 }
 

@@ -273,6 +273,10 @@ impl PingPongSession for SmoothieSession {
             .await
     }
 
+    fn line_timeout(&self, _estimate: Option<f64>) -> Duration {
+        secs(self.config.command_timeout)
+    }
+
     fn job_log_label(&self) -> &'static str {
         "Smoothie"
     }
@@ -340,9 +344,10 @@ impl Session for SmoothieSession {
         self: Arc<Self>,
         gcode: &str,
         op_map: &HashMap<usize, i64>,
-        _op_estimates: &[f64],
+        op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        line_session::stream_job(self.as_ref(), gcode, op_map).await;
+        line_session::stream_job(self.as_ref(), gcode, op_map, op_estimates)
+            .await;
         Ok(())
     }
 

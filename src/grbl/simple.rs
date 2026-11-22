@@ -45,6 +45,11 @@ pub struct SimpleConfig {
     pub transport: TransportKind,
     pub poll_status_while_running: bool,
     pub command_timeout: f64,
+    pub homing_timeout: f64,
+    pub stall_timeout_min: f64,
+    pub stall_timeout_max: f64,
+    pub stall_timeout_safety_factor: f64,
+    pub stall_timeout_default: f64,
     pub handshake_timeout: f64,
     pub handshake_poll_interval: f64,
     pub status_poll_interval: f64,
@@ -58,6 +63,11 @@ impl SimpleConfig {
             transport,
             poll_status_while_running: false,
             command_timeout: 30.0,
+            homing_timeout: 0.0,
+            stall_timeout_min: 5.0,
+            stall_timeout_max: 120.0,
+            stall_timeout_safety_factor: 3.0,
+            stall_timeout_default: 30.0,
             handshake_timeout: 3.0,
             handshake_poll_interval: 0.5,
             status_poll_interval: 1.0,
@@ -283,15 +293,38 @@ impl PingPongSession for GrblSimpleSession {
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
+        let timeout = secs(self.config.command_timeout);
+        self.ping_pong_with_timeout(command, timeout).await
+    }
+
+    /// Send one command and wait up to *timeout* for its
+    /// acknowledgement.  Homing needs a budget measured in minutes on
+    /// large machines, while normal commands keep the ping-pong
+    /// timeout.
+    async fn ping_pong_with_timeout(
+        &self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<Vec<String>, SessionError> {
         let _guard = self.base.cmd_lock.lock().await;
         if !self.base.transport.is_open() {
             return Err(SessionError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
-        self.base
-            .await_ack(command, secs(self.config.command_timeout))
-            .await
+        self.base.await_ack(command, timeout).await
+    }
+
+    fn line_timeout(&self, estimate: Option<f64>) -> Duration {
+        match estimate {
+            Some(seconds) => {
+                secs((seconds * self.config.stall_timeout_safety_factor).clamp(
+                    self.config.stall_timeout_min,
+                    self.config.stall_timeout_max,
+                ))
+            }
+            None => secs(self.config.stall_timeout_default),
+        }
     }
 
     fn job_log_label(&self) -> &'static str {
@@ -360,9 +393,10 @@ impl Session for GrblSimpleSession {
         self: Arc<Self>,
         gcode: &str,
         op_map: &HashMap<usize, i64>,
-        _op_estimates: &[f64],
+        op_estimates: &[f64],
     ) -> Result<(), SessionError> {
-        line_session::stream_job(self.as_ref(), gcode, op_map).await;
+        line_session::stream_job(self.as_ref(), gcode, op_map, op_estimates)
+            .await;
         Ok(())
     }
 
@@ -389,6 +423,7 @@ impl Session for GrblSimpleSession {
             self.as_ref(),
             &gcode.join("\n"),
             &HashMap::new(),
+            &[],
         )
         .await;
         Ok(())
@@ -411,9 +446,19 @@ impl Session for GrblSimpleSession {
         active_wcs: &str,
     ) -> Result<(), SessionError> {
         let dialect = self.base.dialect();
+        let timeout = secs(if self.config.homing_timeout > 0.0 {
+            self.config.homing_timeout
+        } else {
+            self.config.command_timeout
+        });
         match axes {
             None => {
-                line_session::execute_command(self, &dialect.home_all).await?;
+                line_session::execute_command_with_timeout(
+                    self,
+                    &dialect.home_all,
+                    timeout,
+                )
+                .await?;
             }
             Some(axes) => {
                 for axis in axes {
@@ -422,7 +467,10 @@ impl Session for GrblSimpleSession {
                         &[("axis_letter", Arg::Str(axis))],
                     )
                     .map_err(SessionError::Other)?;
-                    line_session::execute_command(self, &cmd).await?;
+                    line_session::execute_command_with_timeout(
+                        self, &cmd, timeout,
+                    )
+                    .await?;
                 }
             }
         }

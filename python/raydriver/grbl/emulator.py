@@ -125,14 +125,23 @@ class GrblEmulator:
     - ``mpos``: current machine position in mm.
     - ``rx_overrun``: True when the host overflowed the RX buffer
       (a protocol violation by the host side).
+    - ``home_ack_delay``: seconds to hold back the ``ok`` for ``$H``,
+      emulating firmware that acknowledges only after the cycle.
     """
 
     TICK = 0.002
 
-    def __init__(self, mock, speed_factor=2000.0, fragment_output=False):
+    def __init__(
+        self,
+        mock,
+        speed_factor=2000.0,
+        fragment_output=False,
+        home_ack_delay=0.0,
+    ):
         self.mock = mock
         self.speed_factor = speed_factor
         self.fragment_output = fragment_output
+        self.home_ack_delay = home_ack_delay
         self.silent = False
         self.rx_overrun = False
         self.tx_log = bytearray()
@@ -591,7 +600,12 @@ class GrblEmulator:
                 )
             )
             self._planned_pos = [0.0, 0.0, 0.0]
-            self._ack(b"ok\r\n")
+            if self.home_ack_delay > 0:
+                asyncio.get_running_loop().call_later(
+                    self.home_ack_delay, self._ack, b"ok\r\n"
+                )
+            else:
+                self._ack(b"ok\r\n")
             return
         match = _SETTING_RE.match(stripped)
         if match:
