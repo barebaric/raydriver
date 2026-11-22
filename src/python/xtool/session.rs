@@ -148,7 +148,7 @@ impl PyXtoolSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.execute_command(command).await;
+            let _ = core.execute_command(&command).await;
             Ok(())
         })
     }

@@ -517,18 +517,6 @@ impl XtoolSession {
     }
 
     /// Execute a single G-code line without failing the caller on
-    /// device-side rejections; the command status carries the error.
-    pub async fn execute_command(&self, command: String) {
-        if let Err(err) = self.execute_interactive_command(&command).await {
-            self.update_command_status(
-                TransportStatus::Error,
-                Some(&err.to_string()),
-            );
-        } else {
-            self.update_command_status(TransportStatus::Idle, None);
-        }
-    }
-
     /// Execute a multi-line block of G-code via `POST /cmd`.
     pub async fn execute_block(
         &self,
@@ -977,5 +965,22 @@ impl Session for XtoolSession {
         }
 
         Ok(())
+    }
+
+    async fn execute_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        if let Err(err) = self.execute_interactive_command(&command).await {
+            self.update_command_status(
+                TransportStatus::Error,
+                Some(&err.to_string()),
+            );
+        } else {
+            self.update_command_status(TransportStatus::Idle, None);
+        }
+
+        Ok(Vec::new())
     }
 }

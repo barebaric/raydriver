@@ -126,6 +126,29 @@ pub struct OctoPrintSession {
 }
 
 impl OctoPrintSession {
+    pub async fn jog_absolute(
+        &self,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+        speed: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let mut params = json!({
+            "command": "jog",
+            "x": x,
+            "y": y,
+            "absolute": true,
+        });
+        if let Some(z) = z {
+            params["z"] = json!(z);
+        }
+        if let Some(speed) = speed {
+            params["speed"] = json!(speed);
+        }
+        self.api_request("POST", "/api/printer/printhead", Some(params))
+            .await?;
+        Ok(())
+    }
     pub fn new(
         config: OctoPrintConfig,
         events: Arc<dyn SessionEvents>,
@@ -634,42 +657,6 @@ impl OctoPrintSession {
             .await?;
         Ok(())
     }
-
-    pub async fn execute_command(
-        &self,
-        command: &str,
-    ) -> Result<(), SessionError> {
-        self.printer_command(json!({"command": command})).await
-    }
-
-    pub async fn move_to(
-        &self,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-        speed: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let mut params = json!({
-            "command": "jog",
-            "x": x,
-            "y": y,
-            "absolute": true,
-        });
-        if let Some(z) = z {
-            params["z"] = json!(z);
-        }
-        if let Some(speed) = speed {
-            params["speed"] = json!(speed);
-        }
-        self.api_request("POST", "/api/printer/printhead", Some(params))
-            .await?;
-        Ok(())
-    }
-
-    pub fn update_dialect(&self, _dialect: crate::core::dialect::Dialect) {
-        // Commands are sent as structured JSON; no command templates
-        // are needed.
-    }
 }
 
 /// Extracts the JSON payloads of a SockJS data frame: "o"/"h" are
@@ -770,7 +757,7 @@ impl Session for OctoPrintSession {
         if let Some(z) = z {
             command.push_str(&format!(" Z{z:.3}"));
         }
-        self.execute_command(&command).await
+        self.execute_command(&command).await.map(|_| ())
     }
     async fn read_wcs_offsets(
         &self,
@@ -947,7 +934,9 @@ impl Session for OctoPrintSession {
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        self.execute_command(&format!("T{tool_number}")).await
+        self.execute_command(&format!("T{tool_number}"))
+            .await
+            .map(|_| ())
     }
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
         let command = match power {
@@ -955,7 +944,7 @@ impl Session for OctoPrintSession {
             Some(p) => format!("M3 S{}", p.round()),
             None => "M5".to_string(),
         };
-        self.execute_command(&command).await
+        self.execute_command(&command).await.map(|_| ())
     }
     async fn set_focus_power(
         &self,
@@ -989,5 +978,13 @@ impl Session for OctoPrintSession {
              results via its API.",
         );
         Ok(None)
+    }
+
+    async fn execute_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        self.printer_command(json!({"command": command})).await?;
+        Ok(Vec::new())
     }
 }

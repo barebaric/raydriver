@@ -179,6 +179,35 @@ pub trait Session: Send + Sync {
         Err(unsupported("execute_interactive_command"))
     }
 
+    /// Send one command and return its response lines.  This is the
+    /// non-raising path: protocols that report rejections as lines
+    /// (`error:`) or swallow them keep doing so.  Defaults to the
+    /// interactive path.
+    async fn execute_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        self.execute_interactive_command(command).await
+    }
+
+    /// Bytes currently buffered in the device's RX buffer.  `0` when
+    /// the protocol has no buffer accounting.
+    fn buffer_count(&self) -> usize {
+        0
+    }
+
+    /// The device's total RX buffer size.  `0` when the protocol has
+    /// no buffer accounting.
+    fn rx_buffer_size(&self) -> usize {
+        0
+    }
+
+    /// Commands waiting in the device's planner, if the protocol can
+    /// report them.
+    fn pending_commands(&self) -> Vec<String> {
+        Vec::new()
+    }
+
     /// Home all axes or *axes*; *active_wcs* is the WCS the caller
     /// expects to stay active (some protocols re-assert it).
     async fn home(

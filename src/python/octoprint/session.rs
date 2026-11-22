@@ -260,7 +260,7 @@ impl PyOctoPrintSession {
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.move_to(x, y, z, speed).await?;
+            core.jog_absolute(x, y, z, speed).await?;
             Ok(())
         })
     }

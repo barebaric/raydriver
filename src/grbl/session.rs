@@ -280,22 +280,6 @@ impl GrblSession {
         Ok(self.transport.clone())
     }
 
-    pub fn buffer_count(&self) -> usize {
-        self.flow.buffer_count()
-    }
-
-    pub fn rx_buffer_size(&self) -> usize {
-        self.flow.rx_buffer_size()
-    }
-
-    pub fn pending_commands(&self) -> Vec<String> {
-        self.flow
-            .pending_queue()
-            .iter()
-            .map(|p| p.command.clone())
-            .collect()
-    }
-
     fn note_device_response(&self) {
         self.device_response_count.fetch_add(1, Ordering::SeqCst);
     }
@@ -782,55 +766,6 @@ impl GrblSession {
              default {} bytes.",
             super::flow::DEFAULT_GRBL_RX_BUFFER_SIZE
         );
-    }
-
-    /// Send a command through the queued command processor and await
-    /// its full response.
-    pub async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        // Only clear the cancellation flag once the cancelled job's
-        // sender has fully terminated (issue #428).
-        if !self.job_running.load(Ordering::SeqCst) {
-            let done = self
-                .stream_task
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_none_or(|t| t.is_finished());
-            if done {
-                self.is_cancelled.store(false, Ordering::SeqCst);
-            }
-        }
-        let request = Arc::new(RequestShared::new(&command));
-        self.queued_requests
-            .lock()
-            .unwrap()
-            .push(Arc::downgrade(&request));
-        self.cmd_tx
-            .lock()
-            .unwrap()
-            .send(QueuedCommand {
-                shared: request.clone(),
-            })
-            .map_err(|_| {
-                SessionError::Connection(
-                    "command queue unavailable".to_string(),
-                )
-            })?;
-        match tokio::time::timeout(
-            SessionConfig::secs(self.config.command_timeout),
-            request.finished.wait(),
-        )
-        .await
-        {
-            Ok(()) => Ok(request.lines()),
-            Err(_) => {
-                request.finish();
-                Err(SessionError::Timeout)
-            }
-        }
     }
 
     async fn command_queue_loop(
@@ -1683,7 +1618,7 @@ impl Session for GrblSession {
         let dialect = self.dialect();
         match axes {
             None => {
-                self.execute_command(dialect.home_all.clone()).await?;
+                self.execute_command(&dialect.home_all).await?;
             }
             Some(axes) => {
                 for axis in axes {
@@ -1692,7 +1627,7 @@ impl Session for GrblSession {
                         &[("axis_letter", Arg::Str(axis))],
                     )
                     .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
+                    self.execute_command(&cmd).await?;
                 }
             }
         }
@@ -1702,9 +1637,9 @@ impl Session for GrblSession {
         // sending G54 is ignored if GRBL thinks it is already in
         // G54.
         let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
-        self.execute_command("G4 P0.01".to_string()).await?;
-        self.execute_command(temp_wcs.to_string()).await?;
-        self.execute_command(active_wcs.to_string()).await?;
+        self.execute_command("G4 P0.01").await?;
+        self.execute_command(temp_wcs).await?;
+        self.execute_command(active_wcs).await?;
         let state_snapshot = {
             let mut state = self.state.lock().unwrap();
             state.error = None;
@@ -1735,7 +1670,7 @@ impl Session for GrblSession {
             return Ok(());
         }
         let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
@@ -1745,7 +1680,7 @@ impl Session for GrblSession {
             &[("tool_number", Arg::Int(tool_number))],
         )
         .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
@@ -1757,7 +1692,7 @@ impl Session for GrblSession {
             }
             _ => dialect.laser_off.clone(),
         };
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn set_focus_power(
@@ -1776,7 +1711,7 @@ impl Session for GrblSession {
                 dialect.laser_off.clone()
             }
         };
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn read_settings(
@@ -1792,7 +1727,7 @@ impl Session for GrblSession {
         key: &str,
         value: &str,
     ) -> Result<(), SessionError> {
-        self.execute_command(format!("${key}={value}")).await?;
+        self.execute_command(&format!("${key}={value}")).await?;
         Ok(())
     }
     async fn set_wcs_offset(
@@ -1807,7 +1742,7 @@ impl Session for GrblSession {
         })?;
         let dialect = self.dialect();
         let cmd = dialect.format_wcs_offset(p_num, x, y, z);
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn read_wcs_offsets(
@@ -2102,7 +2037,71 @@ impl Session for GrblSession {
             ],
         )
         .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
+    }
+
+    async fn execute_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        // Only clear the cancellation flag once the cancelled job's
+        // sender has fully terminated (issue #428).
+        if !self.job_running.load(Ordering::SeqCst) {
+            let done = self
+                .stream_task
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_none_or(|t| t.is_finished());
+            if done {
+                self.is_cancelled.store(false, Ordering::SeqCst);
+            }
+        }
+        let request = Arc::new(RequestShared::new(&command));
+        self.queued_requests
+            .lock()
+            .unwrap()
+            .push(Arc::downgrade(&request));
+        self.cmd_tx
+            .lock()
+            .unwrap()
+            .send(QueuedCommand {
+                shared: request.clone(),
+            })
+            .map_err(|_| {
+                SessionError::Connection(
+                    "command queue unavailable".to_string(),
+                )
+            })?;
+        match tokio::time::timeout(
+            SessionConfig::secs(self.config.command_timeout),
+            request.finished.wait(),
+        )
+        .await
+        {
+            Ok(()) => Ok(request.lines()),
+            Err(_) => {
+                request.finish();
+                Err(SessionError::Timeout)
+            }
+        }
+    }
+
+    fn buffer_count(&self) -> usize {
+        self.flow.buffer_count()
+    }
+
+    fn rx_buffer_size(&self) -> usize {
+        self.flow.rx_buffer_size()
+    }
+
+    fn pending_commands(&self) -> Vec<String> {
+        self.flow
+            .pending_queue()
+            .iter()
+            .map(|p| p.command.clone())
+            .collect()
     }
 }

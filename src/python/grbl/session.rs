@@ -348,7 +348,7 @@ impl PyGrblSession {
         let core = self.core.clone();
         spawn_future(
             py,
-            async move { Ok(core.execute_command(command).await?) },
+            async move { Ok(core.execute_command(&command).await?) },
         )
     }
 
