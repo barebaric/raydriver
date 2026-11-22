@@ -22,18 +22,15 @@ import hmac
 import ipaddress
 import ssl
 
+from raydriver.errors import InsecureListenerError
+from raydriver.remote.daemon import validate_bind_policy
+
 #: The server sends this line when a token is required; the client
 #: must answer with the token to be connected.
 TOKEN_CHALLENGE = b"raydriver-analyzer: send token\n"
 
 #: Sent before closing an unauthorized connection.
 TOKEN_REJECTED = b"raydriver-analyzer: unauthorized\n"
-
-_WILDCARD_HOSTS = frozenset({"", "*", "0.0.0.0", "::"})
-
-
-class InsecureListenerError(Exception):
-    """Raised when a listener configuration violates the policy."""
 
 
 def is_loopback(host: str) -> bool:
@@ -44,20 +41,6 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
-
-
-def validate_bind_policy(
-    host: str, token: str | None, tls_cert: str | None
-) -> None:
-    """Raise :class:`InsecureListenerError` unless *host* is
-    loopback, or *token* and *tls_cert* are both configured."""
-    exposed = host in _WILDCARD_HOSTS or not is_loopback(host)
-    if exposed and (not token or not tls_cert):
-        raise InsecureListenerError(
-            f"refusing to listen on {host or '0.0.0.0'} without "
-            "authentication: non-loopback listeners require BOTH a "
-            "token (--token) and TLS (--tls-cert/--tls-key)"
-        )
 
 
 def make_server_ssl_context(tls_cert: str, tls_key: str) -> ssl.SSLContext:

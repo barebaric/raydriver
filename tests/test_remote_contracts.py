@@ -21,7 +21,7 @@ from raydriver.grbl.simple import GrblSimpleSession
 from raydriver.marlin import MarlinSession
 from raydriver.octoprint import OctoPrintSession
 from raydriver.protocols import PROTOCOLS
-from raydriver.remote.client import create_session
+from raydriver.remote.client import RemoteSession, create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
 from raydriver.smoothie import SmoothieSession
 from raydriver.smoothie.emulator import SmoothieEmulator
@@ -88,6 +88,7 @@ async def test_remote_home_smoothie():
         DEFAULT_DIALECT,
         events.callback,
     )
+    assert isinstance(session, RemoteSession)
     try:
         await asyncio.wait_for(session.connect(), timeout=5)
         await events.wait_for(
@@ -148,6 +149,7 @@ async def test_remote_run_reports_job_errors():
         DEFAULT_DIALECT,
         events.callback,
     )
+    assert isinstance(session, RemoteSession)
     try:
         with pytest.raises(ConnectionError) as excinfo:
             await asyncio.wait_for(session.run("G1 X1\n", {0: 0}), timeout=5)
@@ -197,10 +199,56 @@ async def test_daemon_reports_synchronous_session_errors():
         DEFAULT_DIALECT,
         None,
     )
+    assert isinstance(session, RemoteSession)
     try:
         with pytest.raises(ConnectionError) as excinfo:
             await asyncio.wait_for(session.home(None, "G54"), timeout=5)
         assert "boom from session" in str(excinfo.value)
+    finally:
+        try:
+            await asyncio.wait_for(session.aclose(), timeout=5)
+        except Exception:
+            pass
+        await daemon.stop()
+
+
+async def test_daemon_preserves_timeout_error_kind():
+    """A Python TimeoutError reaches the caller as a timeout."""
+
+    class SlowSession:
+        state = DeviceState()
+        job_running = False
+        resource_uri = None
+        buffer_count = 0
+        rx_buffer_size = 0
+        pending_commands = []
+
+        def home(self, axes=None, active_wcs="G54"):
+            raise TimeoutError("device did not answer")
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+    def factory(name, config, dialect, callback):
+        return SlowSession()
+
+    daemon = Daemon(DaemonConfig(port=0), session_factory=factory)
+    server = await daemon.start()
+    port = server.sockets[0].getsockname()[1]
+    session = create_session(
+        "grbl",
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        DEFAULT_DIALECT,
+        None,
+    )
+    assert isinstance(session, RemoteSession)
+    try:
+        with pytest.raises(TimeoutError) as excinfo:
+            await asyncio.wait_for(session.home(None, "G54"), timeout=5)
+        assert "device did not answer" in str(excinfo.value)
     finally:
         try:
             await asyncio.wait_for(session.aclose(), timeout=5)

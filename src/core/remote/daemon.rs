@@ -186,6 +186,7 @@ impl ClientQueue {
 struct Client {
     id: String,
     address: String,
+    connected_at: f64,
     queue: Arc<ClientQueue>,
     authenticated: AtomicBool,
     closed: AtomicBool,
@@ -404,6 +405,7 @@ impl Daemon {
         let client = Arc::new(Client {
             id: uuid::Uuid::new_v4().simple().to_string()[..12].to_string(),
             address: peer.to_string(),
+            connected_at: unix_time(),
             queue: Arc::new(ClientQueue::new(SEND_QUEUE_LIMIT)),
             authenticated: AtomicBool::new(false),
             closed: AtomicBool::new(false),
@@ -512,7 +514,7 @@ impl Daemon {
             .unwrap_or_default();
         let is_auth =
             message.get("type").and_then(Value::as_str) == Some(protocol::AUTH);
-        if !is_auth || supplied != token {
+        if !is_auth || !tokens_equal(supplied, &token) {
             let reply = protocol::error_response(
                 id,
                 protocol::AUTH_FAILED,
@@ -710,7 +712,7 @@ impl Daemon {
                     "address": client.address,
                     "authenticated":
                         client.authenticated.load(Ordering::SeqCst),
-                    "connected_at": unix_time(),
+                    "connected_at": client.connected_at,
                     "roles": client.roles.lock().unwrap().clone(),
                 })
             })
@@ -1418,6 +1420,19 @@ fn require_control(
         ));
     }
     Ok(())
+}
+
+/// Constant-time token comparison. Hashing first gives fixed-length
+/// inputs, so neither contents nor length influence the comparison.
+fn tokens_equal(supplied: &str, expected: &str) -> bool {
+    use sha1::{Digest, Sha1};
+    let supplied = Sha1::digest(supplied.as_bytes());
+    let expected = Sha1::digest(expected.as_bytes());
+    let mut difference = 0u8;
+    for (a, b) in supplied.iter().zip(expected.iter()) {
+        difference |= a ^ b;
+    }
+    difference == 0
 }
 
 fn hosted(err: HostedError) -> ProtocolError {
