@@ -10,7 +10,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::session::{CancelMode, Session};
 use crate::core::types::WcsOffsets;
-use crate::octoprint::session::{OctoPrintConfig, OctoPrintCore};
+use crate::octoprint::session::{OctoPrintConfig, OctoPrintSession};
 use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
@@ -62,26 +62,26 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
 /// Operations the OctoPrint API cannot perform (e.g. writing
 /// firmware settings) raise `NotImplementedError`.
 #[gen_stub_pyclass(module = "raydriver.octoprint")]
-#[pyclass(module = "raydriver.octoprint")]
-pub struct OctoPrintSession {
-    core: Arc<OctoPrintCore>,
+#[pyclass(name = "OctoPrintSession", module = "raydriver.octoprint")]
+pub struct PyOctoPrintSession {
+    core: Arc<OctoPrintSession>,
     events: Arc<PyEvents>,
 }
 
-impl OctoPrintSession {
+impl PyOctoPrintSession {
     fn build(
         config: OctoPrintConfig,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = OctoPrintCore::new(config, events.clone());
+        let core = OctoPrintSession::new(config, events.clone());
         Ok(Self { core, events })
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl OctoPrintSession {
+impl PyOctoPrintSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(

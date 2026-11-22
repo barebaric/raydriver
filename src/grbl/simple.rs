@@ -69,13 +69,13 @@ impl SimpleConfig {
 
 /// The simple session: connection lifecycle, status polling and
 /// ping-pong command exchange, all in one small state machine.
-pub struct SimpleCore {
+pub struct GrblSimpleSession {
     base: LineSessionBase,
     config: SimpleConfig,
     report_in_inches: AtomicBool,
 }
 
-impl SimpleCore {
+impl GrblSimpleSession {
     pub fn new(
         config: SimpleConfig,
         dialect: Dialect,
@@ -223,7 +223,7 @@ impl SimpleCore {
 }
 
 #[async_trait]
-impl PingPongSession for SimpleCore {
+impl PingPongSession for GrblSimpleSession {
     fn base(&self) -> &LineSessionBase {
         &self.base
     }
@@ -326,7 +326,7 @@ impl PingPongSession for SimpleCore {
 /// operations call the skeleton's free functions; the GRBL-specific
 /// operations carry their real bodies here.
 #[async_trait]
-impl Session for SimpleCore {
+impl Session for GrblSimpleSession {
     fn state(&self) -> DeviceState {
         self.base.state()
     }

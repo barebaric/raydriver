@@ -71,7 +71,7 @@ impl M2Config {
     }
 }
 
-pub struct M2Core {
+pub struct M2Session {
     config: M2Config,
     events: Arc<dyn SessionEvents>,
     state: Arc<Mutex<DeviceState>>,
@@ -80,7 +80,7 @@ pub struct M2Core {
     connection_task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl M2Core {
+impl M2Session {
     pub fn new(config: M2Config, events: Arc<dyn SessionEvents>) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -842,7 +842,7 @@ fn apply_mode(
 /// The session's [`Session`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for M2Core {
+impl Session for M2Session {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

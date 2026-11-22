@@ -9,7 +9,7 @@ use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::m2::session::{M2Config, M2Core};
+use crate::xtool::m2::session::{M2Config, M2Session};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
     let host = dict
@@ -45,23 +45,23 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(module = "raydriver.xtool.m2")]
-pub struct M2Session {
-    core: Arc<M2Core>,
+#[pyclass(name = "M2Session", module = "raydriver.xtool.m2")]
+pub struct PyM2Session {
+    core: Arc<M2Session>,
     events: Arc<PyEvents>,
 }
 
-impl M2Session {
+impl PyM2Session {
     fn build(config: M2Config, event_callback: Option<Py<PyAny>>) -> Self {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = M2Core::new(config, events.clone());
+        let core = M2Session::new(config, events.clone());
         Self { core, events }
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl M2Session {
+impl PyM2Session {
     #[new]
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
@@ -212,7 +212,7 @@ impl M2Session {
     }
 }
 
-impl Drop for M2Session {
+impl Drop for PyM2Session {
     fn drop(&mut self) {
         self.events.close();
         self.core.abort_background_tasks_now();

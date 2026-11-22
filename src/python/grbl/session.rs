@@ -17,7 +17,7 @@ use crate::core::session::{CancelMode, Session, SessionError};
 use crate::core::transport::TransportKind;
 use crate::core::types::{UnitSystem, WcsOffsets};
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport, ProtocolVariant};
-use crate::grbl::session::{SessionConfig, SessionCore};
+use crate::grbl::session::{GrblSession, SessionConfig};
 
 use crate::python::core::mock::MockTransport;
 use crate::python::core::types::DeviceState;
@@ -230,15 +230,15 @@ pub(crate) fn parse_dialect(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl")]
-pub struct GrblSession {
-    core: Arc<SessionCore>,
+#[pyclass(name = "GrblSession", module = "raydriver.grbl")]
+pub struct PyGrblSession {
+    core: Arc<GrblSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl GrblSession {
+impl PyGrblSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -659,7 +659,7 @@ impl GrblSession {
     }
 }
 
-impl GrblSession {
+impl PyGrblSession {
     fn build(
         config: SessionConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -667,12 +667,12 @@ impl GrblSession {
     ) -> PyResult<Self> {
         let dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = SessionCore::new(config, dialect, events.clone());
+        let core = GrblSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for GrblSession {
+impl Drop for PyGrblSession {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared

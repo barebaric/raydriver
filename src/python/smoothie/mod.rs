@@ -20,7 +20,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     smoothie_mod.setattr("__doc__", MODULE_DOC)?;
     smoothie_mod.add("__all__", vec!["SmoothieSession", "probe"])?;
     probe::register(&smoothie_mod)?;
-    smoothie_mod.add_class::<session::SmoothieSession>()?;
+    smoothie_mod.add_class::<session::PySmoothieSession>()?;
 
     m.add_submodule(&smoothie_mod)?;
     Ok(())

@@ -10,7 +10,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use crate::core::dialect::Dialect;
 use crate::core::session::{CancelMode, Session};
 use crate::core::transport::TransportKind;
-use crate::marlin::session::{MarlinConfig, MarlinCore};
+use crate::marlin::session::{MarlinConfig, MarlinSession};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{
@@ -61,15 +61,15 @@ fn build_marlin_config(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.marlin")]
-pub struct MarlinSession {
-    core: Arc<MarlinCore>,
+#[pyclass(name = "MarlinSession", module = "raydriver.marlin")]
+pub struct PyMarlinSession {
+    core: Arc<MarlinSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl MarlinSession {
+impl PyMarlinSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -408,7 +408,7 @@ impl MarlinSession {
     }
 }
 
-impl MarlinSession {
+impl PyMarlinSession {
     fn build(
         config: MarlinConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -416,12 +416,12 @@ impl MarlinSession {
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = MarlinCore::new(config, dialect, events.clone());
+        let core = MarlinSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for MarlinSession {
+impl Drop for PyMarlinSession {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared

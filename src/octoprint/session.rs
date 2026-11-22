@@ -110,7 +110,7 @@ struct JobState {
 }
 
 /// The OctoPrint session core.
-pub struct OctoPrintCore {
+pub struct OctoPrintSession {
     config: OctoPrintConfig,
     events: Arc<dyn SessionEvents>,
     state: Mutex<DeviceState>,
@@ -125,7 +125,7 @@ pub struct OctoPrintCore {
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl OctoPrintCore {
+impl OctoPrintSession {
     pub fn new(
         config: OctoPrintConfig,
         events: Arc<dyn SessionEvents>,
@@ -703,7 +703,7 @@ fn sockjs_payloads(frame: &str) -> Vec<Value> {
 /// The session's [`Session`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for OctoPrintCore {
+impl Session for OctoPrintSession {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

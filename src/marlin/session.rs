@@ -78,7 +78,7 @@ impl MarlinConfig {
 
 /// The Marlin session: connection lifecycle, M114 position polling
 /// and ping-pong command exchange.
-pub struct MarlinCore {
+pub struct MarlinSession {
     base: LineSessionBase,
     config: MarlinConfig,
     /// Set once the device announced itself; commands must not be
@@ -87,7 +87,7 @@ pub struct MarlinCore {
     connected: AsyncEvent,
 }
 
-impl MarlinCore {
+impl MarlinSession {
     pub fn new(
         config: MarlinConfig,
         dialect: Dialect,
@@ -251,7 +251,7 @@ impl MarlinCore {
 }
 
 #[async_trait]
-impl PingPongSession for MarlinCore {
+impl PingPongSession for MarlinSession {
     fn base(&self) -> &LineSessionBase {
         &self.base
     }
@@ -370,7 +370,7 @@ impl PingPongSession for MarlinCore {
 /// skeleton's free functions; the Marlin-specific operations carry
 /// their real bodies here.
 #[async_trait]
-impl Session for MarlinCore {
+impl Session for MarlinSession {
     fn state(&self) -> DeviceState {
         self.base.state()
     }

@@ -12,7 +12,7 @@ use crate::core::dialect::Dialect;
 use crate::core::session::{CancelMode, Session};
 use crate::core::transport::TransportKind;
 use crate::core::types::{UnitSystem, WcsOffsets};
-use crate::grbl::simple::{SimpleConfig, SimpleCore};
+use crate::grbl::simple::{GrblSimpleSession, SimpleConfig};
 
 use crate::python::core::mock::MockTransport;
 use crate::python::core::types::DeviceState;
@@ -73,15 +73,15 @@ fn build_simple_config(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl.simple")]
-pub struct GrblSimpleSession {
-    core: Arc<SimpleCore>,
+#[pyclass(name = "GrblSimpleSession", module = "raydriver.grbl.simple")]
+pub struct PyGrblSimpleSession {
+    core: Arc<GrblSimpleSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl GrblSimpleSession {
+impl PyGrblSimpleSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -476,7 +476,7 @@ impl GrblSimpleSession {
     }
 }
 
-impl GrblSimpleSession {
+impl PyGrblSimpleSession {
     fn build(
         config: SimpleConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -484,7 +484,7 @@ impl GrblSimpleSession {
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = SimpleCore::new(config, dialect, events.clone());
+        let core = GrblSimpleSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
@@ -492,6 +492,6 @@ impl GrblSimpleSession {
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr("__doc__", MODULE_DOC)?;
     m.add("__all__", vec!["GrblSimpleSession"])?;
-    m.add_class::<GrblSimpleSession>()?;
+    m.add_class::<PyGrblSimpleSession>()?;
     Ok(())
 }

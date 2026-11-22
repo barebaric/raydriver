@@ -17,7 +17,7 @@ use crate::python::grbl::session::{
 };
 use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::smoothie::probe::SmoothieDeviceInfo;
-use crate::smoothie::session::{SmoothieConfig, SmoothieCore};
+use crate::smoothie::session::{SmoothieConfig, SmoothieSession};
 
 fn build_smoothie_config(
     kind: TransportKind,
@@ -59,15 +59,15 @@ fn build_smoothie_config(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.smoothie")]
-pub struct SmoothieSession {
-    core: Arc<SmoothieCore>,
+#[pyclass(name = "SmoothieSession", module = "raydriver.smoothie")]
+pub struct PySmoothieSession {
+    core: Arc<SmoothieSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl SmoothieSession {
+impl PySmoothieSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -399,7 +399,7 @@ impl SmoothieSession {
     }
 }
 
-impl SmoothieSession {
+impl PySmoothieSession {
     fn build(
         config: SmoothieConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -407,12 +407,12 @@ impl SmoothieSession {
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = SmoothieCore::new(config, dialect, events.clone());
+        let core = SmoothieSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for SmoothieSession {
+impl Drop for PySmoothieSession {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared

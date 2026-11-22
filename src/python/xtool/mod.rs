@@ -57,7 +57,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     xtool_mod.setattr("__doc__", MODULE_DOC)?;
     xtool_mod
         .add("__all__", vec!["XtoolSession", "query_machine_type", "m2"])?;
-    xtool_mod.add_class::<session::XtoolSession>()?;
+    xtool_mod.add_class::<session::PyXtoolSession>()?;
     xtool_mod
         .add_function(wrap_pyfunction!(query_machine_type, &xtool_mod)?)?;
     m2::register(&xtool_mod)?;

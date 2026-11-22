@@ -17,7 +17,7 @@ use crate::python::events::PyEvents;
 // the smoothie and marlin bindings reuse them.
 use crate::python::grbl::session::{get_f64, get_i64, get_str, parse_dialect};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::session::{XtoolConfig, XtoolCore, DEFAULT_MOVE_SPEED};
+use crate::xtool::session::{XtoolConfig, XtoolSession, DEFAULT_MOVE_SPEED};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
     let host = dict
@@ -61,27 +61,27 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.xtool")]
-pub struct XtoolSession {
-    core: Arc<XtoolCore>,
+#[pyclass(name = "XtoolSession", module = "raydriver.xtool")]
+pub struct PyXtoolSession {
+    core: Arc<XtoolSession>,
     events: Arc<PyEvents>,
 }
 
-impl XtoolSession {
+impl PyXtoolSession {
     fn build(
         config: XtoolConfig,
         dialect: Dialect,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = XtoolCore::new(config, dialect, events.clone());
+        let core = XtoolSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl XtoolSession {
+impl PyXtoolSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(

@@ -184,7 +184,7 @@ impl StreamHandle {
 
 /// Shared session state, owned jointly by the public handle and the
 /// background tasks.
-pub struct SessionCore {
+pub struct GrblSession {
     config: SessionConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn SessionEvents>,
@@ -214,7 +214,7 @@ pub struct SessionCore {
     cmd_lock: tokio::sync::Mutex<()>,
 }
 
-impl SessionCore {
+impl GrblSession {
     pub fn new(
         config: SessionConfig,
         dialect: Dialect,
@@ -1599,7 +1599,7 @@ impl SessionCore {
 /// The session's [`Session`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for SessionCore {
+impl Session for GrblSession {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
