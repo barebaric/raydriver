@@ -37,6 +37,9 @@ pub enum SessionEvent {
         message: Option<String>,
     },
     JobFinished {},
+    JobError {
+        message: String,
+    },
     ProbeStatusChanged {
         message: String,
     },

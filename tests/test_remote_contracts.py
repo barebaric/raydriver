@@ -1,0 +1,209 @@
+"""The remote RPC surface must match every hosted session class.
+
+The daemon validates method names from the protocol registry, then
+calls the Python session method with the client's arguments.  A
+signature mismatch therefore fails inside the daemon, not at the
+client.  These tests pin the uniform argument names and exercise two
+representative protocols end to end.
+"""
+
+import asyncio
+import inspect
+
+import pytest
+from conftest import DEFAULT_DIALECT, EventRecorder
+
+from raydriver.core import SessionEvent
+from raydriver.core.transport import MockTransport
+from raydriver.core.types import DeviceState
+from raydriver.grbl import GrblSession
+from raydriver.grbl.simple import GrblSimpleSession
+from raydriver.marlin import MarlinSession
+from raydriver.octoprint import OctoPrintSession
+from raydriver.protocols import PROTOCOLS
+from raydriver.remote.client import create_session
+from raydriver.remote.daemon import Daemon, DaemonConfig
+from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie.emulator import SmoothieEmulator
+
+SESSIONS = {
+    "grbl": GrblSession,
+    "grbl_simple": GrblSimpleSession,
+    "esp3d": GrblSession,
+    "smoothie": SmoothieSession,
+    "marlin": MarlinSession,
+    "octoprint": OctoPrintSession,
+}
+
+REMOTE_TIMINGS = {
+    "handshake_timeout": 2.0,
+    "handshake_poll_interval": 0.02,
+    "status_poll_interval": 0.05,
+    "reconnect_delay": 0.2,
+    "command_timeout": 2.0,
+}
+
+
+@pytest.mark.parametrize("protocol", sorted(PROTOCOLS))
+def test_hosted_sessions_accept_remote_arguments(protocol):
+    """Every hostable session accepts the arguments the proxy sends."""
+    cls = SESSIONS[protocol]
+    home = inspect.signature(cls.home)
+    assert "active_wcs" in home.parameters
+    run = inspect.signature(cls.run)
+    assert "op_estimates" in run.parameters
+    execute = inspect.signature(cls.execute_command)
+    assert "command" in execute.parameters
+
+
+async def test_remote_home_smoothie():
+    """home(active_wcs) succeeds against a daemon-hosted Smoothie."""
+    mock = MockTransport()
+    emulator = SmoothieEmulator(mock, speed_factor=50)
+    device_task = asyncio.ensure_future(emulator.run())
+
+    def factory(name, config, dialect, callback):
+        return SmoothieSession.with_transport(
+            mock,
+            config={**REMOTE_TIMINGS, **(config or {})},
+            dialect={**DEFAULT_DIALECT, **(dialect or {})},
+            event_callback=callback,
+        )
+
+    daemon = Daemon(
+        DaemonConfig(
+            port=0,
+            sessions=[
+                {"protocol": "smoothie", "config": {"port": "/dev/null"}}
+            ],
+        ),
+        session_factory=factory,
+    )
+    server = await daemon.start()
+    port = server.sockets[0].getsockname()[1]
+    events = EventRecorder()
+    session = create_session(
+        "smoothie",
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        DEFAULT_DIALECT,
+        events.callback,
+    )
+    try:
+        await asyncio.wait_for(session.connect(), timeout=5)
+        await events.wait_for(
+            SessionEvent.ConnectionStatusChanged,
+            lambda event: event.status == "CONNECTED",
+            timeout=5,
+        )
+        await asyncio.wait_for(session.home(None, "G54"), timeout=5)
+    finally:
+        try:
+            await asyncio.wait_for(session.disconnect(), timeout=5)
+        except Exception:
+            pass
+        await daemon.stop()
+        device_task.cancel()
+        try:
+            await device_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def test_remote_run_reports_job_errors():
+    """A hosted run() failure reaches the caller as an error."""
+
+    class FailingJobSession:
+        state = DeviceState()
+        job_running = False
+        resource_uri = None
+        buffer_count = 0
+        rx_buffer_size = 0
+        pending_commands = []
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+        async def run(
+            self,
+            gcode,
+            op_line_map=None,
+            op_estimates=None,
+            progress_callback=None,
+        ):
+            raise RuntimeError("job exploded")
+
+    def factory(name, config, dialect, callback):
+        return FailingJobSession()
+
+    daemon = Daemon(DaemonConfig(port=0), session_factory=factory)
+    server = await daemon.start()
+    port = server.sockets[0].getsockname()[1]
+    events = EventRecorder()
+    session = create_session(
+        "grbl",
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        DEFAULT_DIALECT,
+        events.callback,
+    )
+    try:
+        with pytest.raises(ConnectionError) as excinfo:
+            await asyncio.wait_for(session.run("G1 X1\n", {0: 0}), timeout=5)
+        assert "job exploded" in str(excinfo.value)
+        await events.wait_for(
+            SessionEvent.JobError,
+            lambda event: "job exploded" in event.message,
+            timeout=5,
+        )
+    finally:
+        try:
+            await asyncio.wait_for(session.aclose(), timeout=5)
+        except Exception:
+            pass
+        await daemon.stop()
+
+
+async def test_daemon_reports_synchronous_session_errors():
+    """A method raising before returning an awaitable is an RPC error."""
+
+    class ExplodingSession:
+        state = DeviceState()
+        job_running = False
+        resource_uri = None
+        buffer_count = 0
+        rx_buffer_size = 0
+        pending_commands = []
+
+        def home(self, axes=None, active_wcs="G54"):
+            raise TypeError("boom from session")
+
+        async def connect(self):
+            pass
+
+        async def disconnect(self):
+            pass
+
+    def factory(name, config, dialect, callback):
+        return ExplodingSession()
+
+    daemon = Daemon(DaemonConfig(port=0), session_factory=factory)
+    server = await daemon.start()
+    port = server.sockets[0].getsockname()[1]
+    session = create_session(
+        "grbl",
+        {"remote_host": "127.0.0.1", "remote_port": port},
+        DEFAULT_DIALECT,
+        None,
+    )
+    try:
+        with pytest.raises(ConnectionError) as excinfo:
+            await asyncio.wait_for(session.home(None, "G54"), timeout=5)
+        assert "boom from session" in str(excinfo.value)
+    finally:
+        try:
+            await asyncio.wait_for(session.aclose(), timeout=5)
+        except Exception:
+            pass
+        await daemon.stop()

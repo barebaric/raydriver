@@ -182,12 +182,12 @@ impl OctoPrintSession {
         &self,
         py: Python<'py>,
         command: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
+    ) -> PyResult<PyAwait<'py, Vec<String>>> {
         let core = self.core.clone();
-        spawn_future(py, async move {
-            core.execute_command(&command).await?;
-            Ok(())
-        })
+        spawn_future(
+            py,
+            async move { Ok(core.execute_command(&command).await?) },
+        )
     }
 
     /// Upload a G-code string, start it and await the server's
@@ -234,15 +234,16 @@ impl OctoPrintSession {
     }
 
     /// Home all axes (`axes` is None) or the named axes.
-    #[pyo3(signature = (axes=None))]
+    #[pyo3(signature = (axes=None, active_wcs = String::from("G54")))]
     fn home<'py>(
         &self,
         py: Python<'py>,
         axes: Option<Vec<String>>,
+        active_wcs: String,
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            core.home(axes.as_deref()).await?;
+            core.home(axes.as_deref(), &active_wcs).await?;
             Ok(())
         })
     }

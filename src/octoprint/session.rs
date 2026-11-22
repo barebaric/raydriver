@@ -762,22 +762,23 @@ impl OctoPrintCore {
     pub async fn execute_command(
         &self,
         command: &str,
-    ) -> Result<(), SessionError> {
-        self.printer_command(json!({"command": command})).await
+    ) -> Result<Vec<String>, SessionError> {
+        self.printer_command(json!({"command": command})).await?;
+        // OctoPrint reports no per-line response text.
+        Ok(Vec::new())
     }
 
     pub async fn execute_interactive_command(
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        self.execute_command(command).await?;
-        // OctoPrint reports no per-line response text.
-        Ok(Vec::new())
+        self.execute_command(command).await
     }
 
     pub async fn home(
         &self,
         axes: Option<&[String]>,
+        _active_wcs: &str,
     ) -> Result<(), SessionError> {
         let axis_list: Vec<String> = axes
             .map(|names| names.iter().map(|name| name.to_lowercase()).collect())
@@ -838,7 +839,9 @@ impl OctoPrintCore {
         &self,
         tool_number: i64,
     ) -> Result<(), SessionError> {
-        self.execute_command(&format!("T{tool_number}")).await
+        self.execute_command(&format!("T{tool_number}"))
+            .await
+            .map(|_| ())
     }
 
     pub async fn set_power(
@@ -850,7 +853,7 @@ impl OctoPrintCore {
             Some(p) => format!("M3 S{}", p.round()),
             None => "M5".to_string(),
         };
-        self.execute_command(&command).await
+        self.execute_command(&command).await.map(|_| ())
     }
 
     pub async fn set_focus_power(
@@ -891,7 +894,7 @@ impl OctoPrintCore {
         if let Some(z) = z {
             command.push_str(&format!(" Z{z:.3}"));
         }
-        self.execute_command(&command).await
+        self.execute_command(&command).await.map(|_| ())
     }
 
     pub async fn read_wcs_offsets(

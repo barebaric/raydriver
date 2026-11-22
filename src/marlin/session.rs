@@ -622,7 +622,12 @@ impl MarlinCore {
         self.events.state_changed(&state);
     }
 
-    pub async fn run(&self, gcode: &str, op_map: HashMap<usize, i64>) {
+    pub async fn run(
+        &self,
+        gcode: &str,
+        op_map: HashMap<usize, i64>,
+        _op_estimates: Vec<f64>,
+    ) {
         self.start_job();
         let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
         let total = lines.len();
@@ -691,7 +696,8 @@ impl MarlinCore {
         if lines.is_empty() {
             return;
         }
-        self.run(&lines.join("\n"), HashMap::new()).await;
+        self.run(&lines.join("\n"), HashMap::new(), Vec::new())
+            .await;
     }
 
     // ---------------------------------------------------------------
@@ -755,6 +761,7 @@ impl MarlinCore {
     pub async fn home(
         &self,
         axes: Option<Vec<String>>,
+        _active_wcs: &str,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
         match axes {

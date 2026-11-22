@@ -538,8 +538,14 @@ impl RemoteSession {
         if event.get("kind").and_then(Value::as_str)
             == Some(protocol::KIND_JOB_ERROR)
         {
+            let message = event
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             self.job_running.store(false, Ordering::SeqCst);
-            self.finish_job(Ok(()));
+            self.finish_job(Err(message.clone()));
+            self.emit(WireEvent::JobError { message });
             return;
         }
         if event.get("kind").and_then(Value::as_str)

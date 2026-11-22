@@ -201,7 +201,8 @@ impl GrblSimpleSession {
     ///
     /// `op_line_map` maps G-code line indices to op indices for
     /// progress reporting.
-    #[pyo3(signature = (gcode, op_line_map=None, progress_callback=None))]
+    #[pyo3(signature = (gcode, op_line_map=None, progress_callback=None, *,
+                        op_estimates=None))]
     fn run<'py>(
         &self,
         py: Python<'py>,
@@ -209,16 +210,18 @@ impl GrblSimpleSession {
         op_line_map: Option<HashMap<usize, i64>>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
-            imports = ("typing", "collections.abc")
+            imports = ("builtins", "collections.abc")
         ))]
         progress_callback: Option<Py<PyAny>>,
+        op_estimates: Option<Vec<f64>>,
     ) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
+        let estimates = op_estimates.unwrap_or_default();
         spawn_future(py, async move {
             events.set_progress_callback(progress_callback);
-            core.run(&gcode, op_map).await;
+            core.run(&gcode, op_map, estimates).await;
             Ok(())
         })
     }
