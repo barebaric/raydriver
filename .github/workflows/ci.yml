@@ -80,7 +80,7 @@ jobs:
 
       - name: Install test dependencies
         shell: bash
-        run: pip install pytest pytest-asyncio pytest-timeout
+        run: pip install pytest pytest-asyncio pytest-timeout zeroconf
 
       - name: Run tests
         shell: bash
