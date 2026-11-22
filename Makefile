@@ -32,7 +32,8 @@ lint: lint-rust lint-python
 
 lint-rust:
 	cargo fmt --check
-	cargo clippy -- -D warnings
+	cargo clippy --features python -- -D warnings
+	cargo clippy --no-default-features -- -D warnings
 
 lint-python:
 	ruff check tests/ python/ tools/

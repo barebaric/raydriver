@@ -26,15 +26,16 @@
 
 ## Testing
 
-All tests are Python-based, under `tests/`, and run against
-`raydriver.grbl.emulator.GrblEmulator` — a GRBL 1.1h *firmware emulator*
-(not a mock): it models the character-counting RX buffer, the
-15-block planner with deferred acknowledgements, realtime command
+All tests are Python-based, under `tests/`, and run against real
+firmware *emulators* (not mocks) in `python/raydriver/*/emulator.py`:
+GRBL, Smoothie, Marlin, ESP3D, OctoPrint, xTool and M2.  The GRBL
+emulator models the character-counting RX buffer, the 15-block
+planner with deferred acknowledgements, realtime command
 interception, modal G-code state, feed-rate-timed motion, alarms,
-homing, probing and the `$` system commands.  Device-side code
-consumes session writes via `MockTransport.take_new_sent()` (a
-monotonic cursor — never index into `sent()`, which tests may clear
-at any time).
+homing, probing and the `$` system commands.  Network tests drive
+real loopback daemons and sockets.  Device-side code consumes session
+writes via `MockTransport.take_new_sent()` (a monotonic cursor —
+never index into `sent()`, which tests may clear at any time).
 
 ## Rules
 
@@ -56,22 +57,34 @@ at any time).
 The crate is split into layers that depend only downward:
 
 ```
-core (transports, value types, dialects, session primitives)
-  →  grbl | smoothie | marlin (protocol sessions)
+core (transports, value types, dialects, session primitives, wire)
+  →  grbl | smoothie | marlin | esp3d | octoprint | xtool
+  →  protocols (registry composition root)
+  →  remote daemon/client, discovery services
   →  python (PyO3 bindings)
 ```
 
 - `src/core/` is protocol-neutral and pure Rust: byte transports,
-  device value types, dialect command-template formatting, and the
-  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives.
-- `src/grbl/`, `src/smoothie/`, `src/marlin/` hold the protocol
-  sessions; they must not depend on PyO3 or any Python types. They
-  may use `src/core/` freely. Cross-protocol imports between
+  device value types, dialect command-template formatting, G-code
+  text helpers, ping-pong command tracking, the
+  `SessionEvent`/`SessionError`/`AsyncEvent` session primitives, and
+  the shared control-stream wire framing. It must not name a
+  protocol.
+- `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
+  `src/octoprint/` and `src/xtool/` hold the protocol sessions and
+  transports; they must not depend on PyO3 or any Python types.
+  They may use `src/core/` freely. Cross-protocol imports between
   protocol modules need an explicit justification in the importing
   module's docs (e.g. the Smoothie session reuses the GRBL status
-  parser because Smoothie emits Grbl-style reports).
-- `src/python/` contains all PyO3 bindings and may use `src/core/`
-  and the protocol modules freely, never the other way around.
+  and error parsers because Smoothie emits Grbl-style reports).
+- `src/protocols/` is the single composition point: it assembles
+  each protocol's `ProtocolDescriptor` into the `Registry`. The
+  daemon and the Python bindings receive that registry; they do not
+  hardcode protocol names.
+- `src/python/` contains all PyO3 bindings and may use `src/core/`,
+  the protocol modules and the registry freely, never the other way
+  around. The discovery bindings also host the Python-driver facing
+  discovery engine, because driver declarations are Python objects.
 
 ## Export Policy: Explicit Paths
 
@@ -96,7 +109,13 @@ def __getattr__(name):
 
 Rust submodules registered with `add_submodule` are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
-name is the package.
+name is the package. Exceptions:
+
+- `raydriver.config`, `raydriver.protocols` and the nested
+  `raydriver.core.discovery.*` modules are stub-only native modules
+  with no Python package on disk.
+- `raydriver.esp3d` is a thin alias: ESP3D is the GRBL session over
+  the ESP3D transport, so `Esp3dSession` is `GrblSession`.
 
 ## Python/Rust Boundary Rules
 
@@ -107,8 +126,11 @@ name is the package.
   the tokio side via `call_soon_threadsafe` on the caller's event
   loop. Never block the loop inside a binding.
 - Events emitted by the session are delivered to the Python
-  `event_callback(name: str, payload)` on the event loop thread.
-  Bindings must not call the callback from a foreign thread directly.
+  `event_callback(SessionEvent)` on the event loop thread. Bindings
+  must not call the callback from a foreign thread directly. Core
+  sessions build one `core::session::SessionEvent`; the bindings
+  convert it to the Python `SessionEvent` enum and the remote wire
+  event.
 
 ## Dialects
 
