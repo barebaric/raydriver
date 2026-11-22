@@ -149,7 +149,7 @@ impl Esp3dTransport {
     }
 
     fn upload_body(&self, gcode: &str) -> (String, Vec<u8>) {
-        let boundary = format!("raydriver{}", std::process::id());
+        let boundary = crate::core::http::multipart_boundary();
         let mut body = Vec::with_capacity(gcode.len() + 512);
         if self.config.protocol != ProtocolVariant::Esp3d {
             push_field(&mut body, &boundary, "path", b"/", false);
@@ -323,7 +323,8 @@ fn push_field(
 }
 
 fn url_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len());
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut out = String::with_capacity(data.len() * 3);
     for byte in data {
         match byte {
             b'A'..=b'Z'
@@ -333,7 +334,11 @@ fn url_encode(data: &[u8]) -> String {
             | b'.'
             | b'_'
             | b'~' => out.push(char::from(*byte)),
-            _ => out.push_str(&format!("%{byte:02X}")),
+            _ => {
+                out.push('%');
+                out.push(HEX[(byte >> 4) as usize] as char);
+                out.push(HEX[(byte & 0x0F) as usize] as char);
+            }
         }
     }
     out

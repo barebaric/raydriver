@@ -14,13 +14,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use async_trait::async_trait;
+
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
 use crate::core::http;
-use crate::core::session::{SessionError, SessionEvents};
+use crate::core::session::{CancelMode, Session, SessionError, SessionEvents};
 use crate::core::types::{
-    DeviceError, DeviceState, DeviceStatus, TransportStatus,
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 use crate::core::ws::WsClient;
 
@@ -108,7 +110,7 @@ struct JobState {
 }
 
 /// The OctoPrint session core.
-pub struct OctoPrintCore {
+pub struct OctoPrintSession {
     config: OctoPrintConfig,
     events: Arc<dyn SessionEvents>,
     state: Mutex<DeviceState>,
@@ -123,7 +125,30 @@ pub struct OctoPrintCore {
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl OctoPrintCore {
+impl OctoPrintSession {
+    pub async fn jog_absolute(
+        &self,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+        speed: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let mut params = json!({
+            "command": "jog",
+            "x": x,
+            "y": y,
+            "absolute": true,
+        });
+        if let Some(z) = z {
+            params["z"] = json!(z);
+        }
+        if let Some(speed) = speed {
+            params["speed"] = json!(speed);
+        }
+        self.api_request("POST", "/api/printer/printhead", Some(params))
+            .await?;
+        Ok(())
+    }
     pub fn new(
         config: OctoPrintConfig,
         events: Arc<dyn SessionEvents>,
@@ -147,18 +172,6 @@ impl OctoPrintCore {
     // ---------------------------------------------------------------
     // Accessors
     // ---------------------------------------------------------------
-
-    pub fn state(&self) -> DeviceState {
-        self.state.lock().unwrap().clone()
-    }
-
-    pub fn resource_uri(&self) -> Option<String> {
-        Some(format!("tcp://{}:{}", self.config.host, self.config.port))
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        self.job_running.load(Ordering::SeqCst)
-    }
 
     fn api_key(&self) -> String {
         self.config.api_key.clone()
@@ -302,36 +315,6 @@ impl OctoPrintCore {
     // ---------------------------------------------------------------
     // Connect / disconnect
     // ---------------------------------------------------------------
-
-    pub async fn connect(self: &Arc<Self>) {
-        self.abort_background_tasks().await;
-        self.keep_running.store(true, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        let core = self.clone();
-        let task = tokio::spawn(async move { core.connection_loop().await });
-        *self.connection_task.lock().unwrap() = Some(task);
-    }
-
-    pub async fn cleanup(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.abort_background_tasks().await;
-        self.update_connection_status(TransportStatus::Disconnected, None);
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop`.
-    pub fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        let task = self.connection_task.lock().unwrap().take();
-        if let Some(task) = task {
-            task.abort();
-        }
-        let tasks: Vec<JoinHandle<()>> =
-            std::mem::take(&mut *self.background_tasks.lock().unwrap());
-        for task in tasks {
-            task.abort();
-        }
-    }
 
     async fn abort_background_tasks(&self) {
         let task = self.connection_task.lock().unwrap().take();
@@ -662,11 +645,162 @@ impl OctoPrintCore {
         Ok(())
     }
 
-    pub async fn run(
-        self: &Arc<Self>,
+    // ---------------------------------------------------------------
+    // Motion and control
+    // ---------------------------------------------------------------
+
+    async fn printer_command(
+        &self,
+        command: Value,
+    ) -> Result<(), SessionError> {
+        self.api_request("POST", "/api/printer/command", Some(command))
+            .await?;
+        Ok(())
+    }
+}
+
+/// Extracts the JSON payloads of a SockJS data frame: "o"/"h" are
+/// protocol frames (no payload), "a[...]" wraps an array of
+/// JSON-string messages, "c[...]" closes the session.
+fn sockjs_payloads(frame: &str) -> Vec<Value> {
+    if frame == "o" || frame == "h" {
+        return Vec::new();
+    }
+    if frame.starts_with("c[") {
+        log::info!("SockJS close frame received");
+        return Vec::new();
+    }
+    let Some(messages_json) = frame.strip_prefix("a[") else {
+        return Vec::new();
+    };
+    let Ok(messages) =
+        serde_json::from_str::<Vec<Value>>(&format!("[{messages_json}"))
+    else {
+        return Vec::new();
+    };
+    messages
+        .into_iter()
+        .filter_map(|raw_msg| match raw_msg {
+            Value::String(text) => serde_json::from_str(&text).ok(),
+            value => Some(value),
+        })
+        .collect()
+}
+
+/// The session's [`Session`] impl: the single, real implementation
+/// of every operation the protocol supports.
+#[async_trait]
+impl Session for OctoPrintSession {
+    fn state(&self) -> DeviceState {
+        self.state.lock().unwrap().clone()
+    }
+    fn resource_uri(&self) -> Option<String> {
+        Some(format!("tcp://{}:{}", self.config.host, self.config.port))
+    }
+    fn is_job_running(&self) -> bool {
+        self.job_running.load(Ordering::SeqCst)
+    }
+    fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        let task = self.connection_task.lock().unwrap().take();
+        if let Some(task) = task {
+            task.abort();
+        }
+        let tasks: Vec<JoinHandle<()>> =
+            std::mem::take(&mut *self.background_tasks.lock().unwrap());
+        for task in tasks {
+            task.abort();
+        }
+    }
+    async fn cleanup(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        self.abort_background_tasks().await;
+        self.update_connection_status(TransportStatus::Disconnected, None);
+    }
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        let action = if hold { "pause" } else { "resume" };
+        self.api_request(
+            "POST",
+            "/api/job",
+            Some(json!({"command": "pause", "action": action})),
+        )
+        .await?;
+        Ok(())
+    }
+    async fn clear_alarm(&self) -> Result<(), SessionError> {
+        self.execute_command("M999").await?;
+        self.set_error(None);
+        self.set_status(DeviceStatus::Idle);
+        Ok(())
+    }
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let p_map: HashMap<&str, i64> = [
+            ("G54", 1),
+            ("G55", 2),
+            ("G56", 3),
+            ("G57", 4),
+            ("G58", 5),
+            ("G59", 6),
+        ]
+        .into_iter()
+        .collect();
+        let p_num = p_map.get(wcs_slot).copied().ok_or_else(|| {
+            SessionError::Device(format!("invalid WCS slot: {wcs_slot}"))
+        })?;
+        let mut command = format!("G10 L2 P{p_num} X{x:.3} Y{y:.3}");
+        if let Some(z) = z {
+            command.push_str(&format!(" Z{z:.3}"));
+        }
+        self.execute_command(&command).await.map(|_| ())
+    }
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+        // OctoPrint exposes no work coordinate offsets.
+        Ok(HashMap::new())
+    }
+    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+        // The server API exposes no G-code parser state.
+        Ok(None)
+    }
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        // OctoPrint does not expose firmware settings.
+        Ok(Vec::new())
+    }
+    async fn write_setting(
+        &self,
+        _key: &str,
+        _value: &str,
+    ) -> Result<(), SessionError> {
+        Err(SessionError::Unsupported(
+        "OctoPrint does not support writing device firmware              settings through its API"
+            .to_string(),
+    ))
+    }
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        self.abort_background_tasks().await;
+        self.keep_running.store(true, Ordering::SeqCst);
+        self.job_running.store(false, Ordering::SeqCst);
+        let core = self.clone();
+        let task = tokio::spawn(async move { core.connection_loop().await });
+        *self.connection_task.lock().unwrap() = Some(task);
+
+        Ok(())
+    }
+
+    async fn run(
+        self: Arc<Self>,
         gcode: &str,
-        op_map: HashMap<usize, i64>,
-        _op_estimates: Vec<f64>,
+        op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
     ) -> Result<(), SessionError> {
         // No granular progress exists on this protocol; report
         // every op in the line map as done once the job starts.
@@ -701,8 +835,8 @@ impl OctoPrintCore {
         }
     }
 
-    pub async fn run_raw(
-        &self,
+    async fn run_raw(
+        self: Arc<Self>,
         machine_code: &str,
     ) -> Result<(), SessionError> {
         let commands: Vec<String> = machine_code
@@ -724,7 +858,7 @@ impl OctoPrintCore {
         Ok(())
     }
 
-    pub async fn cancel(&self, _emergency: bool) -> Result<(), SessionError> {
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
         self.api_request(
             "POST",
             "/api/job",
@@ -735,49 +869,36 @@ impl OctoPrintCore {
         Ok(())
     }
 
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        let action = if hold { "pause" } else { "resume" };
-        self.api_request(
-            "POST",
-            "/api/job",
-            Some(json!({"command": "pause", "action": action})),
-        )
-        .await?;
-        Ok(())
-    }
-
-    // ---------------------------------------------------------------
-    // Motion and control
-    // ---------------------------------------------------------------
-
-    async fn printer_command(
-        &self,
-        command: Value,
-    ) -> Result<(), SessionError> {
-        self.api_request("POST", "/api/printer/command", Some(command))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn execute_command(
+    async fn execute_interactive_command(
         &self,
         command: &str,
     ) -> Result<Vec<String>, SessionError> {
-        self.printer_command(json!({"command": command})).await?;
+        self.execute_command(command).await?;
         // OctoPrint reports no per-line response text.
         Ok(Vec::new())
     }
 
-    pub async fn execute_interactive_command(
+    async fn jog(
         &self,
-        command: &str,
-    ) -> Result<Vec<String>, SessionError> {
-        self.execute_command(command).await
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        let speed = Some(speed);
+        let mut params = json!({"command": "jog"});
+        if let Some(speed) = speed {
+            params["speed"] = json!(speed);
+        }
+        for (axis, distance) in deltas {
+            params[axis.as_str()] = json!(distance);
+        }
+        self.api_request("POST", "/api/printer/printhead", Some(params))
+            .await?;
+        Ok(())
     }
 
-    pub async fn home(
+    async fn home(
         &self,
-        axes: Option<&[String]>,
+        axes: Option<Vec<String>>,
         _active_wcs: &str,
     ) -> Result<(), SessionError> {
         let axis_list: Vec<String> = axes
@@ -794,60 +915,30 @@ impl OctoPrintCore {
         Ok(())
     }
 
-    pub async fn move_to(
+    async fn move_to(
         &self,
+        speed: f64,
         x: f64,
         y: f64,
         z: Option<f64>,
-        speed: Option<f64>,
     ) -> Result<(), SessionError> {
-        let mut params = json!({
-            "command": "jog",
-            "x": x,
-            "y": y,
-            "absolute": true,
-        });
+        let mut params =
+            json!({"command": "jog", "x": x, "y": y, "absolute": true});
         if let Some(z) = z {
             params["z"] = json!(z);
         }
-        if let Some(speed) = speed {
-            params["speed"] = json!(speed);
-        }
+        params["speed"] = json!(speed);
         self.api_request("POST", "/api/printer/printhead", Some(params))
             .await?;
         Ok(())
     }
 
-    pub async fn jog(
-        &self,
-        speed: Option<f64>,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        let mut params = json!({"command": "jog"});
-        if let Some(speed) = speed {
-            params["speed"] = json!(speed);
-        }
-        for (axis, distance) in deltas {
-            params[axis.as_str()] = json!(distance);
-        }
-        self.api_request("POST", "/api/printer/printhead", Some(params))
-            .await?;
-        Ok(())
-    }
-
-    pub async fn select_tool(
-        &self,
-        tool_number: i64,
-    ) -> Result<(), SessionError> {
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
         self.execute_command(&format!("T{tool_number}"))
             .await
             .map(|_| ())
     }
-
-    pub async fn set_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
         let command = match power {
             Some(p) if p <= 0.0 => "M5".to_string(),
             Some(p) => format!("M3 S{}", p.round()),
@@ -855,68 +946,26 @@ impl OctoPrintCore {
         };
         self.execute_command(&command).await.map(|_| ())
     }
-
-    pub async fn set_focus_power(
+    async fn set_focus_power(
         &self,
         power: Option<f64>,
     ) -> Result<(), SessionError> {
         self.set_power(power).await
     }
-
-    pub async fn clear_alarm(&self) -> Result<(), SessionError> {
-        self.execute_command("M999").await?;
-        self.set_error(None);
-        self.set_status(DeviceStatus::Idle);
-        Ok(())
-    }
-
-    pub async fn set_wcs_offset(
+    async fn detect_unit_system(
         &self,
-        wcs_slot: &str,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let p_map: HashMap<&str, i64> = [
-            ("G54", 1),
-            ("G55", 2),
-            ("G56", 3),
-            ("G57", 4),
-            ("G58", 5),
-            ("G59", 6),
-        ]
-        .into_iter()
-        .collect();
-        let p_num = p_map.get(wcs_slot).copied().ok_or_else(|| {
-            SessionError::Device(format!("invalid WCS slot: {wcs_slot}"))
-        })?;
-        let mut command = format!("G10 L2 P{p_num} X{x:.3} Y{y:.3}");
-        if let Some(z) = z {
-            command.push_str(&format!(" Z{z:.3}"));
-        }
-        self.execute_command(&command).await.map(|_| ())
-    }
-
-    pub async fn read_wcs_offsets(
-        &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
-        // OctoPrint exposes no work coordinate offsets.
-        Ok(HashMap::new())
-    }
-
-    pub async fn read_parser_state(
-        &self,
-    ) -> Result<Option<String>, SessionError> {
-        // The server API exposes no G-code parser state.
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        // OctoPrint exposes no unit configuration; the dialect works
+        // in millimeters.
         Ok(None)
     }
 
-    pub async fn run_probe_cycle(
+    async fn run_probe_cycle(
         &self,
         axis_letter: &str,
         max_travel: f64,
         feed_rate: f64,
-    ) -> Result<Option<String>, SessionError> {
+    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
         self.events
             .probe_status(&format!("Probing {axis_letter}..."));
         self.execute_command(&format!(
@@ -931,62 +980,11 @@ impl OctoPrintCore {
         Ok(None)
     }
 
-    pub async fn read_settings(
+    async fn execute_command(
         &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
-        // OctoPrint does not expose firmware settings.
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        self.printer_command(json!({"command": command})).await?;
         Ok(Vec::new())
     }
-
-    pub async fn write_setting(
-        &self,
-        _key: &str,
-        _value: &str,
-    ) -> Result<(), SessionError> {
-        Err(SessionError::Unsupported(
-            "OctoPrint does not support writing device firmware              settings through its API"
-                .to_string(),
-        ))
-    }
-
-    pub async fn detect_unit_system(
-        &self,
-    ) -> Result<Option<String>, SessionError> {
-        // OctoPrint exposes no unit configuration; the dialect works
-        // in millimeters.
-        Ok(None)
-    }
-
-    pub fn update_dialect(&self, _dialect: crate::core::dialect::Dialect) {
-        // Commands are sent as structured JSON; no command templates
-        // are needed.
-    }
-}
-
-/// Extracts the JSON payloads of a SockJS data frame: "o"/"h" are
-/// protocol frames (no payload), "a[...]" wraps an array of
-/// JSON-string messages, "c[...]" closes the session.
-fn sockjs_payloads(frame: &str) -> Vec<Value> {
-    if frame == "o" || frame == "h" {
-        return Vec::new();
-    }
-    if frame.starts_with("c[") {
-        log::info!("SockJS close frame received");
-        return Vec::new();
-    }
-    let Some(messages_json) = frame.strip_prefix("a[") else {
-        return Vec::new();
-    };
-    let Ok(messages) =
-        serde_json::from_str::<Vec<Value>>(&format!("[{messages_json}"))
-    else {
-        return Vec::new();
-    };
-    messages
-        .into_iter()
-        .filter_map(|raw_msg| match raw_msg {
-            Value::String(text) => serde_json::from_str(&text).ok(),
-            value => Some(value),
-        })
-        .collect()
 }

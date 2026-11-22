@@ -3,67 +3,18 @@
 //! The daemon owns no protocol code: a [`SessionFactory`] creates a
 //! [`HostedSession`] for a protocol name and its JSON config. Pure
 //! Rust embedders implement these traits directly; the Python
-//! bindings adapt the existing PyO3 session objects.
+//! bindings adapt the existing PyO3 session objects.  Errors are
+//! the crate's [`SessionError`].
 
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
 
 use crate::core::remote::protocol::WireEvent;
+use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
-
-/// The class of a hosted-session failure, carried over the wire so
-/// clients can map it to their own error types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ErrorKind {
-    Timeout,
-    Connection,
-    Device,
-    Unsupported,
-    Internal,
-}
-
-impl ErrorKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Timeout => "timeout",
-            Self::Connection => "connection",
-            Self::Device => "device",
-            Self::Unsupported => "unsupported",
-            Self::Internal => "internal",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct HostedError {
-    pub kind: ErrorKind,
-    pub message: String,
-}
-
-impl HostedError {
-    pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
-        Self {
-            kind,
-            message: message.into(),
-        }
-    }
-
-    pub fn internal(message: impl Into<String>) -> Self {
-        Self::new(ErrorKind::Internal, message)
-    }
-}
-
-impl fmt::Display for HostedError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for HostedError {}
 
 /// Receives events from a hosted session in wire form.
 pub trait RemoteEventSink: Send + Sync {
@@ -82,8 +33,8 @@ pub trait HostedSession: Send + Sync {
     fn pending_commands(&self) -> Vec<String>;
     fn set_event_sink(&self, sink: Arc<dyn RemoteEventSink>);
 
-    async fn connect(&self) -> Result<(), HostedError>;
-    async fn disconnect(&self) -> Result<(), HostedError>;
+    async fn connect(&self) -> Result<(), SessionError>;
+    async fn disconnect(&self) -> Result<(), SessionError>;
 
     /// Execute one non-job session method. Arguments arrive as a
     /// JSON object; the result is the method's return value.
@@ -91,7 +42,7 @@ pub trait HostedSession: Send + Sync {
         &self,
         method: &str,
         args: Value,
-    ) -> Result<Value, HostedError>;
+    ) -> Result<Value, SessionError>;
 
     /// Stream a job. Progress and job errors are emitted through the
     /// event sink; the daemon marks the job finished when this
@@ -101,7 +52,7 @@ pub trait HostedSession: Send + Sync {
         gcode: String,
         op_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
-    ) -> Result<(), HostedError>;
+    ) -> Result<(), SessionError>;
 }
 
 /// Creates sessions for the daemon.
@@ -112,5 +63,5 @@ pub trait SessionFactory: Send + Sync {
         config: Value,
         dialect: Value,
         sink: Arc<dyn RemoteEventSink>,
-    ) -> Result<Arc<dyn HostedSession>, String>;
+    ) -> Result<Arc<dyn HostedSession>, SessionError>;
 }

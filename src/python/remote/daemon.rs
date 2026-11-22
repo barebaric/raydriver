@@ -259,9 +259,11 @@ impl Daemon {
             .unwrap_or_else(|| Arc::new(Mutex::new(CoreConfig::default())));
         let loop_ = running_loop(py)?;
         let factory = Arc::new(PySessionFactory::new(session_factory, loop_));
-        let registry = Arc::new(crate::protocols::registry().clone());
-        let inner =
-            Arc::new(CoreDaemon::new(config.clone(), factory, registry));
+        let inner = Arc::new(CoreDaemon::new(
+            config.clone(),
+            factory,
+            crate::python::protocols::protocol_registry(),
+        ));
         Ok(Self { inner, config })
     }
 

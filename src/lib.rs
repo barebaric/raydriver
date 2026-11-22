@@ -18,13 +18,18 @@
 //! The crate is layered: `core` and the protocol modules are pure
 //! Rust and must not depend on PyO3; the optional `python` feature
 //! provides bindings that mirror this structure.
+//!
+//! Build features slice out what a wasm host physically cannot do
+//! (`mdns`, the remote daemon listener, the remote client, OS serial
+//! ports, the tungstenite-based M2 session); everything else —
+//! including the HTTP/WS device sessions — compiles and runs on
+//! wasm against embedder-provided streams (see docs/wasm.md).
 
 pub mod core;
 pub mod esp3d;
 pub mod grbl;
 pub mod marlin;
 pub mod octoprint;
-pub mod protocols;
 pub mod smoothie;
 pub mod xtool;
 

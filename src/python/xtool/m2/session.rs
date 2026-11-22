@@ -1,14 +1,19 @@
+//! The `raydriver.xtool.m2.session` submodule: the `M2Session`
+//! pyclass mirroring the Rust `M2Core` surface (config parsing,
+//! asyncio futures, event marshaling).
+
 use std::sync::Arc;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
+use crate::core::session::{CancelMode, Session};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::m2::session::{M2Config, M2Core};
+use crate::xtool::m2::session::{M2Config, M2Session};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
     let host = dict
@@ -44,23 +49,23 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(module = "raydriver.xtool.m2")]
-pub struct M2Session {
-    core: Arc<M2Core>,
+#[pyclass(name = "M2Session", module = "raydriver.xtool.m2")]
+pub struct PyM2Session {
+    core: Arc<M2Session>,
     events: Arc<PyEvents>,
 }
 
-impl M2Session {
+impl PyM2Session {
     fn build(config: M2Config, event_callback: Option<Py<PyAny>>) -> Self {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = M2Core::new(config, events.clone());
+        let core = M2Session::new(config, events.clone());
         Self { core, events }
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl M2Session {
+impl PyM2Session {
     #[new]
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
@@ -80,28 +85,6 @@ impl M2Session {
         let config = crate::python::config::config_dict(config.as_ref())?;
         Ok(Self::build(build_config(config.as_ref())?, event_callback))
     }
-
-    /// Connect and start monitoring the M2.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        self.events.capture_loop(py)?;
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.connect().await;
-            Ok(())
-        })
-    }
-
-    /// Stop monitoring and close the connection.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        spawn_future(py, async move {
-            core.disconnect().await;
-            events.quiesce();
-            Ok(())
-        })
-    }
-
     /// Start a job already staged on the device.
     fn start<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         let core = self.core.clone();
@@ -110,72 +93,6 @@ impl M2Session {
             Ok(())
         })
     }
-
-    #[pyo3(signature = (hold=true))]
-    /// Pause the current job, or resume it when `hold` is false.
-    fn set_hold<'py>(
-        &self,
-        py: Python<'py>,
-        hold: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_hold(hold).await?;
-            Ok(())
-        })
-    }
-
-    /// Cancel the current job.
-    fn cancel<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.cancel().await?;
-            Ok(())
-        })
-    }
-
-    /// Home the laser head.
-    fn home<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.home().await?;
-            Ok(())
-        })
-    }
-
-    #[pyo3(signature = (x, y, speed=18000.0))]
-    /// Move to an absolute XY coordinate in millimeters.
-    fn move_to<'py>(
-        &self,
-        py: Python<'py>,
-        x: f64,
-        y: f64,
-        speed: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.move_to(x, y, speed).await?;
-            Ok(())
-        })
-    }
-
-    #[pyo3(signature = (dx=0.0, dy=0.0, dz=0.0, speed=18000.0))]
-    /// Move by relative XYZ deltas in millimeters.
-    fn jog<'py>(
-        &self,
-        py: Python<'py>,
-        dx: f64,
-        dy: f64,
-        dz: f64,
-        speed: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.jog(dx, dy, dz, speed).await?;
-            Ok(())
-        })
-    }
-
     #[getter]
     /// Current snapshot of the machine state.
     fn state(&self) -> DeviceState {
@@ -203,9 +120,13 @@ impl M2Session {
     }
 }
 
-impl Drop for M2Session {
+impl Drop for PyM2Session {
     fn drop(&mut self) {
         self.events.close();
         self.core.abort_background_tasks_now();
     }
 }
+
+use crate::python::session_api::uniform_session_api;
+
+uniform_session_api!(PyM2Session);

@@ -15,7 +15,10 @@
 //!
 //! The M2 uses a separate WS-V2 TLS protocol on port 28900. Its
 //! session supports state monitoring, motion and job control for jobs
-//! already staged on the machine; G-code job upload is not implemented.
+//! already staged on the machine; G-code job upload is not
+//! implemented.  The `m2` session needs the `m2` feature (its
+//! tokio-tungstenite stack has no wasm build).
 
+#[cfg(feature = "m2")]
 pub mod m2;
 pub mod session;

@@ -13,25 +13,23 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::SessionError;
+use crate::core::session::{CancelMode, Session, SessionError};
 use crate::core::transport::TransportKind;
-use crate::core::types::{UnitSystem, WcsOffsets};
+
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport, ProtocolVariant};
-use crate::grbl::session::{SessionConfig, SessionCore};
+use crate::grbl::session::{GrblSession, SessionConfig};
 
 use crate::python::core::mock::MockTransport;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::probe::GrblDeviceInfo;
-use crate::python::pyfuture::{
-    spawn_future, spawn_future_with_cancel, PyAwait,
-};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 
 impl From<SessionError> for PyErr {
     fn from(err: SessionError) -> Self {
         match err {
             SessionError::Connection(msg) => PyConnectionError::new_err(msg),
-            SessionError::Timeout => PyTimeoutError::new_err(err.to_string()),
+            SessionError::Timeout(message) => PyTimeoutError::new_err(message),
             SessionError::Device(msg) => PyRuntimeError::new_err(msg),
             SessionError::BufferStall(msg) => {
                 PyConnectionError::new_err(format!("buffer stall: {msg}"))
@@ -232,15 +230,15 @@ pub(crate) fn parse_dialect(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.grbl")]
-pub struct GrblSession {
-    core: Arc<SessionCore>,
+#[pyclass(name = "GrblSession", module = "raydriver.grbl")]
+pub struct PyGrblSession {
+    core: Arc<GrblSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl GrblSession {
+impl PyGrblSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -296,10 +294,8 @@ impl GrblSession {
     ) -> PyResult<PyAwait<'py, GrblDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let build_info =
-                core.execute_interactive_command("$I".to_string()).await?;
-            let settings_lines =
-                core.execute_interactive_command("$$".to_string()).await?;
+            let build_info = core.execute_interactive_command("$I").await?;
+            let settings_lines = core.execute_interactive_command("$$").await?;
             Ok(GrblDeviceInfo {
                 inner: crate::grbl::probe::describe(
                     &build_info,
@@ -308,333 +304,6 @@ impl GrblSession {
             })
         })
     }
-
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        self.events.capture_loop(py)?;
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.connect().await;
-            Ok(())
-        })
-    }
-
-    /// Stop all background tasks and close the transport.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        spawn_future(py, async move {
-            core.cleanup().await;
-            events.quiesce();
-            Ok(())
-        })
-    }
-
-    /// Send a command and synchronously await its full response,
-    /// blocking any other command from interleaving.
-    fn execute_interactive_command<'py>(
-        &self,
-        py: Python<'py>,
-        command: String,
-    ) -> PyResult<PyAwait<'py, Vec<String>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
-        })
-    }
-
-    /// Queue a command for asynchronous processing and await its
-    /// response.
-    fn execute_command<'py>(
-        &self,
-        py: Python<'py>,
-        command: String,
-    ) -> PyResult<PyAwait<'py, Vec<String>>> {
-        let core = self.core.clone();
-        spawn_future(
-            py,
-            async move { Ok(core.execute_command(command).await?) },
-        )
-    }
-
-    /// Stream a G-code program using the character-counting
-    /// protocol.
-    ///
-    /// `op_line_map` maps G-code line indices to op indices for
-    /// progress reporting; `op_estimates` holds per-op estimated
-    /// durations (seconds) used to scale per-line stall timeouts.
-    #[pyo3(signature = (gcode, op_line_map=None, op_estimates=None, progress_callback=None))]
-    fn run<'py>(
-        &self,
-        py: Python<'py>,
-        gcode: String,
-        op_line_map: Option<HashMap<usize, i64>>,
-        op_estimates: Option<Vec<f64>>,
-        #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
-            imports = ("typing", "collections.abc")
-        ))]
-        progress_callback: Option<Py<PyAny>>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        let op_map = op_line_map.unwrap_or_default();
-        let estimates = op_estimates.unwrap_or_default();
-        let cancel_core = core.clone();
-        spawn_future_with_cancel(
-            py,
-            async move {
-                // The callback stays installed after the run returns:
-                // the final command_done events are marshaled from the
-                // reader task and may be delivered moments later (the
-                // Python driver keeps _on_command_done until its stream
-                // finally-block too). The next run replaces it.
-                events.set_progress_callback(progress_callback);
-                core.run(&gcode, op_map, estimates).await;
-                Ok(())
-            },
-            move || {
-                crate::python::runtime::handle().spawn(async move {
-                    let _ = cancel_core.cancel(false).await;
-                });
-            },
-        )
-    }
-
-    /// Execute a raw G-code string; GRBL realtime commands (?, ~, !)
-    /// are sent via the control path instead of the stream.
-    fn run_raw<'py>(
-        &self,
-        py: Python<'py>,
-        machine_code: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let cancel_core = core.clone();
-        spawn_future_with_cancel(
-            py,
-            async move {
-                core.run_raw(&machine_code).await;
-                Ok(())
-            },
-            move || {
-                crate::python::runtime::handle().spawn(async move {
-                    let _ = cancel_core.cancel(false).await;
-                });
-            },
-        )
-    }
-
-    /// Pause (feed hold) or resume the device.
-    #[pyo3(signature = (hold=true))]
-    fn set_hold<'py>(
-        &self,
-        py: Python<'py>,
-        hold: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_hold(hold).await?;
-            Ok(())
-        })
-    }
-
-    /// Abort the running job: soft reset, queue cleanup and safety
-    /// shutdown.
-    #[pyo3(signature = (emergency=false))]
-    fn cancel<'py>(
-        &self,
-        py: Python<'py>,
-        emergency: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.cancel(emergency).await?;
-            Ok(())
-        })
-    }
-
-    /// Home all axes (`axes` is None) or the named axes (e.g.
-    /// `["X"]`), then re-activate the active WCS via the toggle
-    /// workaround.
-    #[pyo3(signature = (axes=None, active_wcs = String::from("G54")))]
-    fn home<'py>(
-        &self,
-        py: Python<'py>,
-        axes: Option<Vec<String>>,
-        active_wcs: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.home(axes, &active_wcs).await?;
-            Ok(())
-        })
-    }
-
-    /// Move to an absolute position (mm) at `speed` (mm/min).
-    fn move_to<'py>(
-        &self,
-        py: Python<'py>,
-        speed: f64,
-        x: f64,
-        y: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.move_to(speed, x, y).await?;
-            Ok(())
-        })
-    }
-
-    /// Jog by relative deltas (mm) at `speed` (mm/min).
-    fn jog<'py>(
-        &self,
-        py: Python<'py>,
-        speed: f64,
-        deltas: Vec<(String, f64)>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.jog(speed, &deltas).await?;
-            Ok(())
-        })
-    }
-
-    fn select_tool<'py>(
-        &self,
-        py: Python<'py>,
-        tool_number: i64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.select_tool(tool_number).await?;
-            Ok(())
-        })
-    }
-
-    /// Set laser power.  `power` is the absolute S value; `None`
-    /// (or zero) turns the laser off.
-    #[pyo3(signature = (power=None))]
-    fn set_power<'py>(
-        &self,
-        py: Python<'py>,
-        power: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_power(power).await?;
-            Ok(())
-        })
-    }
-
-    /// Set laser power for focus mode; `None` waits for pending jogs
-    /// to finish and turns the laser off.
-    #[pyo3(signature = (power=None))]
-    fn set_focus_power<'py>(
-        &self,
-        py: Python<'py>,
-        power: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_focus_power(power).await?;
-            Ok(())
-        })
-    }
-
-    /// Read `$$` into `(key, raw_value)` pairs.
-    fn read_settings<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<PyAwait<'py, Vec<(String, String)>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move { Ok(core.read_settings().await?) })
-    }
-
-    fn write_setting<'py>(
-        &self,
-        py: Python<'py>,
-        key: String,
-        value: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.write_setting(&key, &value).await?;
-            Ok(())
-        })
-    }
-
-    fn set_wcs_offset<'py>(
-        &self,
-        py: Python<'py>,
-        wcs_slot: String,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_wcs_offset(&wcs_slot, x, y, z).await?;
-            Ok(())
-        })
-    }
-
-    /// Read `$#` WCS offsets, converted to mm when the device
-    /// reports inches.
-    fn read_wcs_offsets<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<PyAwait<'py, WcsOffsets>> {
-        let core = self.core.clone();
-        spawn_future(py, async move { Ok(core.read_wcs_offsets().await?) })
-    }
-
-    /// Read the `$G` parser state to determine the active WCS.
-    fn read_parser_state<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<PyAwait<'py, Option<String>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move { Ok(core.read_parser_state().await?) })
-    }
-
-    /// Run a probe cycle (G38.2); returns the trigger position in mm
-    /// or None on failure.
-    fn run_probe_cycle<'py>(
-        &self,
-        py: Python<'py>,
-        axis_letter: String,
-        max_travel: f64,
-        feed_rate: f64,
-    ) -> PyResult<PyAwait<'py, Option<(f64, f64, f64)>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            Ok(core
-                .run_probe_cycle(&axis_letter, max_travel, feed_rate)
-                .await?)
-        })
-    }
-
-    /// Infer the device's unit system ("metric"/"imperial") from the
-    /// `$13` setting.
-    fn detect_unit_system<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<PyAwait<'py, Option<String>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            let unit = core.detect_unit_system().await?;
-            Ok(unit.map(|u| match u {
-                UnitSystem::Metric => "metric".to_string(),
-                UnitSystem::Imperial => "imperial".to_string(),
-            }))
-        })
-    }
-
-    /// Swap the dialect command templates at runtime.
-    fn update_dialect(&self, dialect: Bound<'_, PyDict>) -> PyResult<()> {
-        self.core.update_dialect(parse_dialect(Some(&dialect))?);
-        Ok(())
-    }
-
     /// Current snapshot of the device state.
     #[getter]
     fn state(&self) -> DeviceState {
@@ -676,7 +345,7 @@ impl GrblSession {
     }
 }
 
-impl GrblSession {
+impl PyGrblSession {
     fn build(
         config: SessionConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -684,12 +353,12 @@ impl GrblSession {
     ) -> PyResult<Self> {
         let dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = SessionCore::new(config, dialect, events.clone());
+        let core = GrblSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for GrblSession {
+impl Drop for PyGrblSession {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared
@@ -698,3 +367,7 @@ impl Drop for GrblSession {
         self.core.abort_background_tasks_now();
     }
 }
+
+use crate::python::session_api::uniform_session_api;
+
+uniform_session_api!(PyGrblSession);

@@ -43,10 +43,37 @@ use windows as platform;
 )))]
 use unsupported as platform;
 
+/// Runs a blocking platform call off the async workers.
+///
+/// On native targets this is `spawn_blocking`; on wasm there is no
+/// blocking thread pool (spawning one panics), so the call runs
+/// inline — the only backend reachable there is `unsupported`, whose
+/// calls return errors immediately without blocking.  The `Err`
+/// variant reports the task-level failure (a panicking task on
+/// native); call sites attach their own message prefix.
+#[cfg(not(target_family = "wasm"))]
+async fn run_platform<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_family = "wasm")]
+async fn run_platform<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> T,
+{
+    Ok(f())
+}
+
 /// The Bluetooth SIG Serial Port Profile service UUID.
 pub const SPP_UUID: &str = "00001101-0000-1000-8000-00805f9b34fb";
 
-/// A paired device that can be offered for a Bluetooth GRBL connection.
+/// A paired device that can be offered for a Bluetooth SPP connection.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct BluetoothDeviceInfo {
     pub address: String,
@@ -90,6 +117,39 @@ pub(crate) fn address_octets(address: &str) -> Result<[u8; 6], String> {
     Ok(octets)
 }
 
+/// The RFCOMM receive loop shared by the raw-socket platform
+/// backends.
+///
+/// *read* performs one blocking socket read — the unsafe FFI stays
+/// at the backend, this loop only owns the byte-chunking, error and
+/// shutdown semantics.  Returns bytes read (> 0), 0 on EOF, negative
+/// on error (mapped through `std::io::Error::last_os_error`).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) fn rfcomm_reader_loop(
+    mut read: impl FnMut(&mut [u8]) -> isize,
+    tx: &mpsc::UnboundedSender<Vec<u8>>,
+    open: &AtomicBool,
+) {
+    let mut buf = [0u8; 1024];
+    loop {
+        let n = read(&mut buf);
+        if n > 0 {
+            if tx.send(buf[..n as usize].to_vec()).is_err() {
+                break;
+            }
+        } else if n == 0 {
+            break;
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.kind() != std::io::ErrorKind::Interrupted {
+                log::debug!("Bluetooth RFCOMM read error: {err}");
+                break;
+            }
+        }
+    }
+    open.store(false, Ordering::SeqCst);
+}
+
 /// A live RFCOMM link.  Platform implementations own any reader or
 /// run-loop thread and stop it from [`Link::close`].
 pub(crate) trait Link: Send + Sync {
@@ -128,7 +188,7 @@ impl Transport for BluetoothTransport {
         let address = self.address.clone();
         let channel = self.channel;
         let open = self.open.clone();
-        let link = tokio::task::spawn_blocking(move || {
+        let link = run_platform(move || {
             platform::connect(&address, channel, tx, open)
         })
         .await
@@ -145,7 +205,7 @@ impl Transport for BluetoothTransport {
     async fn close(&self) {
         self.open.store(false, Ordering::SeqCst);
         if let Some(link) = self.link.lock().await.take() {
-            let _ = tokio::task::spawn_blocking(move || link.close()).await;
+            let _ = run_platform(move || link.close()).await;
         }
     }
 
@@ -157,7 +217,7 @@ impl Transport for BluetoothTransport {
             return Err(TransportError::NotConnected);
         }
         let data = data.to_vec();
-        match tokio::task::spawn_blocking(move || link.write(&data)).await {
+        match run_platform(move || link.write(&data)).await {
             Ok(Ok(())) => Ok(()),
             Ok(Err(e)) => {
                 self.open.store(false, Ordering::SeqCst);

@@ -1,6 +1,5 @@
 //! The `SmoothieSession` PyO3 wrapper.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use pyo3::prelude::*;
@@ -8,17 +7,16 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
+use crate::core::session::{CancelMode, Session};
 use crate::core::transport::TransportKind;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{
     get_bool, get_f64, parse_dialect, transport_kind_from_config,
 };
-use crate::python::pyfuture::{
-    spawn_future, spawn_future_with_cancel, PyAwait,
-};
+use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::smoothie::probe::SmoothieDeviceInfo;
-use crate::smoothie::session::{SmoothieConfig, SmoothieCore};
+use crate::smoothie::session::{SmoothieConfig, SmoothieSession};
 
 fn build_smoothie_config(
     kind: TransportKind,
@@ -60,15 +58,15 @@ fn build_smoothie_config(
 /// All async methods return asyncio futures; a typed `SessionEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(module = "raydriver.smoothie")]
-pub struct SmoothieSession {
-    core: Arc<SmoothieCore>,
+#[pyclass(name = "SmoothieSession", module = "raydriver.smoothie")]
+pub struct PySmoothieSession {
+    core: Arc<SmoothieSession>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl SmoothieSession {
+impl PySmoothieSession {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -114,28 +112,6 @@ impl SmoothieSession {
         let session_config = build_smoothie_config(kind, config.as_ref())?;
         Self::build(session_config, dialect, event_callback)
     }
-
-    /// Open the connection and start the background tasks.
-    fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        self.events.capture_loop(py)?;
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.connect().await;
-            Ok(())
-        })
-    }
-
-    /// Stop all background tasks and close the transport.
-    fn disconnect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        spawn_future(py, async move {
-            core.cleanup().await;
-            events.quiesce();
-            Ok(())
-        })
-    }
-
     /// Send a command and await its full response.
     /// Run the device census: query ``version`` and the
     /// ``config-get`` motion keys, and return the structured result
@@ -148,10 +124,7 @@ impl SmoothieSession {
         spawn_future(py, async move {
             let mut replies: Vec<Vec<String>> = Vec::new();
             for command in crate::smoothie::probe::CENSUS_COMMANDS {
-                replies.push(
-                    core.execute_interactive_command(command.to_string())
-                        .await?,
-                );
+                replies.push(core.execute_interactive_command(command).await?);
             }
             Ok(SmoothieDeviceInfo {
                 inner: crate::smoothie::probe::describe(
@@ -165,237 +138,6 @@ impl SmoothieSession {
             })
         })
     }
-
-    fn execute_interactive_command<'py>(
-        &self,
-        py: Python<'py>,
-        command: String,
-    ) -> PyResult<PyAwait<'py, Vec<String>>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            Ok(core.execute_interactive_command(command).await?)
-        })
-    }
-
-    /// Queue a command and await its response (identical to
-    /// `execute_interactive_command`).
-    fn execute_command<'py>(
-        &self,
-        py: Python<'py>,
-        command: String,
-    ) -> PyResult<PyAwait<'py, Vec<String>>> {
-        let core = self.core.clone();
-        spawn_future(
-            py,
-            async move { Ok(core.execute_command(command).await?) },
-        )
-    }
-
-    /// Stream a G-code program using the ping-pong protocol.
-    ///
-    /// `op_line_map` maps G-code line indices to op indices for
-    /// progress reporting.
-    #[pyo3(signature = (gcode, op_line_map=None, progress_callback=None, *,
-                        op_estimates=None))]
-    fn run<'py>(
-        &self,
-        py: Python<'py>,
-        gcode: String,
-        op_line_map: Option<HashMap<usize, i64>>,
-        #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]]",
-            imports = ("builtins", "collections.abc")
-        ))]
-        progress_callback: Option<Py<PyAny>>,
-        op_estimates: Option<Vec<f64>>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let events = self.events.clone();
-        let op_map = op_line_map.unwrap_or_default();
-        let estimates = op_estimates.unwrap_or_default();
-        let cancel_core = core.clone();
-        spawn_future_with_cancel(
-            py,
-            async move {
-                events.set_progress_callback(progress_callback);
-                core.run(&gcode, op_map, estimates).await;
-                Ok(())
-            },
-            move || {
-                crate::python::runtime::handle().spawn(async move {
-                    let _ = cancel_core.cancel(false).await;
-                });
-            },
-        )
-    }
-
-    /// Execute a raw G-code string line by line.
-    fn run_raw<'py>(
-        &self,
-        py: Python<'py>,
-        machine_code: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        let cancel_core = core.clone();
-        spawn_future_with_cancel(
-            py,
-            async move {
-                core.run_raw(&machine_code).await;
-                Ok(())
-            },
-            move || {
-                crate::python::runtime::handle().spawn(async move {
-                    let _ = cancel_core.cancel(false).await;
-                });
-            },
-        )
-    }
-
-    /// Pause (feed hold) or resume the device.
-    #[pyo3(signature = (hold=true))]
-    fn set_hold<'py>(
-        &self,
-        py: Python<'py>,
-        hold: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_hold(hold).await?;
-            Ok(())
-        })
-    }
-
-    /// Abort the running job: Ctrl+C and safety shutdown.
-    #[pyo3(signature = (emergency=false))]
-    fn cancel<'py>(
-        &self,
-        py: Python<'py>,
-        emergency: bool,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.cancel(emergency).await?;
-            Ok(())
-        })
-    }
-
-    /// Home all axes (`axes` is None) or the named axes (e.g.
-    /// `["X"]`).
-    #[pyo3(signature = (axes=None, active_wcs = String::from("G54")))]
-    fn home<'py>(
-        &self,
-        py: Python<'py>,
-        axes: Option<Vec<String>>,
-        active_wcs: String,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.home(axes, &active_wcs).await?;
-            Ok(())
-        })
-    }
-
-    /// Move to an absolute position (mm) at `speed` (mm/min).
-    fn move_to<'py>(
-        &self,
-        py: Python<'py>,
-        speed: f64,
-        x: f64,
-        y: f64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.move_to(speed, x, y).await?;
-            Ok(())
-        })
-    }
-
-    /// Jog by relative deltas (mm) at `speed` (mm/min).
-    fn jog<'py>(
-        &self,
-        py: Python<'py>,
-        speed: f64,
-        deltas: Vec<(String, f64)>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.jog(speed, &deltas).await?;
-            Ok(())
-        })
-    }
-
-    fn select_tool<'py>(
-        &self,
-        py: Python<'py>,
-        tool_number: i64,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.select_tool(tool_number).await?;
-            Ok(())
-        })
-    }
-
-    /// Clear an alarm state with the dialect's clear command.
-    fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.clear_alarm().await?;
-            Ok(())
-        })
-    }
-
-    /// Set laser power.  `power` is the absolute S value; `None`
-    /// (or zero) turns the laser off.
-    #[pyo3(signature = (power=None))]
-    fn set_power<'py>(
-        &self,
-        py: Python<'py>,
-        power: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_power(power).await?;
-            Ok(())
-        })
-    }
-
-    /// Set laser power for focus mode; `None` turns the laser off.
-    #[pyo3(signature = (power=None))]
-    fn set_focus_power<'py>(
-        &self,
-        py: Python<'py>,
-        power: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_focus_power(power).await?;
-            Ok(())
-        })
-    }
-
-    /// Set a WCS offset via the dialect's `set_wcs_offset` template.
-    fn set_wcs_offset<'py>(
-        &self,
-        py: Python<'py>,
-        wcs_slot: String,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> PyResult<PyAwait<'py, ()>> {
-        let core = self.core.clone();
-        spawn_future(py, async move {
-            core.set_wcs_offset(&wcs_slot, x, y, z).await?;
-            Ok(())
-        })
-    }
-
-    /// Swap the dialect command templates at runtime.
-    fn update_dialect(&self, dialect: Bound<'_, PyDict>) -> PyResult<()> {
-        self.core.update_dialect(parse_dialect(Some(&dialect))?);
-        Ok(())
-    }
-
     /// Current snapshot of the device state.
     #[getter]
     fn state(&self) -> DeviceState {
@@ -421,7 +163,7 @@ impl SmoothieSession {
     }
 }
 
-impl SmoothieSession {
+impl PySmoothieSession {
     fn build(
         config: SmoothieConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -429,12 +171,12 @@ impl SmoothieSession {
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = SmoothieCore::new(config, dialect, events.clone());
+        let core = SmoothieSession::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for SmoothieSession {
+impl Drop for PySmoothieSession {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared
@@ -443,3 +185,7 @@ impl Drop for SmoothieSession {
         self.core.abort_background_tasks_now();
     }
 }
+
+use crate::python::session_api::uniform_session_api;
+
+uniform_session_api!(PySmoothieSession);

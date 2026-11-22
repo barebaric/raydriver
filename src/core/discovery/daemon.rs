@@ -11,14 +11,18 @@
 //! speaks the token handshake and TLS so a client can list the cameras
 //! of a protected daemon after the user supplies credentials.
 
+use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::pki_types::pem::PemObject;
+use rustls::pki_types::{CertificateDer, ServerName};
+use rustls::RootCertStore;
 use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 
 use crate::core::remote::protocol;
-use crate::core::remote::transport::{
-    connect_stream, is_loopback, read_message, write_frame,
-};
 
 /// Why a daemon could not be enumerated, for the daemon-level row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -104,21 +108,30 @@ pub async fn query_cameras(
     tls_ca: Option<&str>,
     tls_hostname: Option<&str>,
     timeout: Duration,
-) -> Result<Vec<DaemonCamera>, String> {
+) -> Result<Vec<DaemonCamera>, std::io::Error> {
     if token.is_some() && tls_ca.is_none() && !is_loopback(host) {
-        return Err("refusing to send a token without TLS".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "refusing to send a token without TLS",
+        ));
     }
     let mut stream =
         connect_stream(host, port, tls_ca, tls_hostname, timeout).await?;
     let welcome = read_message(&mut stream, timeout).await?;
     if welcome.get("type").and_then(Value::as_str) != Some("welcome") {
-        return Err("daemon did not send welcome".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "daemon did not send welcome",
+        ));
     }
     let payload = welcome.get("payload").unwrap_or(&Value::Null);
     if payload.get("protocol").and_then(Value::as_i64)
         != Some(protocol::PROTOCOL_VERSION)
     {
-        return Err("unsupported daemon protocol version".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "unsupported daemon protocol version",
+        ));
     }
     let auth_required = payload
         .get("auth_required")
@@ -126,7 +139,10 @@ pub async fn query_cameras(
         .unwrap_or(false);
     if auth_required {
         let Some(token) = token else {
-            return Err("daemon requires authentication".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "daemon requires authentication",
+            ));
         };
         let auth = json!({
             "id": 0,
@@ -136,7 +152,10 @@ pub async fn query_cameras(
         write_frame(&mut stream, &auth).await?;
         let reply = read_message(&mut stream, timeout).await?;
         if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-            return Err("daemon authentication failed".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "daemon authentication failed",
+            ));
         }
     }
 
@@ -149,7 +168,7 @@ pub async fn query_cameras(
             .and_then(|error| error.get("message"))
             .and_then(Value::as_str)
             .unwrap_or("device/list failed");
-        return Err(message.to_string());
+        return Err(std::io::Error::other(message.to_string()));
     }
     Ok(parse_cameras(
         reply
@@ -196,9 +215,11 @@ async fn query_inner(
     port: u16,
     timeout: Duration,
 ) -> Result<Vec<DaemonEntry>, ()> {
-    let mut stream = connect_stream(host, port, None, None, timeout)
-        .await
-        .map_err(|_| ())?;
+    let mut stream =
+        tokio::time::timeout(timeout, TcpStream::connect((host, port)))
+            .await
+            .map_err(|_| ())?
+            .map_err(|_| ())?;
 
     let welcome = read_message(&mut stream, timeout).await.map_err(|_| ())?;
     if welcome.get("type").and_then(Value::as_str) != Some("welcome") {
@@ -259,4 +280,155 @@ async fn query_inner(
         });
     }
     Ok(entries)
+}
+
+/// A control-protocol stream, plain TCP or TLS.
+pub type BoxedStream = Box<dyn crate::core::connector::ByteStream>;
+
+pub async fn connect_stream(
+    host: &str,
+    port: u16,
+    tls_ca: Option<&str>,
+    tls_hostname: Option<&str>,
+    timeout: Duration,
+) -> Result<BoxedStream, std::io::Error> {
+    let tcp = tokio::time::timeout(timeout, TcpStream::connect((host, port)))
+        .await
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("connecting to {host}:{port} timed out"),
+            )
+        })?
+        .map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("cannot connect to {host}:{port}: {err}"),
+            )
+        })?;
+    let Some(ca_path) = tls_ca else {
+        return Ok(Box::new(tcp));
+    };
+
+    let roots = load_roots(ca_path)?;
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("TLS configuration failed: {err}"),
+            )
+        })?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let connector = TlsConnector::from(Arc::new(config));
+    let name = tls_hostname.unwrap_or(host);
+    let server_name = ServerName::try_from(name.to_string()).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("invalid TLS server name {name:?}"),
+        )
+    })?;
+    let stream =
+        tokio::time::timeout(timeout, connector.connect(server_name, tcp))
+            .await
+            .map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "TLS handshake timed out",
+                )
+            })?
+            .map_err(|err| {
+                std::io::Error::new(
+                    err.kind(),
+                    format!("TLS handshake failed: {err}"),
+                )
+            })?;
+    Ok(Box::new(stream))
+}
+
+fn load_roots(path: &str) -> Result<RootCertStore, std::io::Error> {
+    let certificates = CertificateDer::pem_file_iter(path).map_err(|err| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("cannot read TLS CA {path}: {err}"),
+        )
+    })?;
+    let mut roots = RootCertStore::empty();
+    let mut added = 0;
+    for certificate in certificates {
+        let certificate = certificate.map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid TLS CA {path}: {err}"),
+            )
+        })?;
+        roots.add(certificate).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid TLS CA {path}: {err}"),
+            )
+        })?;
+        added += 1;
+    }
+    if added == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("no certificates in TLS CA {path}"),
+        ));
+    }
+    Ok(roots)
+}
+
+pub fn is_loopback(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|address| address.is_loopback())
+        .unwrap_or(false)
+}
+
+/// Reads one frame, skipping keepalive pings.
+pub async fn read_message<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    timeout: Duration,
+) -> Result<Value, std::io::Error> {
+    loop {
+        let msg = read_frame(stream, timeout).await?;
+        if msg.get("type").and_then(Value::as_str) == Some("ping") {
+            continue;
+        }
+        return Ok(msg);
+    }
+}
+
+pub async fn read_frame<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    timeout: Duration,
+) -> Result<Value, std::io::Error> {
+    tokio::time::timeout(timeout, protocol::read_frame(stream))
+        .await
+        .map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "timed out reading frame",
+            )
+        })?
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                err.to_string(),
+            )
+        })
+}
+
+pub async fn write_frame<S: AsyncWrite + Unpin>(
+    stream: &mut S,
+    message: &Value,
+) -> Result<(), std::io::Error> {
+    protocol::write_frame(stream, message)
+        .await
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }

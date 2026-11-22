@@ -1,24 +1,10 @@
-//! Marlin protocol implementation.
-
-use crate::core::remote::registry::{
-    CensusKind, ProbeSpec, ProtocolDescriptor,
-};
+//! The Marlin protocol implementation.
+//!
+//! Cross-protocol import (sanctioned per AGENTS.md): Marlin's WCS
+//! offsets use the industry-standard G54-G59 to P1-P6 mapping that
+//! GRBL also documents, so the session reuses
+//! `crate::grbl::parser::gcode_to_p_number`.
 
 pub mod parser;
 pub mod probe;
 pub mod session;
-
-pub const DESCRIPTOR: ProtocolDescriptor = ProtocolDescriptor {
-    name: "marlin",
-    label: "Marlin",
-    dialect_family: "marlin",
-    connection: "serial",
-    config_keys: &["port", "baudrate"],
-    extra_methods: &["clear_alarm", "detect_unit_system", "probe_device"],
-    buffer_stats: false,
-    census: CensusKind::Marlin,
-    probe: Some(ProbeSpec {
-        command: "M115",
-        signature: "FIRMWARE",
-    }),
-};

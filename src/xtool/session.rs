@@ -13,11 +13,14 @@ use tokio::task::JoinHandle;
 
 use crate::core::dialect::Dialect;
 use crate::core::http;
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
 use crate::core::ws::WsClient;
+use async_trait::async_trait;
 
 /// Default HTTP (API) port of xTool machines.
 pub const DEFAULT_HTTP_PORT: u16 = 8080;
@@ -25,8 +28,6 @@ pub const DEFAULT_HTTP_PORT: u16 = 8080;
 pub const DEFAULT_WS_PORT: u16 = 8081;
 
 /// Fixed speed (mm/min) for absolute moves without an explicit one.
-const DEFAULT_MOVE_SPEED: f64 = 1500.0;
-
 /// The stop flush block xTool's own software sends after
 /// `/cnc/data?action=stop`: terminate the program and force the
 /// laser output off.
@@ -78,7 +79,7 @@ impl XtoolConfig {
 
 /// The xTool session: connection lifecycle, interactive commands,
 /// homing/jogging sequences and job execution.
-pub struct XtoolCore {
+pub struct XtoolSession {
     config: XtoolConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn SessionEvents>,
@@ -97,7 +98,7 @@ pub struct XtoolCore {
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl XtoolCore {
+impl XtoolSession {
     pub fn new(
         config: XtoolConfig,
         dialect: Dialect,
@@ -124,25 +125,6 @@ impl XtoolCore {
     // Accessors
     // ---------------------------------------------------------------
 
-    pub fn state(&self) -> DeviceState {
-        self.state.lock().unwrap().clone()
-    }
-
-    pub fn resource_uri(&self) -> Option<String> {
-        Some(format!(
-            "tcp://{}:{}",
-            self.config.host, self.config.http_port
-        ))
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        self.job_running.load(Ordering::SeqCst)
-    }
-
-    pub fn update_dialect(&self, dialect: Dialect) {
-        *self.dialect.write().unwrap() = dialect;
-    }
-
     fn dialect(&self) -> Dialect {
         self.dialect.read().unwrap().clone()
     }
@@ -166,33 +148,6 @@ impl XtoolCore {
     // ---------------------------------------------------------------
     // Connect / disconnect
     // ---------------------------------------------------------------
-
-    pub async fn connect(self: &Arc<Self>) {
-        self.abort_background_tasks().await;
-        self.keep_running.store(true, Ordering::SeqCst);
-        self.is_cancelled.store(false, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        let core = self.clone();
-        let task = tokio::spawn(async move { core.connection_loop().await });
-        *self.connection_task.lock().unwrap() = Some(task);
-    }
-
-    pub async fn cleanup(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.abort_background_tasks().await;
-        self.update_connection_status(TransportStatus::Disconnected, None);
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop`.
-    pub fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        let task = self.connection_task.lock().unwrap().take();
-        if let Some(task) = task {
-            task.abort();
-        }
-        self.abort_background_tasks_now_inner();
-    }
 
     async fn abort_background_tasks(&self) {
         let task = self.connection_task.lock().unwrap().take();
@@ -456,7 +411,7 @@ impl XtoolCore {
                     ));
                 }
                 _ = &mut timer => {
-                    return Err(SessionError::Timeout);
+                    return Err(SessionError::Timeout("operation timed out".to_string()));
                 }
             }
             let state = self.state();
@@ -557,55 +512,7 @@ impl XtoolCore {
         self.events.raw_tx(line);
     }
 
-    /// Execute a single G-code line via `GET /cmd?cmd=…`, failing on
-    /// error acknowledgements.
-    ///
-    /// The HTTP acknowledgement is the only response the API gives;
-    /// per-line `ok` acks and machine responses do not exist on this
-    /// protocol.
-    pub async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        let _guard = self.cmd_lock.lock().await;
-        self.raw_tx_line(&command);
-        let path = format!("/cmd?cmd={}", url_encode(&command));
-        let text = match self.request_get(&path).await {
-            Ok(text) => text,
-            Err(err) => {
-                self.update_command_status(
-                    TransportStatus::Error,
-                    Some(&err.to_string()),
-                );
-                return Err(err);
-            }
-        };
-        if let Err(err) = self.check_result(&text, &format!("'{command}'")) {
-            self.update_command_status(
-                TransportStatus::Error,
-                Some(&err.to_string()),
-            );
-            return Err(err);
-        }
-        self.update_command_status(TransportStatus::Idle, None);
-        Ok(Vec::new())
-    }
-
     /// Execute a single G-code line without failing the caller on
-    /// device-side rejections; the command status carries the error.
-    pub async fn execute_command(&self, command: String) {
-        if let Err(err) =
-            self.execute_interactive_command(command.clone()).await
-        {
-            self.update_command_status(
-                TransportStatus::Error,
-                Some(&err.to_string()),
-            );
-        } else {
-            self.update_command_status(TransportStatus::Idle, None);
-        }
-    }
-
     /// Execute a multi-line block of G-code via `POST /cmd`.
     pub async fn execute_block(
         &self,
@@ -627,102 +534,6 @@ impl XtoolCore {
     // Machine sequences
     // ---------------------------------------------------------------
 
-    /// Run the xTool homing cycle: enable the steppers, select the
-    /// manual-move mode, run M28, wait for the machine to report
-    /// idle again, then park the steppers.
-    pub async fn home(&self) -> Result<(), SessionError> {
-        self.settled.clear();
-        self.execute_interactive_command("M17 S1".to_string())
-            .await?;
-        self.execute_interactive_command("M207 S0".to_string())
-            .await?;
-        self.execute_interactive_command("M28".to_string()).await?;
-        self.wait_settled(self.config.homing_timeout).await?;
-        self.execute_interactive_command("M18".to_string()).await?;
-        Ok(())
-    }
-
-    /// Relative jog.  The firmware has no jog mode, so the origin is
-    /// pinned to the current position (G92) and the jog distance is
-    /// issued as an absolute move — the same approach xTool's own
-    /// software uses.
-    pub async fn jog(
-        &self,
-        speed: f64,
-        deltas: Vec<(String, f64)>,
-    ) -> Result<(), SessionError> {
-        if deltas.is_empty() {
-            return Ok(());
-        }
-        let axes = deltas
-            .iter()
-            .map(|(name, distance)| {
-                format!("{}{}", name.to_ascii_uppercase(), distance)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let block = format!(
-            "M17 S1\nM207 S0\nM101\nG92 X0 Y0\nG90\n\
-             G1 {axes} F{} S0\nM18\n",
-            format_speed(speed),
-        );
-        self.execute_block(block).await
-    }
-
-    /// Absolute move in the machine's current coordinate frame.  The
-    /// firmware provides no position feedback, so the frame is
-    /// whatever the machine last established (the home position
-    /// after a homing cycle).
-    pub async fn move_to(
-        &self,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-        speed: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let speed = speed.unwrap_or(DEFAULT_MOVE_SPEED);
-        let mut axes = vec![format!("X{x}"), format!("Y{y}")];
-        if let Some(z) = z {
-            axes.push(format!("Z{z}"));
-        }
-        let block = format!(
-            "M17 S1\nM207 S0\nM101\nG90\n\
-             G1 {} F{} S0\nM18\n",
-            axes.join(" "),
-            format_speed(speed),
-        );
-        self.execute_block(block).await
-    }
-
-    /// Pause or resume the running job.
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        let action = if hold { "pause" } else { "resume" };
-        let path = format!("/cnc/data?action={action}");
-        let text = self.request_get(&path).await?;
-        self.check_result(&text, &format!("'{action}'"))
-    }
-
-    /// Stop the running job: `/cnc/data?action=stop` plus the stop
-    /// flush block, then the dialect's safety-off commands.
-    pub async fn cancel(&self, emergency: bool) {
-        self.is_cancelled.store(true, Ordering::SeqCst);
-        let stop = async {
-            let text = self.request_get("/cnc/data?action=stop").await?;
-            self.check_result(&text, "the stop command")
-        };
-        if let Err(err) = stop.await {
-            log::warn!("Stopping the xTool job failed: {err}");
-        }
-        if let Err(err) = self.execute_block(STOP_FLUSH_BLOCK.to_string()).await
-        {
-            log::warn!("Sending the stop flush block failed: {err}");
-        }
-        self.send_safety_off(emergency).await;
-        self.settled.set();
-        self.job_running.store(false, Ordering::SeqCst);
-        self.events.job_finished();
-    }
-
     async fn send_safety_off(&self, emergency: bool) {
         let dialect = self.dialect();
         let mut commands = dialect.safety_off_commands.clone();
@@ -735,62 +546,15 @@ impl XtoolCore {
             if command.is_empty() {
                 continue;
             }
-            if let Err(err) =
-                self.execute_interactive_command(command.clone()).await
-            {
+            if let Err(err) = self.execute_interactive_command(&command).await {
                 log::warn!("Safety command '{command}' failed: {err}");
             }
-        }
-    }
-
-    /// Set the laser power (0.0-1.0 of max power); `None` disables
-    /// it.
-    pub async fn set_power(&self, power: Option<f64>) {
-        let dialect = self.dialect();
-        let command = match power {
-            Some(power) => format_power(&dialect.laser_on, power),
-            None => dialect.laser_off.clone(),
-        };
-        if let Err(err) = self.execute_interactive_command(command).await {
-            log::warn!("set_power failed: {err}");
-        }
-    }
-
-    /// Set the laser power used while focusing.
-    pub async fn set_focus_power(&self, power: Option<f64>) {
-        let dialect = self.dialect();
-        let command = match power {
-            Some(power) => format_power(&dialect.focus_laser_on, power),
-            None => dialect.laser_off.clone(),
-        };
-        if let Err(err) = self.execute_interactive_command(command).await {
-            log::warn!("set_focus_power failed: {err}");
         }
     }
 
     // ---------------------------------------------------------------
     // Jobs
     // ---------------------------------------------------------------
-
-    /// Upload a G-code job to the device and start it, waiting for
-    /// the machine to finish.  The firmware stores uploads of
-    /// filetype 1 in /tmp.gcode, which /read then executes.
-    ///
-    /// The firmware reports ok even when it cannot execute a file,
-    /// so the start is confirmed by a WORKING event; a job that
-    /// never starts raises instead of blocking forever.  Waiting for
-    /// the end is unbounded — job length is unknowable and
-    /// cancellation flows through [`cancel`](Self::cancel).
-    pub async fn run(&self, gcode: &str) -> Result<(), SessionError> {
-        self.job_running.store(true, Ordering::SeqCst);
-        self.is_cancelled.store(false, Ordering::SeqCst);
-        let result = self.run_inner(gcode).await;
-        if !self.is_cancelled.load(Ordering::SeqCst) {
-            self.job_running.store(false, Ordering::SeqCst);
-            self.events.job_finished();
-        }
-        result
-    }
 
     async fn run_inner(&self, gcode: &str) -> Result<(), SessionError> {
         let text = http::post_multipart(
@@ -836,14 +600,6 @@ impl XtoolCore {
             }
         }
         self.wait_settled(f64::INFINITY).await
-    }
-
-    /// Alias of [`run`](Self::run) for raw command streams.
-    pub async fn run_raw(
-        &self,
-        machine_code: &str,
-    ) -> Result<(), SessionError> {
-        self.run(machine_code).await
     }
 }
 
@@ -994,4 +750,233 @@ fn format_power(template: &str, power: f64) -> String {
     let args = [("power", crate::core::dialect::Arg::Length(power))];
     crate::core::dialect::format_template(template, &args)
         .unwrap_or_else(|_| template.to_string())
+}
+
+/// The session's [`Session`] impl: the single, real implementation
+/// of every operation the protocol supports.
+#[async_trait]
+impl Session for XtoolSession {
+    fn state(&self) -> DeviceState {
+        self.state.lock().unwrap().clone()
+    }
+    fn resource_uri(&self) -> Option<String> {
+        Some(format!(
+            "tcp://{}:{}",
+            self.config.host, self.config.http_port
+        ))
+    }
+    fn is_job_running(&self) -> bool {
+        self.job_running.load(Ordering::SeqCst)
+    }
+    fn update_dialect(&self, dialect: Dialect) {
+        *self.dialect.write().unwrap() = dialect;
+    }
+    async fn cleanup(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        self.abort_background_tasks().await;
+        self.update_connection_status(TransportStatus::Disconnected, None);
+    }
+    fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        let task = self.connection_task.lock().unwrap().take();
+        if let Some(task) = task {
+            task.abort();
+        }
+        self.abort_background_tasks_now_inner();
+    }
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        let action = if hold { "pause" } else { "resume" };
+        let path = format!("/cnc/data?action={action}");
+        let text = self.request_get(&path).await?;
+        self.check_result(&text, &format!("'{action}'"))
+    }
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        self.abort_background_tasks().await;
+        self.keep_running.store(true, Ordering::SeqCst);
+        self.is_cancelled.store(false, Ordering::SeqCst);
+        self.job_running.store(false, Ordering::SeqCst);
+        let core = self.clone();
+        let task = tokio::spawn(async move { core.connection_loop().await });
+        *self.connection_task.lock().unwrap() = Some(task);
+
+        Ok(())
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        _op_map: &HashMap<usize, i64>,
+        _op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        self.job_running.store(true, Ordering::SeqCst);
+        self.is_cancelled.store(false, Ordering::SeqCst);
+        let result = self.run_inner(gcode).await;
+        if !self.is_cancelled.load(Ordering::SeqCst) {
+            self.job_running.store(false, Ordering::SeqCst);
+            self.events.job_finished();
+        }
+        result
+    }
+
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
+        Session::run(self, machine_code, &HashMap::new(), &[]).await
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        let emergency = mode == CancelMode::Immediate;
+        self.is_cancelled.store(true, Ordering::SeqCst);
+        let stop = async {
+            let text = self.request_get("/cnc/data?action=stop").await?;
+            self.check_result(&text, "the stop command")
+        };
+        if let Err(err) = stop.await {
+            log::warn!("Stopping the xTool job failed: {err}");
+        }
+        if let Err(err) = self.execute_block(STOP_FLUSH_BLOCK.to_string()).await
+        {
+            log::warn!("Sending the stop flush block failed: {err}");
+        }
+        self.send_safety_off(emergency).await;
+        self.settled.set();
+        self.job_running.store(false, Ordering::SeqCst);
+        self.events.job_finished();
+
+        Ok(())
+    }
+
+    async fn execute_interactive_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        let _guard = self.cmd_lock.lock().await;
+        self.raw_tx_line(&command);
+        let path = format!("/cmd?cmd={}", url_encode(&command));
+        let text = match self.request_get(&path).await {
+            Ok(text) => text,
+            Err(err) => {
+                self.update_command_status(
+                    TransportStatus::Error,
+                    Some(&err.to_string()),
+                );
+                return Err(err);
+            }
+        };
+        if let Err(err) = self.check_result(&text, &format!("'{command}'")) {
+            self.update_command_status(
+                TransportStatus::Error,
+                Some(&err.to_string()),
+            );
+            return Err(err);
+        }
+        self.update_command_status(TransportStatus::Idle, None);
+        Ok(Vec::new())
+    }
+
+    async fn home(
+        &self,
+        _axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        self.settled.clear();
+        self.execute_interactive_command("M17 S1").await?;
+        self.execute_interactive_command("M207 S0").await?;
+        self.execute_interactive_command("M28").await?;
+        self.wait_settled(self.config.homing_timeout).await?;
+        self.execute_interactive_command("M18").await?;
+        Ok(())
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let mut axes = vec![format!("X{x}"), format!("Y{y}")];
+        if let Some(z) = z {
+            axes.push(format!("Z{z}"));
+        }
+        let block = format!(
+            "M17 S1\nM207 S0\nM101\nG90\n\
+             G1 {} F{} S0\nM18\n",
+            axes.join(" "),
+            format_speed(speed),
+        );
+        self.execute_block(block).await
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        let deltas = deltas.to_vec();
+        if deltas.is_empty() {
+            return Ok(());
+        }
+        let axes = deltas
+            .iter()
+            .map(|(name, distance)| {
+                format!("{}{}", name.to_ascii_uppercase(), distance)
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        let block = format!(
+            "M17 S1\nM207 S0\nM101\nG92 X0 Y0\nG90\n\
+             G1 {axes} F{} S0\nM18\n",
+            format_speed(speed),
+        );
+        self.execute_block(block).await
+    }
+
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let command = match power {
+            Some(power) => format_power(&dialect.laser_on, power),
+            None => dialect.laser_off.clone(),
+        };
+        if let Err(err) = self.execute_interactive_command(&command).await {
+            log::warn!("set_power failed: {err}");
+        }
+
+        Ok(())
+    }
+
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let command = match power {
+            Some(power) => format_power(&dialect.focus_laser_on, power),
+            None => dialect.laser_off.clone(),
+        };
+        if let Err(err) = self.execute_interactive_command(&command).await {
+            log::warn!("set_focus_power failed: {err}");
+        }
+
+        Ok(())
+    }
+
+    async fn execute_command(
+        &self,
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        if let Err(err) = self.execute_interactive_command(&command).await {
+            self.update_command_status(
+                TransportStatus::Error,
+                Some(&err.to_string()),
+            );
+        } else {
+            self.update_command_status(TransportStatus::Idle, None);
+        }
+
+        Ok(Vec::new())
+    }
 }

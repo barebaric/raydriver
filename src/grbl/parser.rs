@@ -41,6 +41,8 @@ static GRBL_PARSER_STATE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r".*(G5[4-9]).*").unwrap());
 static GRBL_OPT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[OPT:([A-Z]+),(\d+),(\d+)\]").unwrap());
+static GCODE_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\([^)]*\)").unwrap());
 
 type BytesRegex = regex::bytes::Regex;
 
@@ -76,12 +78,23 @@ pub fn split_realtime_commands(lines: &[String]) -> (Vec<String>, Vec<String>) {
 /// Strip G-code comments from a line: everything after ';' and
 /// content between '(' and ')'.
 pub fn strip_gcode_comments(line: &str) -> String {
-    crate::core::gcode::strip_gcode_comments(line)
+    let mut line = GCODE_COMMENT_RE.replace_all(line, "").to_string();
+    if let Some(idx) = line.find(';') {
+        line.truncate(idx);
+    }
+    line.trim().to_string()
 }
 
 /// Converts a G-code WCS name (e.g. "G54") to its P-number.
 pub fn gcode_to_p_number(wcs_slot: &str) -> Option<i64> {
-    crate::core::gcode::gcode_to_p_number(wcs_slot)
+    let rest = wcs_slot.strip_prefix('G')?;
+    let num: i64 = rest.parse().ok()?;
+    let p_num = num - 53;
+    if (1..=6).contains(&p_num) {
+        Some(p_num)
+    } else {
+        None
+    }
 }
 
 /// Parse a `[VER:...]` line into `(version, build_name)`.

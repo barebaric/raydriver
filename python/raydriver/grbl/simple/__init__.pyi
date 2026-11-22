@@ -50,95 +50,99 @@ class GrblSimpleSession:
         Run the device census: query `$I` and `$$`, and return the
         structured result as a dict.
         """
-    def connect(self) -> collections.abc.Awaitable[None]: ...
+    def __repr__(self) -> builtins.str: ...
+    def connect(self) -> collections.abc.Awaitable[None]:
+        r"""
+        Open the connection and keep it up until `disconnect`.
+        """
     def disconnect(self) -> collections.abc.Awaitable[None]:
         r"""
-        Stop all background tasks and close the transport.
-        """
-    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
-        r"""
-        Send a command and await its full response.
-        """
-    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
-        r"""
-        Queue a command and await its response (identical to
-        `execute_interactive_command` — the simple protocol has no
-        separate queue).
-        """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None, *, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Stream a G-code program using the ping-pong protocol: one
-        line at a time, waiting for each `ok`.
-        
-        `op_line_map` maps G-code line indices to op indices for
-        progress reporting.
-        """
-    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
-        r"""
-        Execute a raw G-code string; GRBL realtime commands (?, ~, !)
-        are sent via the control path instead of the stream.
-        """
-    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
-        r"""
-        Pause (feed hold) or resume the device.
-        """
-    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
-        r"""
-        Abort the running job: soft reset, pending-command cleanup
-        and safety shutdown.
-        """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> collections.abc.Awaitable[None]:
-        r"""
-        Home all axes (`axes` is None) or the named axes (e.g.
-        `["X"]`), then re-activate the active WCS via the toggle
-        workaround.
-        """
-    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float) -> collections.abc.Awaitable[None]:
-        r"""
-        Move to an absolute position (mm) at `speed` (mm/min).
-        """
-    def jog(self, speed: builtins.float, deltas: typing.Sequence[tuple[builtins.str, builtins.float]]) -> collections.abc.Awaitable[None]:
-        r"""
-        Jog by relative deltas (mm) at `speed` (mm/min).
-        """
-    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]: ...
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Set laser power.  `power` is the absolute S value; `None`
-        (or zero) turns the laser off.
-        """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Set laser power for focus mode; `None` turns the laser off.
-        """
-    def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
-        r"""
-        Read `$$` into `(key, raw_value)` pairs.
-        """
-    def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]: ...
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float]) -> collections.abc.Awaitable[None]: ...
-    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
-        r"""
-        Read `$#` WCS offsets, converted to mm when the device
-        reports inches.
-        """
-    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Read the `$G` parser state to determine the active WCS.
-        """
-    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[tuple[builtins.float, builtins.float, builtins.float]]]:
-        r"""
-        Run a probe cycle (G38.2); returns the trigger position in mm
-        or None on failure.
-        """
-    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Infer the device's unit system ("metric"/"imperial") from the
-        `$13` setting.
+        Stop all background tasks and close the connection.
         """
     def update_dialect(self, dialect: dict) -> None:
         r"""
-        Swap the dialect command templates at runtime.
+        Replace the command templates.
         """
-    def __repr__(self) -> builtins.str: ...
+    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
+        r"""
+        Send one interactive command and return its response
+        lines.
+        """
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
+        r"""
+        Send one command and return its response lines.
+        """
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Stream a G-code job.
+        """
+    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
+        r"""
+        Execute pre-rendered machine code.
+        """
+    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
+        r"""
+        Cancel the running job.
+        """
+    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
+        r"""
+        Pause or resume the running job.
+        """
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: typing.Optional[builtins.str] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Home all axes or the given axes.
+        """
+    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Absolute move in the machine's current coordinate frame.
+        """
+    def jog(self, speed: builtins.float, deltas: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.float]]] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Relative jog by per-axis distances.
+        """
+    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]:
+        r"""
+        Select a tool.
+        """
+    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Set the laser/spindle power; `None` disables the tool.
+        """
+    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Set the laser power used while focusing.
+        """
+    def clear_alarm(self) -> collections.abc.Awaitable[None]:
+        r"""
+        Clear a device alarm.
+        """
+    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Write a work-coordinate-system offset.
+        """
+    def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
+        r"""
+        Read the device's firmware settings.
+        """
+    def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]:
+        r"""
+        Write one firmware setting.
+        """
+    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
+        r"""
+        Read the work-coordinate-system offsets.
+        """
+    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
+        r"""
+        Read the G-code parser state.
+        """
+    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[tuple[builtins.float, builtins.float, builtins.float]]]:
+        r"""
+        Run a probe cycle; `None` = no trigger reported.
+        """
+    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
+        r"""
+        Detect the device's unit system (`"metric"` or
+        `"imperial"`), or `None` when unknown.
+        """
 

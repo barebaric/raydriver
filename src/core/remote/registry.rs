@@ -1,30 +1,19 @@
 //! Protocol registry: what each hosted session protocol speaks.
 //!
-//! Protocol modules export a [`ProtocolDescriptor`]; the crate-root
-//! [`crate::protocols`] module assembles them into a [`Registry`].
-//! The daemon validates calls against the hosted protocol's surface
-//! and `protocol/list` serves this metadata to clients, so clients
-//! never hardcode protocol knowledge.
+//! [`ProtocolInfo`] describes one protocol's surface; the daemon
+//! validates calls against it and `protocol/list` serves the
+//! metadata to clients so they never hardcode protocol knowledge.
+//!
+//! Core stays protocol-neutral: the *set* of hostable protocols —
+//! and their auto-detection fingerprints — is supplied by the
+//! embedding application as a [`Registry`] at daemon construction.
+//! In this crate the Python bindings build the concrete table (see
+//! `python::protocols::protocol_registry`); a pure-Rust embedder
+//! builds its own from the same primitives.
 
 use std::collections::BTreeSet;
 
 use serde_json::{json, Value};
-
-/// How a protocol's device census is represented to Python.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CensusKind {
-    Grbl,
-    Marlin,
-    Smoothie,
-    OctoPrint,
-}
-
-/// A command and response signature for protocol auto-detection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProbeSpec {
-    pub command: &'static str,
-    pub signature: &'static str,
-}
 
 /// Metadata describing one session protocol.
 #[derive(Debug, Clone)]
@@ -36,8 +25,19 @@ pub struct ProtocolInfo {
     pub config_keys: &'static [&'static str],
     pub methods: BTreeSet<&'static str>,
     pub properties: BTreeSet<&'static str>,
-    pub census: CensusKind,
-    pub probe: Option<ProbeSpec>,
+    /// Command + response signature used to auto-detect a device
+    /// speaking this protocol (daemon device probing).  `None` = the
+    /// protocol is not auto-detectable.
+    pub probe: Option<ProbeFingerprint>,
+}
+
+/// A protocol's auto-detection fingerprint.
+#[derive(Debug, Clone)]
+pub struct ProbeFingerprint {
+    /// The interactive command sent to the device.
+    pub command: &'static str,
+    /// A marker expected in the response.
+    pub signature: &'static str,
 }
 
 impl ProtocolInfo {
@@ -68,115 +68,84 @@ impl ProtocolInfo {
     }
 }
 
-/// The protocol-neutral part of a protocol's registry entry.
-///
-/// Each protocol module exports one descriptor. Method and property
-/// sets are derived from the shared surface plus the descriptor's
-/// `extra_methods` and `buffer_stats` flag.
-#[derive(Debug, Clone, Copy)]
-pub struct ProtocolDescriptor {
-    pub name: &'static str,
-    pub label: &'static str,
-    pub dialect_family: &'static str,
-    pub connection: &'static str,
-    pub config_keys: &'static [&'static str],
-    pub extra_methods: &'static [&'static str],
-    pub buffer_stats: bool,
-    pub census: CensusKind,
-    pub probe: Option<ProbeSpec>,
+/// The method surface every hosted session implements, plus the
+/// protocol's extras.
+pub fn methods(extra: &[&'static str]) -> BTreeSet<&'static str> {
+    let mut set: BTreeSet<&'static str> = [
+        "connect",
+        "disconnect",
+        "run",
+        "run_raw",
+        "cancel",
+        "execute_command",
+        "execute_interactive_command",
+        "home",
+        "move_to",
+        "jog",
+        "select_tool",
+        "set_power",
+        "set_focus_power",
+        "set_wcs_offset",
+        "update_dialect",
+    ]
+    .into_iter()
+    .collect();
+    set.extend(extra.iter().copied());
+    set
 }
 
-impl ProtocolDescriptor {
-    pub fn info(self) -> ProtocolInfo {
-        let mut methods: BTreeSet<&'static str> =
-            COMMON_METHODS.iter().copied().collect();
-        methods.extend(self.extra_methods.iter().copied());
-        let properties = if self.buffer_stats {
-            BUFFER_PROPERTIES.iter().copied().collect()
-        } else {
-            COMMON_PROPERTIES.iter().copied().collect()
-        };
-        ProtocolInfo {
-            name: self.name,
-            label: self.label,
-            dialect_family: self.dialect_family,
-            connection: self.connection,
-            config_keys: self.config_keys,
-            methods,
-            properties,
-            census: self.census,
-            probe: self.probe,
-        }
-    }
+/// The property surface every hosted session implements.
+pub fn common_properties() -> BTreeSet<&'static str> {
+    ["state", "job_running", "resource_uri"]
+        .into_iter()
+        .collect()
 }
 
-pub const COMMON_METHODS: &[&str] = &[
-    "connect",
-    "disconnect",
-    "run",
-    "run_raw",
-    "cancel",
-    "execute_command",
-    "execute_interactive_command",
-    "home",
-    "move_to",
-    "jog",
-    "select_tool",
-    "set_power",
-    "set_focus_power",
-    "set_wcs_offset",
-    "update_dialect",
-];
+/// The property surface for protocols with RX-buffer accounting.
+pub fn buffer_properties() -> BTreeSet<&'static str> {
+    let mut set = common_properties();
+    set.extend(["buffer_count", "rx_buffer_size", "pending_commands"]);
+    set
+}
 
-const COMMON_PROPERTIES: &[&str] = &["state", "job_running", "resource_uri"];
-const BUFFER_PROPERTIES: &[&str] = &[
-    "state",
-    "job_running",
-    "resource_uri",
-    "buffer_count",
-    "rx_buffer_size",
-    "pending_commands",
-];
-
-/// The protocols a daemon can host.
-#[derive(Debug, Default, Clone)]
+/// The set of protocols a daemon can host, supplied by the embedding
+/// application at daemon construction.
+#[derive(Debug, Clone, Default)]
 pub struct Registry {
     protocols: Vec<ProtocolInfo>,
 }
 
 impl Registry {
-    pub fn new(descriptors: &[ProtocolDescriptor]) -> Self {
-        Self {
-            protocols: descriptors.iter().map(|d| d.info()).collect(),
-        }
+    /// Build a registry from the protocol table, in serving order.
+    pub fn new(protocols: Vec<ProtocolInfo>) -> Self {
+        Self { protocols }
     }
 
-    pub fn names(&self) -> Vec<&'static str> {
-        self.protocols.iter().map(|info| info.name).collect()
-    }
-
+    /// True when *name* is hostable.
     pub fn is_known(&self, name: &str) -> bool {
         self.protocols.iter().any(|info| info.name == name)
     }
 
-    pub fn info(&self, name: &str) -> Option<&ProtocolInfo> {
-        self.protocols.iter().find(|info| info.name == name)
-    }
-
-    /// Commands to try when resolving an unconfigured device.
-    pub fn probe_candidates(&self) -> Vec<(&'static str, ProbeSpec)> {
+    /// Look up a protocol's metadata.
+    pub fn protocol_info(&self, name: &str) -> Option<ProtocolInfo> {
         self.protocols
             .iter()
-            .filter_map(|info| info.probe.map(|probe| (info.name, probe)))
-            .collect()
+            .find(|info| info.name == name)
+            .cloned()
+    }
+
+    /// The protocol table, in serving order.
+    pub fn protocols(&self) -> &[ProtocolInfo] {
+        &self.protocols
     }
 
     /// The `protocol/list` payload: every protocol's metadata.
-    pub fn payload(&self) -> Value {
+    pub fn protocols_payload(&self) -> Value {
         json!({
-            "protocols": self.protocols
+            "protocols": self
+                .protocols
                 .iter()
-                .map(ProtocolInfo::to_json)
+                .map(|info| info.to_json())
                 .collect::<Vec<_>>(),
         })
     }

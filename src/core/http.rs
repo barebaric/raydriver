@@ -1,17 +1,22 @@
 //! Minimal HTTP/1.1 client for device APIs.
 //!
-//! Hand-rolled over a tokio `TcpStream` so the crate stays free of
-//! an HTTP client dependency: the APIs this module serves are small
-//! and fixed (short GET/POST replies and a multipart upload
-//! endpoint).  Requests are always sent with `Connection: close` and
-//! the response is read to EOF, which keeps the parser simple; both
-//! `Content-Length` and `Transfer-Encoding: chunked` bodies are
-//! decoded.
+//! Hand-rolled so the crate stays free of an HTTP client dependency:
+//! the APIs this module serves are small and fixed (short GET/POST
+//! replies and a multipart upload endpoint).  Requests are always
+//! sent with `Connection: close` and the response is read to EOF,
+//! which keeps the parser simple; both `Content-Length` and
+//! `Transfer-Encoding: chunked` bodies are decoded.
+//!
+//! Dialing goes through [`crate::core::connector::dial`]: on native
+//! hosts a plain TCP connection, or the connector the embedding
+//! application installed — so this module and every session built on
+//! it compile and run on all targets, including wasm.  The exchange
+//! itself is generic over the byte stream
+//! ([`request_on_stream`]).
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::core::session::SessionError;
 
@@ -124,7 +129,7 @@ pub async fn post_multipart_fields(
     extra_headers: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
-    let boundary = format!("raydriver{}", std::process::id());
+    let boundary = multipart_boundary();
     let mut body = Vec::with_capacity(file.len() + 256);
     body.extend_from_slice(
         format!(
@@ -167,6 +172,18 @@ pub async fn post_multipart_fields(
     .await
 }
 
+/// A multipart boundary tag unique per process invocation.
+pub(crate) fn multipart_boundary() -> String {
+    format!(
+        "raydriver{}-{}",
+        std::process::id(),
+        REQUEST_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+static REQUEST_COUNTER: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
 async fn request(
     host: &str,
     port: u16,
@@ -177,28 +194,53 @@ async fn request(
     timeout: Duration,
 ) -> Result<HttpResponse, SessionError> {
     tokio::time::timeout(timeout, async {
-        let stream = TcpStream::connect((host, port))
+        let stream = crate::core::connector::dial(host, port)
             .await
             .map_err(|e| SessionError::Connection(e.to_string()))?;
-        exchange(stream, host, port, method, path, body, extra_headers)
-            .await
-            .map_err(|e| SessionError::Connection(e.to_string()))
+        exchange(
+            stream,
+            &format!("{host}:{port}"),
+            method,
+            path,
+            body,
+            extra_headers,
+        )
+        .await
+        .map_err(|e| SessionError::Connection(e.to_string()))
     })
     .await
-    .map_err(|_| SessionError::Timeout)?
+    .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
 }
 
-async fn exchange(
-    mut stream: TcpStream,
+/// Run a single HTTP exchange over an existing byte stream.
+///
+/// *host* is used verbatim as the `Host` header (append `:port` if
+/// the endpoint is not on the default port).  The request is written
+/// with `Connection: close` semantics and the response is read to
+/// EOF, so the stream is consumed afterwards.
+pub async fn request_on_stream<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: S,
     host: &str,
-    port: u16,
+    method: &str,
+    path: &str,
+    body: Option<(&str, &[u8])>,
+    extra_headers: &[(&str, &str)],
+) -> Result<HttpResponse, SessionError> {
+    exchange(stream, host, method, path, body, extra_headers)
+        .await
+        .map_err(|e| SessionError::Connection(e.to_string()))
+}
+
+async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
+    mut stream: S,
+    host_header: &str,
     method: &str,
     path: &str,
     body: Option<(&str, &[u8])>,
     extra_headers: &[(&str, &str)],
 ) -> Result<HttpResponse, std::io::Error> {
     let mut req = format!("{method} {path} HTTP/1.1\r\n");
-    req.push_str(&format!("Host: {host}:{port}\r\n"));
+    req.push_str(&format!("Host: {host_header}\r\n"));
     req.push_str("Accept: */*\r\n");
     req.push_str("Connection: close\r\n");
     for (name, value) in extra_headers {

@@ -42,7 +42,7 @@ Current snapshot of the device state.
 cancel(emergency: bool = False) -> Awaitable[None]
 ```
 
-Abort the running job: Ctrl+C and safety shutdown.
+Cancel the running job.
 
 | Parameter   | Type              | Description |
 | ----------- | ----------------- | ----------- |
@@ -55,7 +55,7 @@ Abort the running job: Ctrl+C and safety shutdown.
 clear_alarm() -> Awaitable[None]
 ```
 
-Clear an alarm state with the dialect's clear command.
+Clear a device alarm.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -67,11 +67,23 @@ Clear an alarm state with the dialect's clear command.
 connect() -> Awaitable[None]
 ```
 
-Open the connection and start the background tasks.
+Open the connection and keep it up until `disconnect`.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
 | _Returns_ | `Awaitable[None]` |             |
+
+### `detect_unit_system()`
+
+```python
+detect_unit_system() -> Awaitable[Optional[str]]
+```
+
+Detect the device's unit system (`"metric"` or `"imperial"`), or `None` when unknown.
+
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| _Returns_ | `Awaitable[Optional[str]]` |             |
 
 ### `disconnect()`
 
@@ -79,7 +91,7 @@ Open the connection and start the background tasks.
 disconnect() -> Awaitable[None]
 ```
 
-Stop all background tasks and close the transport.
+Stop all background tasks and close the connection.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -91,7 +103,7 @@ Stop all background tasks and close the transport.
 execute_command(command: str) -> Awaitable[list[str]]
 ```
 
-Queue a command and await its response (identical to `execute_interactive_command`).
+Send one command and return its response lines.
 
 | Parameter | Type                   | Description |
 | --------- | ---------------------- | ----------- |
@@ -104,6 +116,8 @@ Queue a command and await its response (identical to `execute_interactive_comman
 execute_interactive_command(command: str) -> Awaitable[list[str]]
 ```
 
+Send one interactive command and return its response lines.
+
 | Parameter | Type                   | Description |
 | --------- | ---------------------- | ----------- |
 | `command` | `str`                  |             |
@@ -114,46 +128,55 @@ execute_interactive_command(command: str) -> Awaitable[list[str]]
 ```python
 home(
     axes: Optional[Sequence[str]] = None,
-    active_wcs: str = 'G54',
+    active_wcs: Optional[str] = None,
 ) -> Awaitable[None]
 ```
 
-Home all axes (`axes` is None) or the named axes (e.g. `["X"]`).
+Home all axes or the given axes.
 
 | Parameter    | Type                             | Description |
 | ------------ | -------------------------------- | ----------- |
 | `axes`       | `Optional[Sequence[str]] = None` |             |
-| `active_wcs` | `str = 'G54'`                    |             |
+| `active_wcs` | `Optional[str] = None`           |             |
 | _Returns_    | `Awaitable[None]`                |             |
 
 ### `jog()`
 
 ```python
-jog(speed: float, deltas: Sequence[tuple[str, float]]) -> Awaitable[None]
+jog(
+    speed: float,
+    deltas: Optional[Sequence[tuple[str, float]]] = None,
+) -> Awaitable[None]
 ```
 
-Jog by relative deltas (mm) at `speed` (mm/min).
+Relative jog by per-axis distances.
 
-| Parameter | Type                          | Description |
-| --------- | ----------------------------- | ----------- |
-| `speed`   | `float`                       |             |
-| `deltas`  | `Sequence[tuple[str, float]]` |             |
-| _Returns_ | `Awaitable[None]`             |             |
+| Parameter | Type                                           | Description |
+| --------- | ---------------------------------------------- | ----------- |
+| `speed`   | `float`                                        |             |
+| `deltas`  | `Optional[Sequence[tuple[str, float]]] = None` |             |
+| _Returns_ | `Awaitable[None]`                              |             |
 
 ### `move_to()`
 
 ```python
-move_to(speed: float, x: float, y: float) -> Awaitable[None]
+move_to(
+    speed: float,
+    x: float,
+    y: float,
+    z: Optional[float] = None,
+) -> Awaitable[None]
 ```
 
-Move to an absolute position (mm) at `speed` (mm/min).
+Absolute move in the machine's current coordinate frame.
 
-| Parameter | Type              | Description |
-| --------- | ----------------- | ----------- |
-| `speed`   | `float`           |             |
-| `x`       | `float`           |             |
-| `y`       | `float`           |             |
-| _Returns_ | `Awaitable[None]` |             |
+| Parameter | Type                     | Description |
+| --------- | ------------------------ | ----------- |
+| `speed`   | `float`                  |             |
+| `x`       | `float`                  |             |
+| `y`       | `float`                  |             |
+| `z`       | `Optional[float] = None` |             |
+| _Returns_ | `Awaitable[None]`        |             |
 
 ### `probe_device()`
 
@@ -168,29 +191,81 @@ Send a command and await its full response. Run the device census: query `versio
 | --------- | ------------------------------------- | ----------- |
 | _Returns_ | `Awaitable[probe.SmoothieDeviceInfo]` |             |
 
+### `read_parser_state()`
+
+```python
+read_parser_state() -> Awaitable[Optional[str]]
+```
+
+Read the G-code parser state.
+
+| Parameter | Type                       | Description |
+| --------- | -------------------------- | ----------- |
+| _Returns_ | `Awaitable[Optional[str]]` |             |
+
+### `read_settings()`
+
+```python
+read_settings() -> Awaitable[list[tuple[str, str]]]
+```
+
+Read the device's firmware settings.
+
+| Parameter | Type                               | Description |
+| --------- | ---------------------------------- | ----------- |
+| _Returns_ | `Awaitable[list[tuple[str, str]]]` |             |
+
+### `read_wcs_offsets()`
+
+```python
+read_wcs_offsets() -> Awaitable[dict[str, tuple[float, float, float]]]
+```
+
+Read the work-coordinate-system offsets.
+
+| Parameter | Type                                               | Description |
+| --------- | -------------------------------------------------- | ----------- |
+| _Returns_ | `Awaitable[dict[str, tuple[float, float, float]]]` |             |
+
 ### `run()`
 
 ```python
 run(
     gcode: str,
     op_line_map: Optional[Mapping[int, int]] = None,
-    progress_callback: Optional[Callable[[int], object]] = None,
-    *,
     op_estimates: Optional[Sequence[float]] = None,
+    progress_callback: Optional[Callable[[int], object]] = None,
 ) -> Awaitable[None]
 ```
 
-Stream a G-code program using the ping-pong protocol.
-
-`op_line_map` maps G-code line indices to op indices for progress reporting.
+Stream a G-code job.
 
 | Parameter           | Type                                       | Description |
 | ------------------- | ------------------------------------------ | ----------- |
 | `gcode`             | `str`                                      |             |
 | `op_line_map`       | `Optional[Mapping[int, int]] = None`       |             |
+| `op_estimates`      | `Optional[Sequence[float]] = None`         |             |
 | `progress_callback` | `Optional[Callable[[int], object]] = None` |             |
-| `op_estimates`      | `Optional[Sequence[float]]`                |             |
 | _Returns_           | `Awaitable[None]`                          |             |
+
+### `run_probe_cycle()`
+
+```python
+run_probe_cycle(
+    axis_letter: str,
+    max_travel: float,
+    feed_rate: float,
+) -> Awaitable[Optional[tuple[float, float, float]]]
+```
+
+Run a probe cycle; `None` = no trigger reported.
+
+| Parameter     | Type                                              | Description |
+| ------------- | ------------------------------------------------- | ----------- |
+| `axis_letter` | `str`                                             |             |
+| `max_travel`  | `float`                                           |             |
+| `feed_rate`   | `float`                                           |             |
+| _Returns_     | `Awaitable[Optional[tuple[float, float, float]]]` |             |
 
 ### `run_raw()`
 
@@ -198,7 +273,7 @@ Stream a G-code program using the ping-pong protocol.
 run_raw(machine_code: str) -> Awaitable[None]
 ```
 
-Execute a raw G-code string line by line.
+Execute pre-rendered machine code.
 
 | Parameter      | Type              | Description |
 | -------------- | ----------------- | ----------- |
@@ -211,6 +286,8 @@ Execute a raw G-code string line by line.
 select_tool(tool_number: int) -> Awaitable[None]
 ```
 
+Select a tool.
+
 | Parameter     | Type              | Description |
 | ------------- | ----------------- | ----------- |
 | `tool_number` | `int`             |             |
@@ -222,7 +299,7 @@ select_tool(tool_number: int) -> Awaitable[None]
 set_focus_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
-Set laser power for focus mode; `None` turns the laser off.
+Set the laser power used while focusing.
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
@@ -235,7 +312,7 @@ Set laser power for focus mode; `None` turns the laser off.
 set_hold(hold: bool = True) -> Awaitable[None]
 ```
 
-Pause (feed hold) or resume the device.
+Pause or resume the running job.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -248,7 +325,7 @@ Pause (feed hold) or resume the device.
 set_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
-Set laser power. `power` is the absolute S value; `None` (or zero) turns the laser off.
+Set the laser/spindle power; `None` disables the tool.
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
@@ -262,19 +339,19 @@ set_wcs_offset(
     wcs_slot: str,
     x: float,
     y: float,
-    z: Optional[float],
+    z: Optional[float] = None,
 ) -> Awaitable[None]
 ```
 
-Set a WCS offset via the dialect's `set_wcs_offset` template.
+Write a work-coordinate-system offset.
 
-| Parameter  | Type              | Description |
-| ---------- | ----------------- | ----------- |
-| `wcs_slot` | `str`             |             |
-| `x`        | `float`           |             |
-| `y`        | `float`           |             |
-| `z`        | `Optional[float]` |             |
-| _Returns_  | `Awaitable[None]` |             |
+| Parameter  | Type                     | Description |
+| ---------- | ------------------------ | ----------- |
+| `wcs_slot` | `str`                    |             |
+| `x`        | `float`                  |             |
+| `y`        | `float`                  |             |
+| `z`        | `Optional[float] = None` |             |
+| _Returns_  | `Awaitable[None]`        |             |
 
 ### `update_dialect()`
 
@@ -282,7 +359,7 @@ Set a WCS offset via the dialect's `set_wcs_offset` template.
 update_dialect(dialect: dict) -> None
 ```
 
-Swap the dialect command templates at runtime.
+Replace the command templates.
 
 | Parameter | Type   | Description |
 | --------- | ------ | ----------- |
@@ -309,3 +386,17 @@ Build a session around a \[`MockTransport`\] (for tests).
 | `dialect`        | `Optional[dict] = None`                                  |             |
 | `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None` |             |
 | _Returns_        | `SmoothieSession`                                        |             |
+
+### `write_setting()`
+
+```python
+write_setting(key: str, value: str) -> Awaitable[None]
+```
+
+Write one firmware setting.
+
+| Parameter | Type              | Description |
+| --------- | ----------------- | ----------- |
+| `key`     | `str`             |             |
+| `value`   | `str`             |             |
+| _Returns_ | `Awaitable[None]` |             |

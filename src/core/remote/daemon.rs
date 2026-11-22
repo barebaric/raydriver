@@ -18,14 +18,15 @@ use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
+use crate::core::discovery::daemon::is_loopback;
 use crate::core::remote::protocol::{
     self, ProtocolError, WireError, WireEvent,
 };
-use crate::core::remote::registry::Registry;
+use crate::core::remote::registry;
 use crate::core::remote::session::{
-    HostedError, HostedSession, RemoteEventSink, SessionFactory,
+    HostedSession, RemoteEventSink, SessionFactory,
 };
-use crate::core::remote::transport::is_loopback;
+use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 
 pub const DEFAULT_PORT: u16 = 8765;
@@ -261,20 +262,21 @@ pub struct StartedServer {
 
 /// Session host serving the remote control protocol.
 pub struct Daemon {
-    pub config: Arc<Mutex<DaemonConfig>>,
+    config: Arc<Mutex<DaemonConfig>>,
     factory: Arc<dyn SessionFactory>,
-    registry: Arc<Registry>,
+    /// The embedder-supplied protocol table (core carries no
+    /// protocol knowledge of its own).
+    registry: registry::Registry,
     hosts: Mutex<HashMap<String, Arc<Host>>>,
     clients: Mutex<HashMap<String, Arc<Client>>>,
     listener: Mutex<Option<ListenerHandle>>,
 }
 
 impl Daemon {
-    /// Create a daemon that hosts only protocols in *registry*.
     pub fn new(
         config: Arc<Mutex<DaemonConfig>>,
         factory: Arc<dyn SessionFactory>,
-        registry: Arc<Registry>,
+        registry: registry::Registry,
     ) -> Self {
         Self {
             config,
@@ -284,6 +286,13 @@ impl Daemon {
             clients: Mutex::new(HashMap::new()),
             listener: Mutex::new(None),
         }
+    }
+
+    /// The live daemon configuration.  The embedding application
+    /// shares this handle and may adjust settings (cameras, sessions,
+    /// keepalive) between calls; the daemon re-reads it per request.
+    pub fn config(&self) -> Arc<Mutex<DaemonConfig>> {
+        self.config.clone()
     }
 
     /// Open the listener and auto-open configured sessions.
@@ -574,7 +583,7 @@ impl Daemon {
         }
         let result = match type_ {
             protocol::DEVICE_LIST => self.device_list().await,
-            protocol::PROTOCOL_LIST => Ok(self.registry.payload()),
+            protocol::PROTOCOL_LIST => Ok(self.registry.protocols_payload()),
             protocol::SESSION_LIST => self.session_list().await,
             protocol::SESSION_OPEN => self.session_open(client, payload).await,
             protocol::SESSION_ATTACH => {
@@ -634,7 +643,7 @@ impl Daemon {
                 }
                 let label = self
                     .registry
-                    .info(protocol_name)
+                    .protocol_info(protocol_name)
                     .map(|info| info.label)
                     .unwrap_or_default();
                 devices.insert(
@@ -659,7 +668,7 @@ impl Daemon {
             }
             let label = self
                 .registry
-                .info(&host.protocol)
+                .protocol_info(&host.protocol)
                 .map(|info| info.label)
                 .unwrap_or_default();
             devices.insert(
@@ -766,7 +775,7 @@ impl Daemon {
             .unwrap_or_else(|| "watch".to_string());
         let metadata = self
             .registry
-            .info(&host.protocol)
+            .protocol_info(&host.protocol)
             .map(|info| info.to_json())
             .unwrap_or(Value::Null);
         Ok(json!({
@@ -806,7 +815,13 @@ impl Daemon {
                 }));
             }
         }
-        Ok(json!({"snapshot": host.snapshot()}))
+        let mut snapshot = host.snapshot();
+        snapshot["metadata"] = self
+            .registry
+            .protocol_info(&host.protocol)
+            .map(|info| info.to_json())
+            .unwrap_or(Value::Null);
+        Ok(json!({"snapshot": snapshot}))
     }
 
     async fn session_detach(
@@ -842,12 +857,13 @@ impl Daemon {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
-        let info = self.registry.info(&host.protocol).ok_or_else(|| {
-            ProtocolError::new(
-                protocol::BAD_REQUEST,
-                format!("unknown protocol {:?}", host.protocol),
-            )
-        })?;
+        let info =
+            self.registry.protocol_info(&host.protocol).ok_or_else(|| {
+                ProtocolError::new(
+                    protocol::BAD_REQUEST,
+                    format!("unknown protocol {:?}", host.protocol),
+                )
+            })?;
         if !info.methods.contains(method) {
             return Err(ProtocolError::new(
                 protocol::UNKNOWN_METHOD,
@@ -858,15 +874,15 @@ impl Daemon {
             return self.start_job(&host, args).await;
         }
         if method == "connect" {
-            host.session.connect().await.map_err(hosted)?;
+            host.session.connect().await.map_err(internal)?;
             return Ok(json!({"result": null}));
         }
         if method == "disconnect" {
-            host.session.disconnect().await.map_err(hosted)?;
+            host.session.disconnect().await.map_err(internal)?;
             return Ok(json!({"result": null}));
         }
         let result =
-            host.session.execute(method, args).await.map_err(hosted)?;
+            host.session.execute(method, args).await.map_err(internal)?;
         Ok(json!({"result": result}))
     }
 
@@ -879,12 +895,13 @@ impl Daemon {
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let info = self.registry.info(&host.protocol).ok_or_else(|| {
-            ProtocolError::new(
-                protocol::BAD_REQUEST,
-                format!("unknown protocol {:?}", host.protocol),
-            )
-        })?;
+        let info =
+            self.registry.protocol_info(&host.protocol).ok_or_else(|| {
+                ProtocolError::new(
+                    protocol::BAD_REQUEST,
+                    format!("unknown protocol {:?}", host.protocol),
+                )
+            })?;
         if !info.properties.contains(name) {
             return Err(ProtocolError::new(
                 protocol::UNKNOWN_PROPERTY,
@@ -927,9 +944,7 @@ impl Daemon {
         let session = self
             .factory
             .create(protocol_name, config.clone(), dialect.clone(), sink)
-            .map_err(|message| {
-                ProtocolError::new(protocol::INTERNAL, message)
-            })?;
+            .map_err(internal)?;
         let host = Arc::new(Host {
             id: uuid::Uuid::new_v4().simple().to_string()[..12].to_string(),
             protocol: protocol_name.to_string(),
@@ -1012,8 +1027,17 @@ impl Daemon {
         &self,
         reference: &str,
     ) -> Option<(String, Value, Value)> {
-        let candidates = self.registry.probe_candidates();
-        for (name, probe) in candidates {
+        let candidates: Vec<(&str, &registry::ProbeFingerprint)> = self
+            .registry
+            .protocols()
+            .iter()
+            .filter_map(|info| {
+                info.probe
+                    .as_ref()
+                    .map(|fingerprint| (info.name, fingerprint))
+            })
+            .collect();
+        for (name, fingerprint) in candidates {
             let config = json!({
                 "port": reference,
                 "baudrate": 115200,
@@ -1040,13 +1064,13 @@ impl Daemon {
                 Duration::from_secs(3),
                 session.execute(
                     "execute_interactive_command",
-                    json!({"command": probe.command}),
+                    json!({"command": fingerprint.command}),
                 ),
             )
             .await;
             if let Ok(Ok(value)) = reply {
                 let text = value.to_string();
-                if text.contains(probe.signature) {
+                if text.contains(fingerprint.signature) {
                     let _ = session.disconnect().await;
                     return Some((name.to_string(), config, json!({})));
                 }
@@ -1339,7 +1363,7 @@ impl Daemon {
                 daemon.fan_out(
                     &job_host,
                     WireEvent::JobError {
-                        message: err.message,
+                        message: err.to_string(),
                     },
                 );
             }
@@ -1435,9 +1459,15 @@ fn tokens_equal(supplied: &str, expected: &str) -> bool {
     difference == 0
 }
 
-fn hosted(err: HostedError) -> ProtocolError {
-    ProtocolError::new(protocol::INTERNAL, err.message)
-        .with_kind(err.kind.as_str())
+fn internal(err: SessionError) -> ProtocolError {
+    let kind = match err {
+        SessionError::Timeout(_) => "timeout",
+        SessionError::Connection(_) => "connection",
+        SessionError::Device(_) | SessionError::BufferStall(_) => "device",
+        SessionError::Unsupported(_) => "unsupported",
+        SessionError::Other(_) => "internal",
+    };
+    ProtocolError::new(protocol::INTERNAL, err.to_string()).with_kind(kind)
 }
 
 fn device_ref(config: &Value) -> String {

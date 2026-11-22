@@ -16,13 +16,17 @@ def test_session_exposes_m2_resource_uri_and_state():
     assert session.is_job_running is False
 
 
-def test_session_has_control_operations_but_no_gcode_streamer():
+@pytest.mark.asyncio
+async def test_session_has_control_operations_but_no_gcode_streamer():
     session = M2Session(config={"host": "192.0.2.20"})
 
     assert callable(session.start)
     assert callable(session.set_hold)
     assert callable(session.cancel)
-    assert not hasattr(session, "run")
+    # The uniform surface exposes job streaming; the M2 protocol has
+    # no G-code upload, so it raises rather than being absent.
+    with pytest.raises(NotImplementedError):
+        await session.run("G1 X1")
 
 
 @pytest.mark.asyncio
@@ -57,8 +61,8 @@ async def test_session_connects_and_controls_m2_jobs():
         await wait_until(lambda: session.state.machine_pos[0] == 1.0)
 
         await session.home()
-        await session.move_to(10.0, 20.0)
-        await session.jog(dx=1.0, dy=-1.0)
+        await session.move_to(18000.0, 10.0, 20.0)
+        await session.jog(18000.0, [("x", 1.0), ("y", -1.0)])
         await session.start()
         await wait_until(lambda: session.state.status.name == "RUN")
         await session.set_hold(True)

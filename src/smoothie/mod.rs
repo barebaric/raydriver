@@ -1,18 +1,12 @@
-//! Smoothie protocol implementation.
-
-use crate::core::remote::registry::{CensusKind, ProtocolDescriptor};
+//! The Smoothie protocol implementation.
+//!
+//! Cross-protocol imports (sanctioned per AGENTS.md, justified here
+//! in the importing module's docs): Smoothie answers `?` with
+//! Grbl-style `<...>` status reports and shares the GRBL error and
+//! alarm code tables, so the session reuses `crate::grbl::parser`
+//! (status parsing, error lookup, comment stripping, G54-G59
+//! P-number mapping) and `crate::grbl::errors` (alarm-code to
+//! device-error mapping).
 
 pub mod probe;
 pub mod session;
-
-pub const DESCRIPTOR: ProtocolDescriptor = ProtocolDescriptor {
-    name: "smoothie",
-    label: "Smoothieware",
-    dialect_family: "smoothieware",
-    connection: "telnet",
-    config_keys: &["host", "tcp_port"],
-    extra_methods: &["set_hold", "clear_alarm", "probe_device"],
-    buffer_stats: false,
-    census: CensusKind::Smoothie,
-    probe: None,
-};

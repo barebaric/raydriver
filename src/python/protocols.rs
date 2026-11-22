@@ -10,7 +10,7 @@ use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
 
-use crate::core::remote::registry::ProtocolInfo as CoreProtocolInfo;
+use crate::core::remote::registry as core;
 use crate::python::core::json::value_to_py;
 
 /// Metadata describing one session protocol.
@@ -22,7 +22,7 @@ use crate::python::core::json::value_to_py;
 #[gen_stub_pyclass(module = "raydriver.protocols")]
 #[pyclass(frozen, module = "raydriver.protocols")]
 pub struct ProtocolInfo {
-    inner: CoreProtocolInfo,
+    inner: core::ProtocolInfo,
 }
 
 #[gen_stub_pymethods]
@@ -89,13 +89,124 @@ impl ProtocolInfo {
     }
 }
 
+/// The extra remote-callable methods the GRBL-family sessions
+/// implement beyond the uniform surface.
+const GRBL_EXTRA: &[&str] = &[
+    "set_hold",
+    "read_settings",
+    "write_setting",
+    "read_wcs_offsets",
+    "read_parser_state",
+    "run_probe_cycle",
+    "detect_unit_system",
+    "probe_device",
+];
+
+/// The concrete protocol table this crate serves.  Protocol
+/// knowledge lives with the embedding application — the bindings,
+/// here — and is handed to the daemon at construction; core carries
+/// only the [`core::Registry`] container.
+pub(crate) fn protocol_registry() -> core::Registry {
+    core::Registry::new(vec![
+        core::ProtocolInfo {
+            name: "grbl",
+            label: "GRBL",
+            dialect_family: "grbl",
+            connection: "serial_or_telnet_or_bluetooth",
+            config_keys: &[
+                "port", "baudrate", "host", "tcp_port", "address", "channel",
+            ],
+            methods: core::methods(GRBL_EXTRA),
+            properties: core::buffer_properties(),
+            probe: Some(core::ProbeFingerprint {
+                command: "$I",
+                signature: "VER:",
+            }),
+        },
+        core::ProtocolInfo {
+            name: "grbl_simple",
+            label: "GRBL (simple)",
+            dialect_family: "grbl",
+            connection: "serial_or_telnet_or_bluetooth",
+            config_keys: &[
+                "port", "baudrate", "host", "tcp_port", "address", "channel",
+            ],
+            methods: core::methods(GRBL_EXTRA),
+            properties: core::common_properties(),
+            probe: None,
+        },
+        core::ProtocolInfo {
+            name: "esp3d",
+            label: "FluidNC / ESP3D",
+            dialect_family: "grbl",
+            connection: "network",
+            config_keys: &["host", "http_port", "ws_port", "protocol"],
+            methods: core::methods(GRBL_EXTRA),
+            properties: core::common_properties(),
+            probe: None,
+        },
+        core::ProtocolInfo {
+            name: "smoothie",
+            label: "Smoothieware",
+            dialect_family: "smoothieware",
+            connection: "telnet",
+            config_keys: &["host", "tcp_port"],
+            methods: core::methods(&[
+                "set_hold",
+                "clear_alarm",
+                "probe_device",
+            ]),
+            properties: core::common_properties(),
+            probe: None,
+        },
+        core::ProtocolInfo {
+            name: "octoprint",
+            label: "OctoPrint",
+            dialect_family: "grbl",
+            connection: "network",
+            config_keys: &["host", "port", "path", "api_key"],
+            // The session implements the uniform surface, but the
+            // server API cannot back settings or unit claims and
+            // returns empty results for them, so those methods are
+            // not advertised as remote-callable.
+            methods: core::methods(&[
+                "clear_alarm",
+                "probe_device",
+                "probe_info",
+                "read_wcs_offsets",
+                "read_parser_state",
+                "run_probe_cycle",
+                "set_hold",
+            ]),
+            properties: core::common_properties(),
+            probe: None,
+        },
+        core::ProtocolInfo {
+            name: "marlin",
+            label: "Marlin",
+            dialect_family: "marlin",
+            connection: "serial",
+            config_keys: &["port", "baudrate"],
+            methods: core::methods(&[
+                "clear_alarm",
+                "detect_unit_system",
+                "probe_device",
+            ]),
+            properties: core::common_properties(),
+            probe: Some(core::ProbeFingerprint {
+                command: "M115",
+                signature: "FIRMWARE",
+            }),
+        },
+    ])
+}
+
 /// Look up a protocol's metadata, raising ``KeyError`` if unknown.
 #[gen_stub_pyfunction(module = "raydriver.protocols")]
 #[pyfunction]
 fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
-    crate::protocols::registry()
-        .info(name)
-        .cloned()
+    protocol_registry()
+        .protocol_info(name)
         .map(|inner| ProtocolInfo { inner })
         .ok_or_else(|| PyKeyError::new_err(name.to_owned()))
 }
@@ -108,12 +219,9 @@ fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
 #[pyfunction]
 fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     let dict = PyDict::new(py);
-    let registry = crate::protocols::registry();
-    for name in registry.names() {
-        let Some(inner) = registry.info(name).cloned() else {
-            continue;
-        };
-        dict.set_item(name, Py::new(py, ProtocolInfo { inner })?)?;
+    for info in protocol_registry().protocols() {
+        let inner = info.clone();
+        dict.set_item(info.name, Py::new(py, ProtocolInfo { inner })?)?;
     }
     Ok(dict)
 }
@@ -123,8 +231,8 @@ fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
 #[gen_stub(override_return_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
 #[pyfunction]
 fn protocols_payload(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-    let payload = crate::protocols::registry().payload();
-    Ok(value_to_py(py, &payload)?.into_bound(py))
+    Ok(value_to_py(py, &protocol_registry().protocols_payload())?
+        .into_bound(py))
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

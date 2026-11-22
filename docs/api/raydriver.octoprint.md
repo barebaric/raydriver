@@ -54,7 +54,7 @@ Cancel the running job.
 clear_alarm() -> Awaitable[None]
 ```
 
-Clear the printer's error state (M999) and reset locally.
+Clear a device alarm.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -66,7 +66,7 @@ Clear the printer's error state (M999) and reset locally.
 connect() -> Awaitable[None]
 ```
 
-Open the connection and start the background tasks.
+Open the connection and keep it up until `disconnect`.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -78,8 +78,7 @@ Open the connection and start the background tasks.
 detect_unit_system() -> Awaitable[Optional[str]]
 ```
 
-The unit system the dialect works in; the server API exposes no unit configuration, so this is
-always `None`.
+Detect the device's unit system (`"metric"` or `"imperial"`), or `None` when unknown.
 
 | Parameter | Type                       | Description |
 | --------- | -------------------------- | ----------- |
@@ -103,7 +102,7 @@ Stop all background tasks and close the connection.
 execute_command(command: str) -> Awaitable[list[str]]
 ```
 
-Send a single command without awaiting further state.
+Send one command and return its response lines.
 
 | Parameter | Type                   | Description |
 | --------- | ---------------------- | ----------- |
@@ -116,8 +115,7 @@ Send a single command without awaiting further state.
 execute_interactive_command(command: str) -> Awaitable[list[str]]
 ```
 
-Send a single command and await the server's HTTP acknowledgement. The API exposes no per-line
-response text, so the result is always empty.
+Send one interactive command and return its response lines.
 
 | Parameter | Type                   | Description |
 | --------- | ---------------------- | ----------- |
@@ -129,51 +127,54 @@ response text, so the result is always empty.
 ```python
 home(
     axes: Optional[Sequence[str]] = None,
-    active_wcs: str = 'G54',
+    active_wcs: Optional[str] = None,
 ) -> Awaitable[None]
 ```
 
-Home all axes (`axes` is None) or the named axes.
+Home all axes or the given axes.
 
 | Parameter    | Type                             | Description |
 | ------------ | -------------------------------- | ----------- |
 | `axes`       | `Optional[Sequence[str]] = None` |             |
-| `active_wcs` | `str = 'G54'`                    |             |
+| `active_wcs` | `Optional[str] = None`           |             |
 | _Returns_    | `Awaitable[None]`                |             |
 
 ### `jog()`
 
 ```python
-jog(speed: float, deltas: Sequence[tuple[str, float]]) -> Awaitable[None]
+jog(
+    speed: float,
+    deltas: Optional[Sequence[tuple[str, float]]] = None,
+) -> Awaitable[None]
 ```
 
-Jog by relative deltas (mm) at `speed` (mm/min).
+Relative jog by per-axis distances.
 
-| Parameter | Type                          | Description |
-| --------- | ----------------------------- | ----------- |
-| `speed`   | `float`                       |             |
-| `deltas`  | `Sequence[tuple[str, float]]` |             |
-| _Returns_ | `Awaitable[None]`             |             |
+| Parameter | Type                                           | Description |
+| --------- | ---------------------------------------------- | ----------- |
+| `speed`   | `float`                                        |             |
+| `deltas`  | `Optional[Sequence[tuple[str, float]]] = None` |             |
+| _Returns_ | `Awaitable[None]`                              |             |
 
 ### `move_to()`
 
 ```python
 move_to(
+    speed: float,
     x: float,
     y: float,
     z: Optional[float] = None,
-    speed: Optional[float] = None,
 ) -> Awaitable[None]
 ```
 
-Move to an absolute position (mm); `speed` in mm/min.
+Absolute move in the machine's current coordinate frame.
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
+| `speed`   | `float`                  |             |
 | `x`       | `float`                  |             |
 | `y`       | `float`                  |             |
 | `z`       | `Optional[float] = None` |             |
-| `speed`   | `Optional[float] = None` |             |
 | _Returns_ | `Awaitable[None]`        |             |
 
 ### `probe_device()`
@@ -208,7 +209,7 @@ so local and remote probing use the same code path.
 read_parser_state() -> Awaitable[Optional[str]]
 ```
 
-Read the G-code parser state; always `None` (the server API exposes none).
+Read the G-code parser state.
 
 | Parameter | Type                       | Description |
 | --------- | -------------------------- | ----------- |
@@ -220,7 +221,7 @@ Read the G-code parser state; always `None` (the server API exposes none).
 read_settings() -> Awaitable[list[tuple[str, str]]]
 ```
 
-Read the firmware settings; always empty (the server API exposes none).
+Read the device's firmware settings.
 
 | Parameter | Type                               | Description |
 | --------- | ---------------------------------- | ----------- |
@@ -232,7 +233,7 @@ Read the firmware settings; always empty (the server API exposes none).
 read_wcs_offsets() -> Awaitable[dict[str, tuple[float, float, float]]]
 ```
 
-Read the WCS offsets; always empty (the server API exposes none).
+Read the work-coordinate-system offsets.
 
 | Parameter | Type                                               | Description |
 | --------- | -------------------------------------------------- | ----------- |
@@ -249,9 +250,7 @@ run(
 ) -> Awaitable[None]
 ```
 
-Upload a G-code string, start it and await the server's terminal print event. Every op index in
-*op_line_map* is reported to *progress_callback* when the job starts (the protocol carries no per-op
-progress).
+Stream a G-code job.
 
 | Parameter           | Type                                       | Description |
 | ------------------- | ------------------------------------------ | ----------- |
@@ -268,17 +267,17 @@ run_probe_cycle(
     axis_letter: str,
     max_travel: float,
     feed_rate: float,
-) -> Awaitable[Optional[str]]
+) -> Awaitable[Optional[tuple[float, float, float]]]
 ```
 
-Run a probe cycle (G38.2); OctoPrint does not report probe results, so the result is always `None`.
+Run a probe cycle; `None` = no trigger reported.
 
-| Parameter     | Type                       | Description |
-| ------------- | -------------------------- | ----------- |
-| `axis_letter` | `str`                      |             |
-| `max_travel`  | `float`                    |             |
-| `feed_rate`   | `float`                    |             |
-| _Returns_     | `Awaitable[Optional[str]]` |             |
+| Parameter     | Type                                              | Description |
+| ------------- | ------------------------------------------------- | ----------- |
+| `axis_letter` | `str`                                             |             |
+| `max_travel`  | `float`                                           |             |
+| `feed_rate`   | `float`                                           |             |
+| _Returns_     | `Awaitable[Optional[tuple[float, float, float]]]` |             |
 
 ### `run_raw()`
 
@@ -286,7 +285,7 @@ Run a probe cycle (G38.2); OctoPrint does not report probe results, so the resul
 run_raw(machine_code: str) -> Awaitable[None]
 ```
 
-Send a raw G-code string as printer commands.
+Execute pre-rendered machine code.
 
 | Parameter      | Type              | Description |
 | -------------- | ----------------- | ----------- |
@@ -299,7 +298,7 @@ Send a raw G-code string as printer commands.
 select_tool(tool_number: int) -> Awaitable[None]
 ```
 
-Select a tool by sending its tool-change command.
+Select a tool.
 
 | Parameter     | Type              | Description |
 | ------------- | ----------------- | ----------- |
@@ -312,7 +311,7 @@ Select a tool by sending its tool-change command.
 set_focus_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
-Set laser power for focus mode; `None` turns the laser off.
+Set the laser power used while focusing.
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
@@ -325,7 +324,7 @@ Set laser power for focus mode; `None` turns the laser off.
 set_hold(hold: bool = True) -> Awaitable[None]
 ```
 
-Pause (true) or resume (false) the running job.
+Pause or resume the running job.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |
@@ -338,7 +337,7 @@ Pause (true) or resume (false) the running job.
 set_power(power: Optional[float] = None) -> Awaitable[None]
 ```
 
-Set laser power. `power` is the absolute S value; `None` (or zero) turns the laser off.
+Set the laser/spindle power; `None` disables the tool.
 
 | Parameter | Type                     | Description |
 | --------- | ------------------------ | ----------- |
@@ -352,20 +351,19 @@ set_wcs_offset(
     wcs_slot: str,
     x: float,
     y: float,
-    z: Optional[float],
+    z: Optional[float] = None,
 ) -> Awaitable[None]
 ```
 
-Set a work coordinate offset via a G10 L2 command. Raises `ValueError` for slots the server model
-does not know.
+Write a work-coordinate-system offset.
 
-| Parameter  | Type              | Description |
-| ---------- | ----------------- | ----------- |
-| `wcs_slot` | `str`             |             |
-| `x`        | `float`           |             |
-| `y`        | `float`           |             |
-| `z`        | `Optional[float]` |             |
-| _Returns_  | `Awaitable[None]` |             |
+| Parameter  | Type                     | Description |
+| ---------- | ------------------------ | ----------- |
+| `wcs_slot` | `str`                    |             |
+| `x`        | `float`                  |             |
+| `y`        | `float`                  |             |
+| `z`        | `Optional[float] = None` |             |
+| _Returns_  | `Awaitable[None]`        |             |
 
 ### `update_dialect()`
 
@@ -373,7 +371,7 @@ does not know.
 update_dialect(dialect: dict) -> None
 ```
 
-Accept dialect command templates; commands are sent as structured JSON, so nothing is stored.
+Replace the command templates.
 
 | Parameter | Type   | Description |
 | --------- | ------ | ----------- |
@@ -385,6 +383,8 @@ Accept dialect command templates; commands are sent as structured JSON, so nothi
 ```python
 write_setting(key: str, value: str) -> Awaitable[None]
 ```
+
+Write one firmware setting.
 
 | Parameter | Type              | Description |
 | --------- | ----------------- | ----------- |

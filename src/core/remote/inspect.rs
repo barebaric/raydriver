@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::core::remote::protocol;
-use crate::core::remote::transport::{
+use crate::core::discovery::daemon::{
     connect_stream, is_loopback, read_message, write_frame,
 };
+use crate::core::remote::protocol;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -26,17 +26,21 @@ pub async fn daemon_rpc(
     tls_ca: Option<&str>,
     tls_hostname: Option<&str>,
     requests: &[(&str, Value)],
-) -> Result<(Value, Vec<Value>), String> {
+) -> Result<(Value, Vec<Value>), std::io::Error> {
     if token.is_some() && tls_ca.is_none() && !is_loopback(host) {
-        return Err(
-            "refusing to send a token without TLS (use --tls-ca)".to_string()
-        );
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "refusing to send a token without TLS (use --tls-ca)",
+        ));
     }
     let mut stream =
         connect_stream(host, port, tls_ca, tls_hostname, RPC_TIMEOUT).await?;
     let welcome = read_message(&mut stream, RPC_TIMEOUT).await?;
     if welcome.get("type").and_then(Value::as_str) != Some(protocol::WELCOME) {
-        return Err("not a raydriver daemon".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "not a raydriver daemon",
+        ));
     }
     let payload = welcome.get("payload").cloned().unwrap_or(Value::Null);
     if payload
@@ -52,7 +56,10 @@ pub async fn daemon_rpc(
         write_frame(&mut stream, &auth).await?;
         let reply = read_message(&mut stream, RPC_TIMEOUT).await?;
         if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-            return Err("daemon authentication failed".to_string());
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "daemon authentication failed",
+            ));
         }
     }
 
@@ -67,12 +74,18 @@ pub async fn daemon_rpc(
 }
 
 /// Read just the welcome frame — no credentials needed.
-pub async fn welcome_probe(host: &str, port: u16) -> Result<Value, String> {
+pub async fn welcome_probe(
+    host: &str,
+    port: u16,
+) -> Result<Value, std::io::Error> {
     let mut stream =
         connect_stream(host, port, None, None, RPC_TIMEOUT).await?;
     let welcome = read_message(&mut stream, RPC_TIMEOUT).await?;
     if welcome.get("type").and_then(Value::as_str) != Some(protocol::WELCOME) {
-        return Err("not a raydriver daemon".to_string());
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "not a raydriver daemon",
+        ));
     }
     Ok(welcome.get("payload").cloned().unwrap_or(Value::Null))
 }
@@ -83,7 +96,7 @@ pub async fn snapshot(
     port: u16,
     token: Option<&str>,
     tls_ca: Option<&str>,
-) -> Result<Value, String> {
+) -> Result<Value, std::io::Error> {
     let requests = [
         (protocol::SESSION_LIST, json!({})),
         (protocol::CLIENT_LIST, json!({})),

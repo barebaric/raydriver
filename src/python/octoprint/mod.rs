@@ -20,7 +20,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     octoprint_mod.setattr("__doc__", MODULE_DOC)?;
     octoprint_mod.add("__all__", vec!["OctoPrintSession", "probe"])?;
     probe::register(&octoprint_mod)?;
-    octoprint_mod.add_class::<session::OctoPrintSession>()?;
+    octoprint_mod.add_class::<session::PyOctoPrintSession>()?;
 
     m.add_submodule(&octoprint_mod)?;
     // Note: raydriver.octoprint is intentionally NOT registered in

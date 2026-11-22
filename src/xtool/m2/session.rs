@@ -1,7 +1,23 @@
+//! The xTool M2 session: a JSON-RPC-style protocol over TLS
+//! WebSocket (`wss://<host>:28900/websocket`).
+//!
+//! Requests are length-prefixed binary frames (`ba be` header) with
+//! wrapping 16-bit transaction IDs; the machine answers each with a
+//! code/message/data triple and pushes notification frames (state,
+//! working, finished) that update the device state.  The session
+//! authenticates as the machine's guest user on connect and rejects
+//! devices that do not identify as an M2.
+//!
+//! Everything is device-API-driven — no line protocol and no
+//! `ok`/`error` acks; a parked request fails when the socket drops
+//! (`fail_pending`) or at its per-request deadline.
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use async_trait::async_trait;
 
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{
@@ -22,7 +38,9 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
@@ -67,7 +85,7 @@ impl M2Config {
     }
 }
 
-pub struct M2Core {
+pub struct M2Session {
     config: M2Config,
     events: Arc<dyn SessionEvents>,
     state: Arc<Mutex<DeviceState>>,
@@ -76,7 +94,7 @@ pub struct M2Core {
     connection_task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl M2Core {
+impl M2Session {
     pub fn new(config: M2Config, events: Arc<dyn SessionEvents>) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -86,49 +104,6 @@ impl M2Core {
             connection: AsyncMutex::new(None),
             connection_task: Mutex::new(None),
         })
-    }
-
-    pub fn state(&self) -> DeviceState {
-        self.state.lock().unwrap().clone()
-    }
-
-    pub fn resource_uri(&self) -> Option<String> {
-        Some(format!(
-            "wss://{}:{}/websocket",
-            self.config.host, self.config.port
-        ))
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        matches!(self.state().status, DeviceStatus::Run | DeviceStatus::Hold)
-    }
-
-    pub async fn connect(self: &Arc<Self>) {
-        self.disconnect_tasks().await;
-        self.keep_running.store(true, Ordering::SeqCst);
-        let core = self.clone();
-        let task = tokio::spawn(async move { core.connection_loop().await });
-        *self.connection_task.lock().unwrap() = Some(task);
-    }
-
-    pub async fn disconnect(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.disconnect_tasks().await;
-        self.set_connection_status(TransportStatus::Disconnected, None);
-    }
-
-    pub fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        if let Ok(mut task) = self.connection_task.lock() {
-            if let Some(task) = task.take() {
-                task.abort();
-            }
-        }
-        if let Ok(mut conn) = self.connection.try_lock() {
-            if let Some(conn) = conn.take() {
-                conn.close_now();
-            }
-        }
     }
 
     async fn disconnect_tasks(&self) {
@@ -299,72 +274,11 @@ impl M2Core {
     pub async fn start(&self) -> Result<(), SessionError> {
         self.control("START").await
     }
-
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        self.control(if hold { "PAUSE" } else { "RESUME" }).await
-    }
-
-    pub async fn cancel(&self) -> Result<(), SessionError> {
-        self.control("CANCEL").await
-    }
-
-    pub async fn home(&self) -> Result<(), SessionError> {
-        self.current_connection()
-            .await?
-            .request(
-                "POST",
-                "/v1/project/control/home",
-                json!({"axis": "ALL"}),
-                json!({}),
-                M2Config::secs(self.config.request_timeout),
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn move_to(
-        &self,
-        x: f64,
-        y: f64,
-        speed: f64,
-    ) -> Result<(), SessionError> {
-        self.current_connection()
-            .await?
-            .request(
-                "POST",
-                "/v1/project/control/absolute-move",
-                json!({}),
-                json!({"coor": {"x": x, "y": y}, "speed": speed}),
-                M2Config::secs(self.config.request_timeout),
-            )
-            .await?;
-        Ok(())
-    }
-
-    pub async fn jog(
-        &self,
-        dx: f64,
-        dy: f64,
-        dz: f64,
-        speed: f64,
-    ) -> Result<(), SessionError> {
-        self.current_connection()
-            .await?
-            .request(
-                "POST",
-                "/v1/project/control/relative-move",
-                json!({}),
-                json!({"dx": dx, "dy": dy, "dz": dz, "speed": speed}),
-                M2Config::secs(self.config.request_timeout),
-            )
-            .await?;
-        Ok(())
-    }
 }
 
 struct M2Connection {
     writer: AsyncMutex<SocketWriter>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
+    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, SessionError>>>>,
     reader_task: Mutex<Option<JoinHandle<()>>>,
     transaction: AtomicU64,
     closed: AsyncEvent,
@@ -403,7 +317,7 @@ impl M2Connection {
             connect_async_tls_with_config(request, None, false, connector),
         )
         .await
-        .map_err(|_| SessionError::Timeout)?
+        .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
         .map_err(|err| SessionError::Connection(err.to_string()))?;
         let (writer, reader) = socket.split();
         let connection = Arc::new(Self {
@@ -506,10 +420,11 @@ impl M2Connection {
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout
+                SessionError::Timeout("operation timed out".to_string())
             })?
-            .map_err(|_| SessionError::Connection("connection closed".into()))?
-            .map_err(SessionError::Device)?;
+            .map_err(|_| {
+                SessionError::Connection("connection closed".into())
+            })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
             let message = response
@@ -574,10 +489,11 @@ impl M2Connection {
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout
+                SessionError::Timeout("operation timed out".to_string())
             })?
-            .map_err(|_| SessionError::Connection("connection closed".into()))?
-            .map_err(SessionError::Device)?;
+            .map_err(|_| {
+                SessionError::Connection("connection closed".into())
+            })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
             return Err(SessionError::Device(format!(
@@ -639,7 +555,9 @@ impl M2Connection {
         self.closed.set();
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err("M2 WebSocket closed".to_string()));
+            let _ = sender.send(Err(SessionError::Connection(
+                "M2 WebSocket closed".into(),
+            )));
         }
     }
 
@@ -726,7 +644,9 @@ impl M2Connection {
     fn fail_pending(&self) {
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err("M2 WebSocket closed".to_string()));
+            let _ = sender.send(Err(SessionError::Connection(
+                "M2 WebSocket closed".into(),
+            )));
         }
     }
 }
@@ -791,6 +711,9 @@ impl ServerCertVerifier for AllowInvalidCerts {
     }
 }
 
+/// Guard against hostile peers sending unbounded frames.
+const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
 fn encode_frame(payload: &[u8], protocol: u8) -> Vec<u8> {
     let length = payload.len();
     let mut header = [0u8; 10];
@@ -821,7 +744,7 @@ fn decode_frames(buffer: &[u8]) -> (Vec<(u8, Vec<u8>)>, Vec<u8>) {
         let length = ((buffer[position + 2] as usize) << 16)
             | ((buffer[position + 3] as usize) << 8)
             | buffer[position + 4] as usize;
-        if length > 16 * 1024 * 1024 {
+        if length > MAX_FRAME_BYTES {
             position += 1;
             continue;
         }
@@ -937,4 +860,129 @@ fn apply_mode(
         state.clone()
     };
     events.state_changed(&state);
+}
+
+/// The session's [`Session`] impl: the single, real implementation
+/// of every operation the protocol supports.
+#[async_trait]
+impl Session for M2Session {
+    fn state(&self) -> DeviceState {
+        self.state.lock().unwrap().clone()
+    }
+    fn resource_uri(&self) -> Option<String> {
+        Some(format!(
+            "wss://{}:{}/websocket",
+            self.config.host, self.config.port
+        ))
+    }
+    fn is_job_running(&self) -> bool {
+        matches!(self.state().status, DeviceStatus::Run | DeviceStatus::Hold)
+    }
+    fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Ok(mut task) = self.connection_task.lock() {
+            if let Some(task) = task.take() {
+                task.abort();
+            }
+        }
+        if let Ok(mut conn) = self.connection.try_lock() {
+            if let Some(conn) = conn.take() {
+                conn.close_now();
+            }
+        }
+    }
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        self.disconnect_tasks().await;
+        self.keep_running.store(true, Ordering::SeqCst);
+        let core = self.clone();
+        let task = tokio::spawn(async move { core.connection_loop().await });
+        *self.connection_task.lock().unwrap() = Some(task);
+
+        Ok(())
+    }
+
+    async fn cleanup(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        self.disconnect_tasks().await;
+        self.set_connection_status(TransportStatus::Disconnected, None);
+    }
+
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        self.control(if hold { "PAUSE" } else { "RESUME" }).await
+    }
+
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+        self.control("CANCEL").await
+    }
+
+    async fn home(
+        &self,
+        _axes: Option<Vec<String>>,
+        _active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        self.current_connection()
+            .await?
+            .request(
+                "POST",
+                "/v1/project/control/home",
+                json!({"axis": "ALL"}),
+                json!({}),
+                M2Config::secs(self.config.request_timeout),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn move_to(
+        &self,
+        speed: f64,
+        x: f64,
+        y: f64,
+        _z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        self.current_connection()
+            .await?
+            .request(
+                "POST",
+                "/v1/project/control/absolute-move",
+                json!({}),
+                json!({"coor": {"x": x, "y": y}, "speed": speed}),
+                M2Config::secs(self.config.request_timeout),
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        let mut dx = 0.0;
+        let mut dy = 0.0;
+        let mut dz = 0.0;
+        for (axis, distance) in deltas {
+            match axis.to_ascii_uppercase().as_str() {
+                "X" => dx = *distance,
+                "Y" => dy = *distance,
+                "Z" => dz = *distance,
+                other => {
+                    return Err(SessionError::Other(format!(
+                        "jog axis {other} is not supported"
+                    )));
+                }
+            }
+        }
+        self.current_connection()
+            .await?
+            .request(
+                "POST",
+                "/v1/project/control/relative-move",
+                json!({}),
+                json!({"dx": dx, "dy": dy, "dz": dz, "speed": speed}),
+                M2Config::secs(self.config.request_timeout),
+            )
+            .await?;
+        Ok(())
+    }
 }

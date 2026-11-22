@@ -15,11 +15,14 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::session::{
+    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+};
 use crate::core::transport::{Transport, TransportKind};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
+use async_trait::async_trait;
 
 use super::flow::FlowControl;
 use super::flow::GrblResponseType;
@@ -181,7 +184,7 @@ impl StreamHandle {
 
 /// Shared session state, owned jointly by the public handle and the
 /// background tasks.
-pub struct SessionCore {
+pub struct GrblSession {
     config: SessionConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn SessionEvents>,
@@ -211,7 +214,7 @@ pub struct SessionCore {
     cmd_lock: tokio::sync::Mutex<()>,
 }
 
-impl SessionCore {
+impl GrblSession {
     pub fn new(
         config: SessionConfig,
         dialect: Dialect,
@@ -256,20 +259,8 @@ impl SessionCore {
         Arc::new(core)
     }
 
-    pub fn state(&self) -> DeviceState {
-        self.state.lock().unwrap().clone()
-    }
-
-    pub fn update_dialect(&self, dialect: Dialect) {
-        *self.dialect.write().unwrap() = dialect;
-    }
-
     fn dialect(&self) -> Dialect {
         self.dialect.read().unwrap().clone()
-    }
-
-    pub fn is_job_running(&self) -> bool {
-        self.job_running.load(Ordering::SeqCst)
     }
 
     fn is_cancelled(&self) -> bool {
@@ -289,26 +280,6 @@ impl SessionCore {
         Ok(self.transport.clone())
     }
 
-    pub fn resource_uri(&self) -> Option<String> {
-        self.transport.resource_uri()
-    }
-
-    pub fn buffer_count(&self) -> usize {
-        self.flow.buffer_count()
-    }
-
-    pub fn rx_buffer_size(&self) -> usize {
-        self.flow.rx_buffer_size()
-    }
-
-    pub fn pending_commands(&self) -> Vec<String> {
-        self.flow
-            .pending_queue()
-            .iter()
-            .map(|p| p.command.clone())
-            .collect()
-    }
-
     fn note_device_response(&self) {
         self.device_response_count.fetch_add(1, Ordering::SeqCst);
     }
@@ -324,34 +295,6 @@ impl SessionCore {
     ) {
         *self.last_connection_status.lock().unwrap() = status;
         self.events.connection_status(status, message);
-    }
-
-    // ---------------------------------------------------------------
-    // Connect / disconnect
-    // ---------------------------------------------------------------
-
-    pub async fn connect(self: &Arc<Self>) {
-        self.abort_background_tasks().await;
-
-        self.keep_running.store(true, Ordering::SeqCst);
-        self.is_cancelled.store(false, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        self.job_exception.lock().unwrap().take();
-        self.flow.reset();
-
-        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
-        *self.cmd_tx.lock().unwrap() = cmd_tx;
-
-        let core = self.clone();
-        let connection_task =
-            tokio::spawn(async move { core.connection_loop().await });
-        *self.connection_task.lock().unwrap() = Some(connection_task);
-
-        let core = self.clone();
-        let command_task = tokio::spawn(async move {
-            core.command_queue_loop(cmd_rx).await;
-        });
-        *self.command_task.lock().unwrap() = Some(command_task);
     }
 
     async fn abort_background_tasks(&self) {
@@ -376,37 +319,6 @@ impl SessionCore {
             task.abort();
             let _ = task.await;
         }
-    }
-
-    /// Abort every background task without awaiting, for use from
-    /// `Drop`.  A session dropped without `disconnect()` must not
-    /// leave its tasks running on the shared runtime: the orphans
-    /// keep marshaling events onto an event loop that may already be
-    /// closed (access violations on Windows).
-    pub fn abort_background_tasks_now(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        if let Some(handle) = self.stream_task.lock().unwrap().take() {
-            handle.abort.abort();
-        }
-        for slot in
-            [&self.connection_task, &self.command_task, &self.reader_task]
-        {
-            if let Some(task) = slot.lock().unwrap().take() {
-                task.abort();
-            }
-        }
-    }
-
-    pub async fn cleanup(&self) {
-        self.keep_running.store(false, Ordering::SeqCst);
-        self.job_running.store(false, Ordering::SeqCst);
-        self.is_cancelled.store(true, Ordering::SeqCst);
-        self.abort_stream_task().await;
-        self.is_cancelled.store(false, Ordering::SeqCst);
-        self.flow.reset();
-        self.job_exception.lock().unwrap().take();
-        self.abort_background_tasks().await;
-        self.update_connection_status(TransportStatus::Disconnected, None);
     }
 
     async fn await_handshake(&self) -> Result<bool, SessionError> {
@@ -452,9 +364,8 @@ impl SessionCore {
                     Ok(true) => {
                         log::info!("Connection established successfully.");
                         self.apply_cached_rx_buffer_size();
-                        if let Err(err) = self
-                            .execute_interactive_command("$I".to_string())
-                            .await
+                        if let Err(err) =
+                            self.execute_interactive_command("$I").await
                         {
                             log::warn!("Failed to retrieve build info: {err}");
                         }
@@ -857,89 +768,6 @@ impl SessionCore {
         );
     }
 
-    // ---------------------------------------------------------------
-    // Command execution
-    // ---------------------------------------------------------------
-
-    pub async fn execute_interactive_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        self.transport_open()?;
-        let request = Arc::new(RequestShared::new(&command));
-        {
-            let _guard = self.cmd_lock.lock().await;
-            let _ = self.flow.wait_pending_empty(None).await;
-            *self.interactive_request.lock().unwrap() = Some(request.clone());
-            let result = async {
-                self.send_command_bytes(format!("{command}\n").as_bytes())
-                    .await?;
-                match tokio::time::timeout(
-                    SessionConfig::secs(self.config.command_timeout),
-                    request.finished.wait(),
-                )
-                .await
-                {
-                    Ok(()) => Ok(()),
-                    Err(_) => Err(SessionError::Timeout),
-                }
-            }
-            .await;
-            *self.interactive_request.lock().unwrap() = None;
-            result?;
-        }
-        Ok(request.lines())
-    }
-
-    /// Send a command through the queued command processor and await
-    /// its full response.
-    pub async fn execute_command(
-        &self,
-        command: String,
-    ) -> Result<Vec<String>, SessionError> {
-        // Only clear the cancellation flag once the cancelled job's
-        // sender has fully terminated (issue #428).
-        if !self.job_running.load(Ordering::SeqCst) {
-            let done = self
-                .stream_task
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_none_or(|t| t.is_finished());
-            if done {
-                self.is_cancelled.store(false, Ordering::SeqCst);
-            }
-        }
-        let request = Arc::new(RequestShared::new(&command));
-        self.queued_requests
-            .lock()
-            .unwrap()
-            .push(Arc::downgrade(&request));
-        self.cmd_tx
-            .lock()
-            .unwrap()
-            .send(QueuedCommand {
-                shared: request.clone(),
-            })
-            .map_err(|_| {
-                SessionError::Connection(
-                    "command queue unavailable".to_string(),
-                )
-            })?;
-        match tokio::time::timeout(
-            SessionConfig::secs(self.config.command_timeout),
-            request.finished.wait(),
-        )
-        .await
-        {
-            Ok(()) => Ok(request.lines()),
-            Err(_) => {
-                request.finish();
-                Err(SessionError::Timeout)
-            }
-        }
-    }
-
     async fn command_queue_loop(
         self: Arc<Self>,
         mut rx: mpsc::UnboundedReceiver<QueuedCommand>,
@@ -1111,40 +939,6 @@ impl SessionCore {
         result
     }
 
-    pub async fn run(
-        self: &Arc<Self>,
-        gcode: &str,
-        op_map: HashMap<usize, i64>,
-        op_estimates: Vec<f64>,
-    ) {
-        self.start_job().await;
-        if self.transport.network_job_runner().is_some() {
-            self.run_network_job(gcode, Some(&op_map)).await;
-            return;
-        }
-        let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
-        let core = self.clone();
-        if let Err(err) = self
-            .run_streaming_job(async move {
-                core.stream_gcode(lines, Some(op_map), Some(op_estimates))
-                    .await;
-            })
-            .await
-        {
-            match err {
-                SessionError::Device(msg) => log::warn!(
-                    "Job terminated due to device error: {msg}. \
-                     Connection remains active."
-                ),
-                other => {
-                    log::error!(
-                        "Job terminated with unexpected error: {other}"
-                    );
-                }
-            }
-        }
-    }
-
     async fn run_network_job(
         self: &Arc<Self>,
         gcode: &str,
@@ -1204,42 +998,6 @@ impl SessionCore {
         }
     }
 
-    pub async fn run_raw(self: &Arc<Self>, machine_code: &str) {
-        if machine_code.trim().is_empty() {
-            return;
-        }
-        if self.transport.network_job_runner().is_some() {
-            self.start_job().await;
-            self.run_network_job(machine_code, None).await;
-            return;
-        }
-        let lines: Vec<String> = machine_code
-            .lines()
-            .map(|l| l.trim().to_string())
-            .filter(|l| !l.is_empty())
-            .collect();
-        let (gcode, realtime) = parser::split_realtime_commands(&lines);
-        for line in &realtime {
-            if let Err(err) = self.send_realtime(line, false).await {
-                log::error!("Realtime command failed: {err}");
-                return;
-            }
-        }
-        if gcode.is_empty() {
-            return;
-        }
-        self.start_job().await;
-        let core = self.clone();
-        if let Err(err) = self
-            .run_streaming_job(async move {
-                core.stream_gcode(gcode, None, None).await;
-            })
-            .await
-        {
-            log::error!("Raw G-code terminated with error: {err}");
-        }
-    }
-
     async fn stream_gcode(
         self: Arc<Self>,
         gcode_lines: Vec<String>,
@@ -1287,7 +1045,7 @@ impl SessionCore {
                 if let Some(snapshot) = snapshot {
                     self.events.state_changed(&snapshot);
                 }
-                let _ = self.cancel(true).await;
+                let _ = self.cancel(CancelMode::Immediate).await;
             }
         }
 
@@ -1728,11 +1486,469 @@ impl SessionCore {
         }
     }
 
-    // ---------------------------------------------------------------
-    // Cancel / hold
-    // ---------------------------------------------------------------
+    /// Best-effort transmission of the dialect's tool-off commands
+    /// so a cancelled job cannot leave persistent PWM outputs
+    /// energized.  After a soft reset the firmware needs a moment to
+    /// become ready again, hence the short delay.
+    async fn send_safety_shutdown(&self, emergency: bool) {
+        let dialect = self.dialect();
+        let mut commands = dialect.safety_off_commands.clone();
+        if emergency {
+            if let Some(cmd) = dialect.emergency_stop.clone() {
+                commands.push(cmd);
+            }
+        }
+        if commands.is_empty() {
+            return;
+        }
+        if !self.transport.is_open() {
+            return;
+        }
+        tokio::time::sleep(SessionConfig::secs(
+            self.config.safety_shutdown_delay,
+        ))
+        .await;
+        for command in commands {
+            if !self.transport.is_open() {
+                break;
+            }
+            let payload = format!("{command}\n");
+            if let Err(err) = self.send_gcode_simple(payload.as_bytes()).await {
+                log::warn!("Safety command '{command}' failed: {err}");
+            }
+        }
+    }
 
-    pub async fn cancel(&self, emergency: bool) -> Result<(), SessionError> {
+    async fn wait_for_idle(&self) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while self.state.lock().unwrap().status == DeviceStatus::Jog {
+            if tokio::time::Instant::now() > deadline {
+                log::warn!(
+                    "Timed out waiting for JOG to finish before \
+                     sending laser-off command."
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// The session's [`Session`] impl: the single, real implementation
+/// of every operation the protocol supports.
+#[async_trait]
+impl Session for GrblSession {
+    fn state(&self) -> DeviceState {
+        self.state.lock().unwrap().clone()
+    }
+    fn update_dialect(&self, dialect: Dialect) {
+        *self.dialect.write().unwrap() = dialect;
+    }
+    fn is_job_running(&self) -> bool {
+        self.job_running.load(Ordering::SeqCst)
+    }
+    fn resource_uri(&self) -> Option<String> {
+        self.transport.resource_uri()
+    }
+    fn abort_background_tasks_now(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        if let Some(handle) = self.stream_task.lock().unwrap().take() {
+            handle.abort.abort();
+        }
+        for slot in
+            [&self.connection_task, &self.command_task, &self.reader_task]
+        {
+            if let Some(task) = slot.lock().unwrap().take() {
+                task.abort();
+            }
+        }
+    }
+    async fn cleanup(&self) {
+        self.keep_running.store(false, Ordering::SeqCst);
+        self.job_running.store(false, Ordering::SeqCst);
+        self.is_cancelled.store(true, Ordering::SeqCst);
+        self.abort_stream_task().await;
+        self.is_cancelled.store(false, Ordering::SeqCst);
+        self.flow.reset();
+        self.job_exception.lock().unwrap().take();
+        self.abort_background_tasks().await;
+        self.update_connection_status(TransportStatus::Disconnected, None);
+    }
+    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+        self.is_holding.store(hold, Ordering::SeqCst);
+        // Do not un-cancel a job that is still winding down (issue
+        // #428).
+        if !self.job_running.load(Ordering::SeqCst) {
+            let done = self
+                .stream_task
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_none_or(|t| t.is_finished());
+            if done {
+                self.is_cancelled.store(false, Ordering::SeqCst);
+            }
+        }
+        self.send_realtime(if hold { "!" } else { "~" }, false)
+            .await?;
+        let desired = if hold {
+            DeviceStatus::Hold
+        } else if self.job_running.load(Ordering::SeqCst) {
+            DeviceStatus::Run
+        } else {
+            DeviceStatus::Idle
+        };
+        let state_snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.status != desired {
+                state.status = desired;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        // Emit outside the lock (see handle_error).
+        if let Some(state_snapshot) = state_snapshot {
+            self.events.state_changed(&state_snapshot);
+        }
+        Ok(())
+    }
+    async fn home(
+        &self,
+        axes: Option<Vec<String>>,
+        active_wcs: &str,
+    ) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        match axes {
+            None => {
+                self.execute_command(&dialect.home_all).await?;
+            }
+            Some(axes) => {
+                for axis in axes {
+                    let cmd = format_template(
+                        &dialect.home_axis,
+                        &[("axis_letter", Arg::Str(axis))],
+                    )
+                    .map_err(SessionError::Other)?;
+                    self.execute_command(&cmd).await?;
+                }
+            }
+        }
+
+        // Some Grbl versions forget the G54 offset after homing;
+        // toggling to another WCS and back re-activates it.  Just
+        // sending G54 is ignored if GRBL thinks it is already in
+        // G54.
+        let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
+        self.execute_command("G4 P0.01").await?;
+        self.execute_command(temp_wcs).await?;
+        self.execute_command(active_wcs).await?;
+        let state_snapshot = {
+            let mut state = self.state.lock().unwrap();
+            state.error = None;
+            state.clone()
+        };
+        // Emit outside the lock (see handle_error).
+        self.events.state_changed(&state_snapshot);
+        Ok(())
+    }
+    async fn jog(
+        &self,
+        speed: f64,
+        deltas: &[(String, f64)],
+    ) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let head =
+            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
+                .map_err(SessionError::Other)?;
+        let mut cmd_parts = vec![head];
+        for (axis_name, distance) in deltas {
+            cmd_parts.push(format!(
+                "{}{}",
+                axis_name.to_uppercase(),
+                crate::core::dialect::python_float_repr(*distance)
+            ));
+        }
+        if cmd_parts.len() == 1 {
+            return Ok(());
+        }
+        let cmd = cmd_parts.join(" ");
+        self.execute_command(&cmd).await?;
+        Ok(())
+    }
+    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let cmd = format_template(
+            &dialect.tool_change,
+            &[("tool_number", Arg::Int(tool_number))],
+        )
+        .map_err(SessionError::Other)?;
+        self.execute_command(&cmd).await?;
+        Ok(())
+    }
+    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let cmd = match power {
+            Some(p) if p > 0.0 => {
+                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
+                    .map_err(SessionError::Other)?
+            }
+            _ => dialect.laser_off.clone(),
+        };
+        self.execute_command(&cmd).await?;
+        Ok(())
+    }
+    async fn set_focus_power(
+        &self,
+        power: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let dialect = self.dialect();
+        let cmd = match power {
+            Some(p) if p > 0.0 => format_template(
+                &dialect.focus_laser_on,
+                &[("power", Arg::Length(p))],
+            )
+            .map_err(SessionError::Other)?,
+            _ => {
+                self.wait_for_idle().await;
+                dialect.laser_off.clone()
+            }
+        };
+        self.execute_command(&cmd).await?;
+        Ok(())
+    }
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, SessionError> {
+        let lines = self.execute_interactive_command("$$").await?;
+        self.report_in_inches
+            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
+        Ok(parser::parse_setting_pairs(&lines))
+    }
+    async fn write_setting(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> Result<(), SessionError> {
+        self.execute_command(&format!("${key}={value}")).await?;
+        Ok(())
+    }
+    async fn set_wcs_offset(
+        &self,
+        wcs_slot: &str,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+    ) -> Result<(), SessionError> {
+        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
+            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+        })?;
+        let dialect = self.dialect();
+        let cmd = dialect
+            .format_wcs_offset(p_num, x, y, z)
+            .map_err(SessionError::Other)?;
+        self.execute_command(&cmd).await?;
+        Ok(())
+    }
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+        let lines = self.execute_interactive_command("$#").await?;
+        let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
+        let mut offsets = HashMap::new();
+        for line in &lines {
+            if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
+                let pos = if report_in_inches {
+                    (
+                        crate::core::types::inches_to_mm(x),
+                        crate::core::types::inches_to_mm(y),
+                        crate::core::types::inches_to_mm(z),
+                    )
+                } else {
+                    (x, y, z)
+                };
+                offsets.insert(slot, pos);
+            }
+        }
+        self.events.wcs_updated(&offsets);
+        Ok(offsets)
+    }
+    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+        let lines = self.execute_interactive_command("$G").await?;
+        Ok(parser::parse_grbl_parser_state(&lines))
+    }
+    async fn run_probe_cycle(
+        &self,
+        axis_letter: &str,
+        max_travel: f64,
+        feed_rate: f64,
+    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+        let axis_letter = axis_letter.to_uppercase();
+        let dialect = self.dialect();
+        let cmd = format_template(
+            &dialect.probe_cycle,
+            &[
+                ("axis_letter", Arg::Str(axis_letter.clone())),
+                ("max_travel", Arg::Length(max_travel)),
+                ("feed_rate", Arg::Speed(feed_rate)),
+            ],
+        )
+        .map_err(SessionError::Other)?;
+
+        self.events
+            .probe_status(&format!("Probing {axis_letter}..."));
+        let lines = match self.execute_interactive_command(&cmd).await {
+            Ok(lines) => lines,
+            Err(_) => {
+                self.events.probe_status("Probe failed: Timed out");
+                return Ok(None);
+            }
+        };
+
+        for line in &lines {
+            if let Some(((x, y, z), success)) = parser::parse_probe_line(line) {
+                if success {
+                    let pos = if self.report_in_inches.load(Ordering::SeqCst) {
+                        (
+                            crate::core::types::inches_to_mm(x),
+                            crate::core::types::inches_to_mm(y),
+                            crate::core::types::inches_to_mm(z),
+                        )
+                    } else {
+                        (x, y, z)
+                    };
+                    self.events.probe_status(&format!(
+                        "Probe triggered at ({}, {}, {})",
+                        pos.0, pos.1, pos.2
+                    ));
+                    return Ok(Some(pos));
+                }
+            }
+        }
+        self.events.probe_status("Probe failed");
+        Ok(None)
+    }
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, SessionError> {
+        let lines = match self.execute_interactive_command("$$").await {
+            Ok(lines) => lines,
+            Err(err) => {
+                log::warn!("Unit system detection failed: {err}");
+                return Ok(None);
+            }
+        };
+        self.report_in_inches
+            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
+        Ok(parser::detect_unit_system_from_settings(&lines))
+    }
+    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+        self.abort_background_tasks().await;
+
+        self.keep_running.store(true, Ordering::SeqCst);
+        self.is_cancelled.store(false, Ordering::SeqCst);
+        self.job_running.store(false, Ordering::SeqCst);
+        self.job_exception.lock().unwrap().take();
+        self.flow.reset();
+
+        let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+        *self.cmd_tx.lock().unwrap() = cmd_tx;
+
+        let core = self.clone();
+        let connection_task =
+            tokio::spawn(async move { core.connection_loop().await });
+        *self.connection_task.lock().unwrap() = Some(connection_task);
+
+        let core = self.clone();
+        let command_task = tokio::spawn(async move {
+            core.command_queue_loop(cmd_rx).await;
+        });
+        *self.command_task.lock().unwrap() = Some(command_task);
+
+        Ok(())
+    }
+
+    async fn run(
+        self: Arc<Self>,
+        gcode: &str,
+        op_map: &HashMap<usize, i64>,
+        op_estimates: &[f64],
+    ) -> Result<(), SessionError> {
+        self.start_job().await;
+        if self.transport.network_job_runner().is_some() {
+            self.run_network_job(gcode, Some(op_map)).await;
+            return Ok(());
+        }
+        let lines: Vec<String> = gcode.lines().map(|l| l.to_string()).collect();
+        let core = self.clone();
+        let op_map = op_map.clone();
+        let op_estimates = op_estimates.to_vec();
+        if let Err(err) = self
+            .run_streaming_job(async move {
+                core.stream_gcode(lines, Some(op_map), Some(op_estimates))
+                    .await;
+            })
+            .await
+        {
+            match err {
+                SessionError::Device(msg) => log::warn!(
+                    "Job terminated due to device error: {msg}. \
+                     Connection remains active."
+                ),
+                other => {
+                    log::error!(
+                        "Job terminated with unexpected error: {other}"
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), SessionError> {
+        if machine_code.trim().is_empty() {
+            return Ok(());
+        }
+        if self.transport.network_job_runner().is_some() {
+            self.start_job().await;
+            self.run_network_job(machine_code, None).await;
+            return Ok(());
+        }
+        let lines: Vec<String> = machine_code
+            .lines()
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        let (gcode, realtime) = parser::split_realtime_commands(&lines);
+        for line in &realtime {
+            if let Err(err) = self.send_realtime(line, false).await {
+                log::error!("Realtime command failed: {err}");
+                return Ok(());
+            }
+        }
+        if gcode.is_empty() {
+            return Ok(());
+        }
+        self.start_job().await;
+        let core = self.clone();
+        if let Err(err) = self
+            .run_streaming_job(async move {
+                core.stream_gcode(gcode, None, None).await;
+            })
+            .await
+        {
+            log::error!("Raw G-code terminated with error: {err}");
+        }
+
+        Ok(())
+    }
+
+    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+        let emergency = mode == CancelMode::Immediate;
         log::debug!("Cancel command initiated.");
         let job_was_running = self.job_running.load(Ordering::SeqCst);
         self.is_cancelled.store(true, Ordering::SeqCst);
@@ -1778,128 +1994,45 @@ impl SessionCore {
         Ok(())
     }
 
-    /// Best-effort transmission of the dialect's tool-off commands
-    /// so a cancelled job cannot leave persistent PWM outputs
-    /// energized.  After a soft reset the firmware needs a moment to
-    /// become ready again, hence the short delay.
-    async fn send_safety_shutdown(&self, emergency: bool) {
-        let dialect = self.dialect();
-        let mut commands = dialect.safety_off_commands.clone();
-        if emergency {
-            if let Some(cmd) = dialect.emergency_stop.clone() {
-                commands.push(cmd);
-            }
-        }
-        if commands.is_empty() {
-            return;
-        }
-        if !self.transport.is_open() {
-            return;
-        }
-        tokio::time::sleep(SessionConfig::secs(
-            self.config.safety_shutdown_delay,
-        ))
-        .await;
-        for command in commands {
-            if !self.transport.is_open() {
-                break;
-            }
-            let payload = format!("{command}\n");
-            if let Err(err) = self.send_gcode_simple(payload.as_bytes()).await {
-                log::warn!("Safety command '{command}' failed: {err}");
-            }
-        }
-    }
-
-    pub async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
-        self.is_holding.store(hold, Ordering::SeqCst);
-        // Do not un-cancel a job that is still winding down (issue
-        // #428).
-        if !self.job_running.load(Ordering::SeqCst) {
-            let done = self
-                .stream_task
-                .lock()
-                .unwrap()
-                .as_ref()
-                .is_none_or(|t| t.is_finished());
-            if done {
-                self.is_cancelled.store(false, Ordering::SeqCst);
-            }
-        }
-        self.send_realtime(if hold { "!" } else { "~" }, false)
-            .await?;
-        let desired = if hold {
-            DeviceStatus::Hold
-        } else if self.job_running.load(Ordering::SeqCst) {
-            DeviceStatus::Run
-        } else {
-            DeviceStatus::Idle
-        };
-        let state_snapshot = {
-            let mut state = self.state.lock().unwrap();
-            if state.status != desired {
-                state.status = desired;
-                Some(state.clone())
-            } else {
-                None
-            }
-        };
-        // Emit outside the lock (see handle_error).
-        if let Some(state_snapshot) = state_snapshot {
-            self.events.state_changed(&state_snapshot);
-        }
-        Ok(())
-    }
-
-    // ---------------------------------------------------------------
-    // Device operations
-    // ---------------------------------------------------------------
-
-    pub async fn home(
+    async fn execute_interactive_command(
         &self,
-        axes: Option<Vec<String>>,
-        active_wcs: &str,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        match axes {
-            None => {
-                self.execute_command(dialect.home_all.clone()).await?;
-            }
-            Some(axes) => {
-                for axis in axes {
-                    let cmd = format_template(
-                        &dialect.home_axis,
-                        &[("axis_letter", Arg::Str(axis))],
-                    )
-                    .map_err(SessionError::Other)?;
-                    self.execute_command(cmd).await?;
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        self.transport_open()?;
+        let request = Arc::new(RequestShared::new(&command));
+        {
+            let _guard = self.cmd_lock.lock().await;
+            let _ = self.flow.wait_pending_empty(None).await;
+            *self.interactive_request.lock().unwrap() = Some(request.clone());
+            let result = async {
+                self.send_command_bytes(format!("{command}\n").as_bytes())
+                    .await?;
+                match tokio::time::timeout(
+                    SessionConfig::secs(self.config.command_timeout),
+                    request.finished.wait(),
+                )
+                .await
+                {
+                    Ok(()) => Ok(()),
+                    Err(_) => Err(SessionError::Timeout(
+                        "operation timed out".to_string(),
+                    )),
                 }
             }
+            .await;
+            *self.interactive_request.lock().unwrap() = None;
+            result?;
         }
-
-        // Some Grbl versions forget the G54 offset after homing;
-        // toggling to another WCS and back re-activates it.  Just
-        // sending G54 is ignored if GRBL thinks it is already in
-        // G54.
-        let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
-        self.execute_command("G4 P0.01".to_string()).await?;
-        self.execute_command(temp_wcs.to_string()).await?;
-        self.execute_command(active_wcs.to_string()).await?;
-        let state_snapshot = {
-            let mut state = self.state.lock().unwrap();
-            state.error = None;
-            state.clone()
-        };
-        // Emit outside the lock (see handle_error).
-        self.events.state_changed(&state_snapshot);
-        Ok(())
+        Ok(request.lines())
     }
 
-    pub async fn move_to(
+    async fn move_to(
         &self,
         speed: f64,
         pos_x: f64,
         pos_y: f64,
+        _z: Option<f64>,
     ) -> Result<(), SessionError> {
         let dialect = self.dialect();
         let cmd = format_template(
@@ -1911,229 +2044,71 @@ impl SessionCore {
             ],
         )
         .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
+        self.execute_command(&cmd).await?;
         Ok(())
     }
 
-    pub async fn jog(
+    async fn execute_command(
         &self,
-        speed: f64,
-        deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let head =
-            format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-                .map_err(SessionError::Other)?;
-        let mut cmd_parts = vec![head];
-        for (axis_name, distance) in deltas {
-            cmd_parts.push(format!(
-                "{}{}",
-                axis_name.to_uppercase(),
-                crate::core::dialect::python_float_repr(*distance)
-            ));
+        command: &str,
+    ) -> Result<Vec<String>, SessionError> {
+        let command = command.to_string();
+        // Only clear the cancellation flag once the cancelled job's
+        // sender has fully terminated (issue #428).
+        if !self.job_running.load(Ordering::SeqCst) {
+            let done = self
+                .stream_task
+                .lock()
+                .unwrap()
+                .as_ref()
+                .is_none_or(|t| t.is_finished());
+            if done {
+                self.is_cancelled.store(false, Ordering::SeqCst);
+            }
         }
-        if cmd_parts.len() == 1 {
-            return Ok(());
-        }
-        let cmd = cmd_parts.join(" ");
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn select_tool(
-        &self,
-        tool_number: i64,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.tool_change,
-            &[("tool_number", Arg::Int(tool_number))],
+        let request = Arc::new(RequestShared::new(&command));
+        self.queued_requests
+            .lock()
+            .unwrap()
+            .push(Arc::downgrade(&request));
+        self.cmd_tx
+            .lock()
+            .unwrap()
+            .send(QueuedCommand {
+                shared: request.clone(),
+            })
+            .map_err(|_| {
+                SessionError::Connection(
+                    "command queue unavailable".to_string(),
+                )
+            })?;
+        match tokio::time::timeout(
+            SessionConfig::secs(self.config.command_timeout),
+            request.finished.wait(),
         )
-        .map_err(SessionError::Other)?;
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn set_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => {
-                format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
-            }
-            _ => dialect.laser_off.clone(),
-        };
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn set_focus_power(
-        &self,
-        power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let dialect = self.dialect();
-        let cmd = match power {
-            Some(p) if p > 0.0 => format_template(
-                &dialect.focus_laser_on,
-                &[("power", Arg::Length(p))],
-            )
-            .map_err(SessionError::Other)?,
-            _ => {
-                self.wait_for_idle().await;
-                dialect.laser_off.clone()
-            }
-        };
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    async fn wait_for_idle(&self) {
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-        while self.state.lock().unwrap().status == DeviceStatus::Jog {
-            if tokio::time::Instant::now() > deadline {
-                log::warn!(
-                    "Timed out waiting for JOG to finish before \
-                     sending laser-off command."
-                );
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
-    pub async fn read_settings(
-        &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
-        let lines = self.execute_interactive_command("$$".to_string()).await?;
-        self.report_in_inches
-            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
-        Ok(parser::parse_setting_pairs(&lines))
-    }
-
-    pub async fn write_setting(
-        &self,
-        key: &str,
-        value: &str,
-    ) -> Result<(), SessionError> {
-        self.execute_command(format!("${key}={value}")).await?;
-        Ok(())
-    }
-
-    pub async fn set_wcs_offset(
-        &self,
-        wcs_slot: &str,
-        x: f64,
-        y: f64,
-        z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
-        })?;
-        let dialect = self.dialect();
-        let cmd = dialect.format_wcs_offset(p_num, x, y, z);
-        self.execute_command(cmd).await?;
-        Ok(())
-    }
-
-    pub async fn read_wcs_offsets(
-        &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
-        let lines = self.execute_interactive_command("$#".to_string()).await?;
-        let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
-        let mut offsets = HashMap::new();
-        for line in &lines {
-            if let Some((slot, (x, y, z))) = parser::parse_wcs_line(line) {
-                let pos = if report_in_inches {
-                    (
-                        crate::core::types::inches_to_mm(x),
-                        crate::core::types::inches_to_mm(y),
-                        crate::core::types::inches_to_mm(z),
-                    )
-                } else {
-                    (x, y, z)
-                };
-                offsets.insert(slot, pos);
-            }
-        }
-        self.events.wcs_updated(&offsets);
-        Ok(offsets)
-    }
-
-    pub async fn read_parser_state(
-        &self,
-    ) -> Result<Option<String>, SessionError> {
-        let lines = self.execute_interactive_command("$G".to_string()).await?;
-        Ok(parser::parse_grbl_parser_state(&lines))
-    }
-
-    pub async fn run_probe_cycle(
-        &self,
-        axis_letter: &str,
-        max_travel: f64,
-        feed_rate: f64,
-    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
-        let axis_letter = axis_letter.to_uppercase();
-        let dialect = self.dialect();
-        let cmd = format_template(
-            &dialect.probe_cycle,
-            &[
-                ("axis_letter", Arg::Str(axis_letter.clone())),
-                ("max_travel", Arg::Length(max_travel)),
-                ("feed_rate", Arg::Speed(feed_rate)),
-            ],
-        )
-        .map_err(SessionError::Other)?;
-
-        self.events
-            .probe_status(&format!("Probing {axis_letter}..."));
-        let lines = match self.execute_interactive_command(cmd).await {
-            Ok(lines) => lines,
+        .await
+        {
+            Ok(()) => Ok(request.lines()),
             Err(_) => {
-                self.events.probe_status("Probe failed: Timed out");
-                return Ok(None);
-            }
-        };
-
-        for line in &lines {
-            if let Some(((x, y, z), success)) = parser::parse_probe_line(line) {
-                if success {
-                    let pos = if self.report_in_inches.load(Ordering::SeqCst) {
-                        (
-                            crate::core::types::inches_to_mm(x),
-                            crate::core::types::inches_to_mm(y),
-                            crate::core::types::inches_to_mm(z),
-                        )
-                    } else {
-                        (x, y, z)
-                    };
-                    self.events.probe_status(&format!(
-                        "Probe triggered at ({}, {}, {})",
-                        pos.0, pos.1, pos.2
-                    ));
-                    return Ok(Some(pos));
-                }
+                request.finish();
+                Err(SessionError::Timeout("operation timed out".to_string()))
             }
         }
-        self.events.probe_status("Probe failed");
-        Ok(None)
     }
 
-    pub async fn detect_unit_system(
-        &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines =
-            match self.execute_interactive_command("$$".to_string()).await {
-                Ok(lines) => lines,
-                Err(err) => {
-                    log::warn!("Unit system detection failed: {err}");
-                    return Ok(None);
-                }
-            };
-        self.report_in_inches
-            .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
-        Ok(parser::detect_unit_system_from_settings(&lines))
+    fn buffer_count(&self) -> usize {
+        self.flow.buffer_count()
+    }
+
+    fn rx_buffer_size(&self) -> usize {
+        self.flow.rx_buffer_size()
+    }
+
+    fn pending_commands(&self) -> Vec<String> {
+        self.flow
+            .pending_queue()
+            .iter()
+            .map(|p| p.command.clone())
+            .collect()
     }
 }
