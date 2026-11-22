@@ -729,8 +729,9 @@ impl RemoteSession {
         speed: f64,
         x: f64,
         y: f64,
+        z: Option<f64>,
     ) -> Result<(), String> {
-        self.command("move_to", json!({"speed": speed, "x": x, "y": y}))
+        self.command("move_to", json!({"speed": speed, "x": x, "y": y, "z": z}))
             .await
             .map(|_| ())
     }
