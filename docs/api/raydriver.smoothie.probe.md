@@ -104,3 +104,16 @@ dropped, and non-numeric `config-get` replies yield `None` fields.
 | `beta_max_rate_lines`  | `Sequence[str]`      |             |
 | `acceleration_lines`   | `Sequence[str]`      |             |
 | _Returns_              | `SmoothieDeviceInfo` |             |
+
+### `probe_device()`
+
+```python
+probe_device(session: Any) -> Awaitable[SmoothieDeviceInfo]
+```
+
+Runs the device census over *session* and resolves to \[`SmoothieDeviceInfo`\].
+
+| Parameter | Type                            | Description |
+| --------- | ------------------------------- | ----------- |
+| `session` | `Any`                           |             |
+| _Returns_ | `Awaitable[SmoothieDeviceInfo]` |             |

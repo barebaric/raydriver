@@ -27,7 +27,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let grbl_mod = PyModule::new(py, "grbl")?;
 
     grbl_mod.setattr("__doc__", MODULE_DOC)?;
-    grbl_mod.add("__all__", vec!["GrblSession", "census", "parser"])?;
+    grbl_mod.add("__all__", vec!["GrblSession", "parser", "probe"])?;
 
     grbl_mod.add_class::<session::PyGrblSession>()?;
 

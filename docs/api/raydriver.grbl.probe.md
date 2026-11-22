@@ -1,6 +1,6 @@
 ---
-title: raydriver.grbl.census
-sidebar_label: raydriver.grbl.census
+title: raydriver.grbl.probe
+sidebar_label: raydriver.grbl.probe
 ---
 
 ## GrblDeviceInfo
@@ -142,3 +142,16 @@ and passing the collected response lines.
 | `build_info`     | `Sequence[str]`  |             |
 | `settings_lines` | `Sequence[str]`  |             |
 | _Returns_        | `GrblDeviceInfo` |             |
+
+### `probe_device()`
+
+```python
+probe_device(session: Any) -> Awaitable[GrblDeviceInfo]
+```
+
+Runs the device census over *session* and resolves to \[`GrblDeviceInfo`\].
+
+| Parameter | Type                        | Description |
+| --------- | --------------------------- | ----------- |
+| `session` | `Any`                       |             |
+| _Returns_ | `Awaitable[GrblDeviceInfo]` |             |

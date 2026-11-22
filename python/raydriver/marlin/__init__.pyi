@@ -11,12 +11,12 @@ from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
 import typing
-from . import census
 from . import parser
+from . import probe
 __all__ = [
     "MarlinSession",
-    "census",
     "parser",
+    "probe",
 ]
 
 @typing.final
@@ -47,7 +47,7 @@ class MarlinSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[census.MarlinDeviceInfo]:
+    def probe_device(self, boot_lines: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[probe.MarlinDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
         Run the device census: query M115, M211, M503 and M149,

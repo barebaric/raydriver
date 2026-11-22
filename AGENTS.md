@@ -110,17 +110,17 @@ its submodule attributes eagerly.
 
 Rust *parent* modules (`grbl`, `core`, ...) are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
-name is the package. Rust *leaf* submodules (`grbl.census`,
+name is the package. Rust *leaf* submodules (`grbl.probe`,
 `protocols`, `core.discovery.*`, ...) ARE registered via
 `attach_submodule`, so imports like
-`from raydriver.grbl.census import describe` resolve to the compiled
+`from raydriver.grbl.probe import describe` resolve to the compiled
 module and must not be shadowed by a same-named Python file.
 
-The public `raydriver.grbl.probe` / `raydriver.marlin.probe` modules
-are pure-Python shims over those native censuses: they add the
-session-facing `probe_device()` helper that Rayforge imports and
-re-export the native `describe()` and census classes. Do not register
-a native module named `probe` — doing so shadows the shim.
+The `probe` modules are native (`grbl`, `marlin`, `smoothie`,
+`octoprint`). Each exports the protocol's census class, `describe()`
+and a `probe_device(session)` compatibility wrapper that forwards to
+the session's native `probe_device()` method. Do not add a Python
+`probe.py` next to them: it would shadow the compiled module.
 
 ## The Uniform Session API
 

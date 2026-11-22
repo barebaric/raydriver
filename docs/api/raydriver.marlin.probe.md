@@ -1,6 +1,6 @@
 ---
-title: raydriver.marlin.census
-sidebar_label: raydriver.marlin.census
+title: raydriver.marlin.probe
+sidebar_label: raydriver.marlin.probe
 ---
 
 ## MarlinDeviceInfo
@@ -90,3 +90,21 @@ handshake; a version found there is more specific than the `FIRMWARE_NAME` token
 | `m149_lines` | `Sequence[str]`                  |             |
 | `boot_lines` | `Optional[Sequence[str]] = None` |             |
 | _Returns_    | `MarlinDeviceInfo`               |             |
+
+### `probe_device()`
+
+```python
+probe_device(
+    session: Any,
+    boot_lines: Optional[Sequence[str]] = None,
+) -> Awaitable[MarlinDeviceInfo]
+```
+
+Runs the device census over *session* and resolves to \[`MarlinDeviceInfo`\]. *boot_lines* are the
+startup lines the caller observed.
+
+| Parameter    | Type                             | Description |
+| ------------ | -------------------------------- | ----------- |
+| `session`    | `Any`                            |             |
+| `boot_lines` | `Optional[Sequence[str]] = None` |             |
+| _Returns_    | `Awaitable[MarlinDeviceInfo]`    |             |

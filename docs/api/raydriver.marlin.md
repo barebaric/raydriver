@@ -184,17 +184,17 @@ Absolute move in the machine's current coordinate frame.
 ```python
 probe_device(
     boot_lines: Optional[Sequence[str]] = None,
-) -> Awaitable[census.MarlinDeviceInfo]
+) -> Awaitable[probe.MarlinDeviceInfo]
 ```
 
 Open the connection and start the background tasks. Run the device census: query M115, M211, M503
 and M149, and return the structured result as a dict. *boot_lines* are the startup messages the
 caller observed on the session, used to refine the firmware version.
 
-| Parameter    | Type                                 | Description |
-| ------------ | ------------------------------------ | ----------- |
-| `boot_lines` | `Optional[Sequence[str]] = None`     |             |
-| _Returns_    | `Awaitable[census.MarlinDeviceInfo]` |             |
+| Parameter    | Type                                | Description |
+| ------------ | ----------------------------------- | ----------- |
+| `boot_lines` | `Optional[Sequence[str]] = None`    |             |
+| _Returns_    | `Awaitable[probe.MarlinDeviceInfo]` |             |
 
 ### `read_parser_state()`
 

@@ -10,7 +10,7 @@ from raydriver import config
 from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
-from raydriver.grbl import census
+from raydriver.grbl import probe
 import typing
 __all__ = [
     "GrblSimpleSession",
@@ -44,7 +44,7 @@ class GrblSimpleSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def probe_device(self) -> collections.abc.Awaitable[census.GrblDeviceInfo]:
+    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
         Run the device census: query `$I` and `$$`, and return the

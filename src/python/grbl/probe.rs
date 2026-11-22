@@ -1,4 +1,4 @@
-//! The `raydriver.grbl.census` submodule: the device census.
+//! The `raydriver.grbl.probe` submodule: the device census.
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -7,11 +7,12 @@ use pyo3_stub_gen::derive::{
     gen_stub_pymethods,
 };
 
+use crate::python::census::call_session_probe;
 use crate::python::core::json::value_to_py;
 
 /// The firmware family a device identifies itself as.
 #[gen_stub_pyclass_enum]
-#[pyclass(eq, skip_from_py_object, module = "raydriver.grbl.census")]
+#[pyclass(eq, skip_from_py_object, module = "raydriver.grbl.probe")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrblFlavor {
     #[pyo3(name = "STOCK")]
@@ -39,7 +40,7 @@ impl GrblFlavor {
 /// identity, compile flags, flavor classification and the semantic
 /// values applications need.
 #[gen_stub_pyclass]
-#[pyclass(frozen, module = "raydriver.grbl.census")]
+#[pyclass(frozen, module = "raydriver.grbl.probe")]
 pub struct GrblDeviceInfo {
     pub(crate) inner: crate::grbl::probe::GrblCensus,
 }
@@ -135,7 +136,7 @@ impl GrblDeviceInfo {
 /// Pure data transformation with no I/O; the caller is responsible
 /// for communicating with the device and passing the collected
 /// response lines.
-#[gen_stub_pyfunction(module = "raydriver.grbl.census")]
+#[gen_stub_pyfunction(module = "raydriver.grbl.probe")]
 #[pyfunction]
 fn describe(
     build_info: Vec<String>,
@@ -146,17 +147,30 @@ fn describe(
     }
 }
 
+/// Runs the device census over *session* and resolves to
+/// [`GrblDeviceInfo`].
+#[gen_stub_pyfunction(module = "raydriver.grbl.probe")]
+#[gen_stub(override_return_type(
+    type_repr = "collections.abc.Awaitable[GrblDeviceInfo]",
+    imports = ("collections.abc",)
+))]
+#[pyfunction]
+fn probe_device(py: Python<'_>, session: Py<PyAny>) -> PyResult<Py<PyAny>> {
+    call_session_probe(py, session.bind(py), None)
+}
+
 pub fn register(grbl_mod: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = grbl_mod.py();
-    let module = PyModule::new(py, "census")?;
+    let module = PyModule::new(py, "probe")?;
     module.setattr("__doc__", "Device census for GRBL controllers.")?;
     module.add_class::<GrblFlavor>()?;
     module.add_class::<GrblDeviceInfo>()?;
     module.add_function(wrap_pyfunction!(describe, &module)?)?;
+    module.add_function(wrap_pyfunction!(probe_device, &module)?)?;
     crate::python::core::discovery::helpers::attach_submodule(
         grbl_mod,
         &module,
-        "raydriver.grbl.census",
+        "raydriver.grbl.probe",
     )?;
     Ok(())
 }

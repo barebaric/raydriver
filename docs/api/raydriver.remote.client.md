@@ -223,16 +223,16 @@ move_to(
 ```python
 probe_device(
     boot_lines: Optional[Sequence[str]] = None,
-) -> Awaitable[grbl.census.GrblDeviceInfo | marlin.census.MarlinDeviceInfo | smoothie.probe.SmoothieDeviceInfo | octoprint.probe.OctoPrintDeviceInfo]
+) -> Awaitable[grbl.probe.GrblDeviceInfo | marlin.probe.MarlinDeviceInfo | smoothie.probe.SmoothieDeviceInfo | octoprint.probe.OctoPrintDeviceInfo]
 ```
 
 Run the device census over the session; marlin sessions accept the boot lines captured at connect
 time.
 
-| Parameter    | Type                                                                                                                                                              | Description |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `boot_lines` | `Optional[Sequence[str]] = None`                                                                                                                                  |             |
-| _Returns_    | `Awaitable[grbl.census.GrblDeviceInfo &#124; marlin.census.MarlinDeviceInfo &#124; smoothie.probe.SmoothieDeviceInfo &#124; octoprint.probe.OctoPrintDeviceInfo]` |             |
+| Parameter    | Type                                                                                                                                                            | Description |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `boot_lines` | `Optional[Sequence[str]] = None`                                                                                                                                |             |
+| _Returns_    | `Awaitable[grbl.probe.GrblDeviceInfo &#124; marlin.probe.MarlinDeviceInfo &#124; smoothie.probe.SmoothieDeviceInfo &#124; octoprint.probe.OctoPrintDeviceInfo]` |             |
 
 ### `read_parser_state()`
 
