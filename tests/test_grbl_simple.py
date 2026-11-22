@@ -222,3 +222,116 @@ class TestConfig:
         with pytest.raises(TimeoutError):
             await session.execute_interactive_command("$X")
         await session.disconnect()
+
+    async def test_home_uses_homing_timeout(self, mock, events):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_simple_session(
+            mock,
+            events,
+            config={"command_timeout": 0.15, "homing_timeout": 2.0},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_home_times_out_with_short_homing_timeout(
+        self, mock, events
+    ):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_simple_session(
+            mock,
+            events,
+            config={"command_timeout": 2.0, "homing_timeout": 0.05},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            with pytest.raises(TimeoutError):
+                await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_home_without_homing_timeout_uses_command_timeout(
+        self, mock, events
+    ):
+        emulator, device_task = await start_device(mock, home_ack_delay=0.4)
+        session = make_simple_session(
+            mock,
+            events,
+            config={"command_timeout": 0.05, "homing_timeout": 0.0},
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emulator.settings["22"] = 1
+            with pytest.raises(TimeoutError):
+                await session.home(None, "G54")
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_stream_uses_op_estimates(self, mock, events):
+        emulator, device_task = await start_device(mock, speed_factor=50)
+        session = make_simple_session(
+            mock,
+            events,
+            config={
+                "command_timeout": 0.05,
+                "stall_timeout_default": 0.05,
+                "stall_timeout_min": 0.05,
+                "stall_timeout_max": 120.0,
+            },
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            await session.run("G1 X20 F100\n", {0: 0}, [5.0])
+            await events.wait_for(SessionEvent.JobFinished)
+        finally:
+            await session.disconnect()
+            device_task.cancel()
+
+    async def test_stream_without_estimate_uses_stall_default(
+        self, mock, events
+    ):
+        emulator, device_task = await start_device(mock, speed_factor=50)
+        session = make_simple_session(
+            mock,
+            events,
+            config={
+                "command_timeout": 0.05,
+                "stall_timeout_default": 1.0,
+                "stall_timeout_min": 0.05,
+                "stall_timeout_max": 120.0,
+            },
+        )
+        try:
+            await session.connect()
+            await events.wait_for(
+                SessionEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            await session.run("G1 X20 F100\n")
+            await events.wait_for(SessionEvent.JobFinished)
+        finally:
+            await session.disconnect()
+            device_task.cancel()
