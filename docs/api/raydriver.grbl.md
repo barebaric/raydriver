@@ -182,15 +182,15 @@ Move to an absolute position (mm) at `speed` (mm/min).
 ### `probe_device()`
 
 ```python
-probe_device() -> Awaitable[probe.GrblDeviceInfo]
+probe_device() -> Awaitable[census.GrblDeviceInfo]
 ```
 
 Open the connection and start the background tasks. Run the device census: query `$I` and `$$`, and
 return the structured result as a dict.
 
-| Parameter | Type                              | Description |
-| --------- | --------------------------------- | ----------- |
-| _Returns_ | `Awaitable[probe.GrblDeviceInfo]` |             |
+| Parameter | Type                               | Description |
+| --------- | ---------------------------------- | ----------- |
+| _Returns_ | `Awaitable[census.GrblDeviceInfo]` |             |
 
 ### `read_parser_state()`
 

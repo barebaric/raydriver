@@ -161,15 +161,15 @@ Move to an absolute position (mm) at `speed` (mm/min).
 ### `probe_device()`
 
 ```python
-probe_device() -> Awaitable[probe.GrblDeviceInfo]
+probe_device() -> Awaitable[census.GrblDeviceInfo]
 ```
 
 Open the connection and start the background tasks. Run the device census: query `$I` and `$$`, and
 return the structured result as a dict.
 
-| Parameter | Type                              | Description |
-| --------- | --------------------------------- | ----------- |
-| _Returns_ | `Awaitable[probe.GrblDeviceInfo]` |             |
+| Parameter | Type                               | Description |
+| --------- | ---------------------------------- | ----------- |
+| _Returns_ | `Awaitable[census.GrblDeviceInfo]` |             |
 
 ### `read_parser_state()`
 
@@ -214,6 +214,8 @@ run(
     gcode: str,
     op_line_map: Optional[Mapping[int, int]] = None,
     progress_callback: Optional[Callable[[int], object]] = None,
+    *,
+    op_estimates: Optional[Sequence[float]] = None,
 ) -> Awaitable[None]
 ```
 
@@ -226,6 +228,7 @@ Stream a G-code program using the ping-pong protocol: one line at a time, waitin
 | `gcode`             | `str`                                      |             |
 | `op_line_map`       | `Optional[Mapping[int, int]] = None`       |             |
 | `progress_callback` | `Optional[Callable[[int], object]] = None` |             |
+| `op_estimates`      | `Optional[Sequence[float]]`                |             |
 | _Returns_           | `Awaitable[None]`                          |             |
 
 ### `run_probe_cycle()`

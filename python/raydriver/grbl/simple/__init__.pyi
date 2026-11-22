@@ -10,7 +10,7 @@ from raydriver import config
 from raydriver import core
 from raydriver.core import transport
 from raydriver.core import types
-from raydriver.grbl import probe
+from raydriver.grbl import census
 import typing
 __all__ = [
     "GrblSimpleSession",
@@ -44,7 +44,7 @@ class GrblSimpleSession:
         r"""
         Build a session around a [`MockTransport`] (for tests).
         """
-    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
+    def probe_device(self) -> collections.abc.Awaitable[census.GrblDeviceInfo]:
         r"""
         Open the connection and start the background tasks.
         Run the device census: query `$I` and `$$`, and return the
@@ -65,7 +65,7 @@ class GrblSimpleSession:
         `execute_interactive_command` — the simple protocol has no
         separate queue).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None, *, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the ping-pong protocol: one
         line at a time, waiting for each `ok`.

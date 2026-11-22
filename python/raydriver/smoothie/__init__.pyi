@@ -64,7 +64,7 @@ class SmoothieSession:
         Queue a command and await its response (identical to
         `execute_interactive_command`).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
+    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None, *, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None) -> collections.abc.Awaitable[None]:
         r"""
         Stream a G-code program using the ping-pong protocol.
         
@@ -83,7 +83,7 @@ class SmoothieSession:
         r"""
         Abort the running job: Ctrl+C and safety shutdown.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes (e.g.
         `["X"]`).

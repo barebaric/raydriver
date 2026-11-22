@@ -64,7 +64,7 @@ class OctoPrintSession:
         acknowledgement.  The API exposes no per-line response text,
         so the result is always empty.
         """
-    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[None]:
+    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
         r"""
         Send a single command without awaiting further state.
         """
@@ -79,7 +79,7 @@ class OctoPrintSession:
         r"""
         Send a raw G-code string as printer commands.
         """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None) -> collections.abc.Awaitable[None]:
+    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: builtins.str = 'G54') -> collections.abc.Awaitable[None]:
         r"""
         Home all axes (`axes` is None) or the named axes.
         """

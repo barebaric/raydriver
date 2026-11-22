@@ -126,15 +126,19 @@ Send a command and await its full response.
 ### `home()`
 
 ```python
-home(axes: Optional[Sequence[str]] = None) -> Awaitable[None]
+home(
+    axes: Optional[Sequence[str]] = None,
+    active_wcs: str = 'G54',
+) -> Awaitable[None]
 ```
 
 Home all axes (`axes` is None) or the named axes (e.g. `["X"]`).
 
-| Parameter | Type                             | Description |
-| --------- | -------------------------------- | ----------- |
-| `axes`    | `Optional[Sequence[str]] = None` |             |
-| _Returns_ | `Awaitable[None]`                |             |
+| Parameter    | Type                             | Description |
+| ------------ | -------------------------------- | ----------- |
+| `axes`       | `Optional[Sequence[str]] = None` |             |
+| `active_wcs` | `str = 'G54'`                    |             |
+| _Returns_    | `Awaitable[None]`                |             |
 
 ### `jog()`
 
@@ -170,17 +174,17 @@ Move to an absolute position (mm) at `speed` (mm/min).
 ```python
 probe_device(
     boot_lines: Optional[Sequence[str]] = None,
-) -> Awaitable[probe.MarlinDeviceInfo]
+) -> Awaitable[census.MarlinDeviceInfo]
 ```
 
 Open the connection and start the background tasks. Run the device census: query M115, M211, M503
 and M149, and return the structured result as a dict. *boot_lines* are the startup messages the
 caller observed on the session, used to refine the firmware version.
 
-| Parameter    | Type                                | Description |
-| ------------ | ----------------------------------- | ----------- |
-| `boot_lines` | `Optional[Sequence[str]] = None`    |             |
-| _Returns_    | `Awaitable[probe.MarlinDeviceInfo]` |             |
+| Parameter    | Type                                 | Description |
+| ------------ | ------------------------------------ | ----------- |
+| `boot_lines` | `Optional[Sequence[str]] = None`     |             |
+| _Returns_    | `Awaitable[census.MarlinDeviceInfo]` |             |
 
 ### `run()`
 
@@ -189,6 +193,8 @@ run(
     gcode: str,
     op_line_map: Optional[Mapping[int, int]] = None,
     progress_callback: Optional[Callable[[int], object]] = None,
+    *,
+    op_estimates: Optional[Sequence[float]] = None,
 ) -> Awaitable[None]
 ```
 
@@ -201,6 +207,7 @@ Stream a G-code program using the ping-pong protocol.
 | `gcode`             | `str`                                      |             |
 | `op_line_map`       | `Optional[Mapping[int, int]] = None`       |             |
 | `progress_callback` | `Optional[Callable[[int], object]] = None` |             |
+| `op_estimates`      | `Optional[Sequence[float]]`                |             |
 | _Returns_           | `Awaitable[None]`                          |             |
 
 ### `run_raw()`

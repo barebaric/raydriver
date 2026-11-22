@@ -54,6 +54,13 @@ class SessionEvent:
         def __new__(cls) -> SessionEvent.JobFinished: ...
     
     @typing.final
+    class JobError(SessionEvent):
+        __match_args__ = ("message",)
+        @property
+        def message(self) -> builtins.str: ...
+        def __new__(cls, message: builtins.str) -> SessionEvent.JobError: ...
+    
+    @typing.final
     class ProbeStatusChanged(SessionEvent):
         __match_args__ = ("message",)
         @property

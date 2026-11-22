@@ -13,7 +13,11 @@ Submodules
 - raydriver.grbl — GRBL device sessions and response parsers
 - raydriver.smoothie — Smoothieware device session
 - raydriver.marlin — Marlin device session and response parsers
-- raydriver.xtool — xTool proprietary WiFi-API session
+- raydriver.octoprint — OctoPrint server session
+- raydriver.xtool — xTool proprietary WiFi-API sessions
+- raydriver.remote — daemon and remote session proxy
+- raydriver.protocols — protocol registry metadata
+- raydriver.errors — exceptions shared by the analyzer and daemon
 """
 
 import raydriver.raydriver as _raydriver  # type: ignore[import-untyped]

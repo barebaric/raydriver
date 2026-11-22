@@ -100,15 +100,15 @@ Stop all background tasks and close the connection.
 ### `execute_command()`
 
 ```python
-execute_command(command: str) -> Awaitable[None]
+execute_command(command: str) -> Awaitable[list[str]]
 ```
 
 Send a single command without awaiting further state.
 
-| Parameter | Type              | Description |
-| --------- | ----------------- | ----------- |
-| `command` | `str`             |             |
-| _Returns_ | `Awaitable[None]` |             |
+| Parameter | Type                   | Description |
+| --------- | ---------------------- | ----------- |
+| `command` | `str`                  |             |
+| _Returns_ | `Awaitable[list[str]]` |             |
 
 ### `execute_interactive_command()`
 
@@ -127,15 +127,19 @@ response text, so the result is always empty.
 ### `home()`
 
 ```python
-home(axes: Optional[Sequence[str]] = None) -> Awaitable[None]
+home(
+    axes: Optional[Sequence[str]] = None,
+    active_wcs: str = 'G54',
+) -> Awaitable[None]
 ```
 
 Home all axes (`axes` is None) or the named axes.
 
-| Parameter | Type                             | Description |
-| --------- | -------------------------------- | ----------- |
-| `axes`    | `Optional[Sequence[str]] = None` |             |
-| _Returns_ | `Awaitable[None]`                |             |
+| Parameter    | Type                             | Description |
+| ------------ | -------------------------------- | ----------- |
+| `axes`       | `Optional[Sequence[str]] = None` |             |
+| `active_wcs` | `str = 'G54'`                    |             |
+| _Returns_    | `Awaitable[None]`                |             |
 
 ### `jog()`
 

@@ -16,6 +16,8 @@ One typed session event, delivered to `event_callback`.
 
 ### ConnectionStatusChanged
 
+### JobError
+
 ### JobFinished
 
 ### ProbeStatusChanged
