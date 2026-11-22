@@ -18,14 +18,14 @@ use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
-use crate::core::discovery::daemon::is_loopback;
 use crate::core::remote::protocol::{
     self, ProtocolError, WireError, WireEvent,
 };
 use crate::core::remote::registry::Registry;
 use crate::core::remote::session::{
-    HostedSession, RemoteEventSink, SessionFactory,
+    HostedError, HostedSession, RemoteEventSink, SessionFactory,
 };
+use crate::core::remote::transport::is_loopback;
 use crate::core::types::DeviceState;
 
 pub const DEFAULT_PORT: u16 = 8765;
@@ -596,7 +596,12 @@ impl Daemon {
         };
         Some(match result {
             Ok(payload) => protocol::response(id, payload),
-            Err(err) => protocol::error_response(id, &err.code, &err.message),
+            Err(err) => protocol::error_response_with_kind(
+                id,
+                &err.code,
+                &err.message,
+                err.kind,
+            ),
         })
     }
 
@@ -851,15 +856,15 @@ impl Daemon {
             return self.start_job(&host, args).await;
         }
         if method == "connect" {
-            host.session.connect().await.map_err(internal)?;
+            host.session.connect().await.map_err(hosted)?;
             return Ok(json!({"result": null}));
         }
         if method == "disconnect" {
-            host.session.disconnect().await.map_err(internal)?;
+            host.session.disconnect().await.map_err(hosted)?;
             return Ok(json!({"result": null}));
         }
         let result =
-            host.session.execute(method, args).await.map_err(internal)?;
+            host.session.execute(method, args).await.map_err(hosted)?;
         Ok(json!({"result": result}))
     }
 
@@ -1328,8 +1333,13 @@ impl Daemon {
             if let Some(job) = job_host.job.lock().unwrap().as_mut() {
                 job.data["running"] = json!(false);
             }
-            if let Err(message) = result {
-                daemon.fan_out(&job_host, WireEvent::JobError { message });
+            if let Err(err) = result {
+                daemon.fan_out(
+                    &job_host,
+                    WireEvent::JobError {
+                        message: err.message,
+                    },
+                );
             }
         });
         *host.job_task.lock().unwrap() = Some(task);
@@ -1410,8 +1420,9 @@ fn require_control(
     Ok(())
 }
 
-fn internal(message: String) -> ProtocolError {
-    ProtocolError::new(protocol::INTERNAL, message)
+fn hosted(err: HostedError) -> ProtocolError {
+    ProtocolError::new(protocol::INTERNAL, err.message)
+        .with_kind(err.kind.as_str())
 }
 
 fn device_ref(config: &Value) -> String {

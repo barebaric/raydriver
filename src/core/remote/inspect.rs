@@ -8,10 +8,10 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
-use crate::core::discovery::daemon::{
+use crate::core::remote::protocol;
+use crate::core::remote::transport::{
     connect_stream, is_loopback, read_message, write_frame,
 };
-use crate::core::remote::protocol;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(5);
 

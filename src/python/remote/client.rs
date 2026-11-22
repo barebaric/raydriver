@@ -3,7 +3,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use pyo3::exceptions::{PyConnectionError, PyValueError};
+use pyo3::exceptions::{
+    PyConnectionError, PyNotImplementedError, PyTimeoutError, PyValueError,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{
@@ -12,7 +14,7 @@ use pyo3_stub_gen::derive::{
 use serde_json::{json, Value};
 
 use crate::core::remote::client::{
-    self as core, RemoteEndpoint, RemoteEvents,
+    self as core, RemoteEndpoint, RemoteError, RemoteErrorKind, RemoteEvents,
     RemoteSession as CoreRemoteSession,
 };
 use crate::core::remote::protocol::WireEvent;
@@ -602,8 +604,16 @@ impl RemoteSession {
     }
 }
 
-fn connection(message: String) -> PyErr {
-    PyConnectionError::new_err(message)
+fn connection(err: RemoteError) -> PyErr {
+    match err.kind {
+        RemoteErrorKind::Timeout => PyTimeoutError::new_err(err.message),
+        RemoteErrorKind::Unsupported => {
+            PyNotImplementedError::new_err(err.message)
+        }
+        RemoteErrorKind::Connection
+        | RemoteErrorKind::Device
+        | RemoteErrorKind::Internal => PyConnectionError::new_err(err.message),
+    }
 }
 
 fn config_to_value(py: Python<'_>, value: &Py<PyAny>) -> PyResult<Value> {

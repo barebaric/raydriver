@@ -7,6 +7,7 @@ pub mod mdns;
 pub mod protocol;
 pub mod registry;
 pub mod session;
+pub mod transport;
 
 /// The raydriver version reported in the daemon welcome.
 pub fn version() -> String {
