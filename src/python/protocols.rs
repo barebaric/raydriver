@@ -10,7 +10,7 @@ use pyo3_stub_gen::derive::{
     gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
 };
 
-use crate::core::remote::registry as core;
+use crate::core::remote::registry::ProtocolInfo as CoreProtocolInfo;
 use crate::python::core::json::value_to_py;
 
 /// Metadata describing one session protocol.
@@ -22,7 +22,7 @@ use crate::python::core::json::value_to_py;
 #[gen_stub_pyclass(module = "raydriver.protocols")]
 #[pyclass(frozen, module = "raydriver.protocols")]
 pub struct ProtocolInfo {
-    inner: core::ProtocolInfo,
+    inner: CoreProtocolInfo,
 }
 
 #[gen_stub_pymethods]
@@ -93,7 +93,9 @@ impl ProtocolInfo {
 #[gen_stub_pyfunction(module = "raydriver.protocols")]
 #[pyfunction]
 fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
-    core::protocol_info(name)
+    crate::protocols::registry()
+        .info(name)
+        .cloned()
         .map(|inner| ProtocolInfo { inner })
         .ok_or_else(|| PyKeyError::new_err(name.to_owned()))
 }
@@ -106,8 +108,9 @@ fn protocol_info(name: &str) -> PyResult<ProtocolInfo> {
 #[pyfunction]
 fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
     let dict = PyDict::new(py);
-    for name in core::names() {
-        let Some(inner) = core::protocol_info(name) else {
+    let registry = crate::protocols::registry();
+    for name in registry.names() {
+        let Some(inner) = registry.info(name).cloned() else {
             continue;
         };
         dict.set_item(name, Py::new(py, ProtocolInfo { inner })?)?;
@@ -120,7 +123,8 @@ fn protocols(py: Python<'_>) -> PyResult<Bound<'_, PyDict>> {
 #[gen_stub(override_return_type(type_repr = "dict[builtins.str, builtins.object]", imports = ("builtins",)))]
 #[pyfunction]
 fn protocols_payload(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-    Ok(value_to_py(py, &core::protocols_payload())?.into_bound(py))
+    let payload = crate::protocols::registry().payload();
+    Ok(value_to_py(py, &payload)?.into_bound(py))
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {

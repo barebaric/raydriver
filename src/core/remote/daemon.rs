@@ -22,7 +22,7 @@ use crate::core::discovery::daemon::is_loopback;
 use crate::core::remote::protocol::{
     self, ProtocolError, WireError, WireEvent,
 };
-use crate::core::remote::registry;
+use crate::core::remote::registry::Registry;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
@@ -262,19 +262,23 @@ pub struct StartedServer {
 pub struct Daemon {
     pub config: Arc<Mutex<DaemonConfig>>,
     factory: Arc<dyn SessionFactory>,
+    registry: Arc<Registry>,
     hosts: Mutex<HashMap<String, Arc<Host>>>,
     clients: Mutex<HashMap<String, Arc<Client>>>,
     listener: Mutex<Option<ListenerHandle>>,
 }
 
 impl Daemon {
+    /// Create a daemon that hosts only protocols in *registry*.
     pub fn new(
         config: Arc<Mutex<DaemonConfig>>,
         factory: Arc<dyn SessionFactory>,
+        registry: Arc<Registry>,
     ) -> Self {
         Self {
             config,
             factory,
+            registry,
             hosts: Mutex::new(HashMap::new()),
             clients: Mutex::new(HashMap::new()),
             listener: Mutex::new(None),
@@ -568,7 +572,7 @@ impl Daemon {
         }
         let result = match type_ {
             protocol::DEVICE_LIST => self.device_list().await,
-            protocol::PROTOCOL_LIST => Ok(registry::protocols_payload()),
+            protocol::PROTOCOL_LIST => Ok(self.registry.payload()),
             protocol::SESSION_LIST => self.session_list().await,
             protocol::SESSION_OPEN => self.session_open(client, payload).await,
             protocol::SESSION_ATTACH => {
@@ -616,10 +620,14 @@ impl Daemon {
                     .get("protocol")
                     .and_then(Value::as_str)
                     .unwrap_or_default();
-                if reference.is_empty() || !registry::is_known(protocol_name) {
+                if reference.is_empty()
+                    || !self.registry.is_known(protocol_name)
+                {
                     continue;
                 }
-                let label = registry::protocol_info(protocol_name)
+                let label = self
+                    .registry
+                    .info(protocol_name)
                     .map(|info| info.label)
                     .unwrap_or_default();
                 devices.insert(
@@ -642,7 +650,9 @@ impl Daemon {
             if reference.is_empty() {
                 continue;
             }
-            let label = registry::protocol_info(&host.protocol)
+            let label = self
+                .registry
+                .info(&host.protocol)
                 .map(|info| info.label)
                 .unwrap_or_default();
             devices.insert(
@@ -747,7 +757,9 @@ impl Daemon {
             .get(&host.id)
             .cloned()
             .unwrap_or_else(|| "watch".to_string());
-        let metadata = registry::protocol_info(&host.protocol)
+        let metadata = self
+            .registry
+            .info(&host.protocol)
             .map(|info| info.to_json())
             .unwrap_or(Value::Null);
         Ok(json!({
@@ -823,13 +835,12 @@ impl Daemon {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
-        let info =
-            registry::protocol_info(&host.protocol).ok_or_else(|| {
-                ProtocolError::new(
-                    protocol::BAD_REQUEST,
-                    format!("unknown protocol {:?}", host.protocol),
-                )
-            })?;
+        let info = self.registry.info(&host.protocol).ok_or_else(|| {
+            ProtocolError::new(
+                protocol::BAD_REQUEST,
+                format!("unknown protocol {:?}", host.protocol),
+            )
+        })?;
         if !info.methods.contains(method) {
             return Err(ProtocolError::new(
                 protocol::UNKNOWN_METHOD,
@@ -861,13 +872,12 @@ impl Daemon {
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let info =
-            registry::protocol_info(&host.protocol).ok_or_else(|| {
-                ProtocolError::new(
-                    protocol::BAD_REQUEST,
-                    format!("unknown protocol {:?}", host.protocol),
-                )
-            })?;
+        let info = self.registry.info(&host.protocol).ok_or_else(|| {
+            ProtocolError::new(
+                protocol::BAD_REQUEST,
+                format!("unknown protocol {:?}", host.protocol),
+            )
+        })?;
         if !info.properties.contains(name) {
             return Err(ProtocolError::new(
                 protocol::UNKNOWN_PROPERTY,
@@ -899,7 +909,7 @@ impl Daemon {
         config: Value,
         dialect: Value,
     ) -> Result<Arc<Host>, ProtocolError> {
-        if !registry::is_known(protocol_name) {
+        if !self.registry.is_known(protocol_name) {
             return Err(ProtocolError::new(
                 protocol::BAD_REQUEST,
                 format!("unknown protocol {protocol_name:?}"),
@@ -995,9 +1005,8 @@ impl Daemon {
         &self,
         reference: &str,
     ) -> Option<(String, Value, Value)> {
-        let candidates =
-            [("grbl", "$I", "VER:"), ("marlin", "M115", "FIRMWARE")];
-        for (name, command, signature) in candidates {
+        let candidates = self.registry.probe_candidates();
+        for (name, probe) in candidates {
             let config = json!({
                 "port": reference,
                 "baudrate": 115200,
@@ -1024,13 +1033,13 @@ impl Daemon {
                 Duration::from_secs(3),
                 session.execute(
                     "execute_interactive_command",
-                    json!({"command": command}),
+                    json!({"command": probe.command}),
                 ),
             )
             .await;
             if let Ok(Ok(value)) = reply {
                 let text = value.to_string();
-                if text.contains(signature) {
+                if text.contains(probe.signature) {
                     let _ = session.disconnect().await;
                     return Some((name.to_string(), config, json!({})));
                 }

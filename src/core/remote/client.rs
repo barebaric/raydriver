@@ -15,7 +15,6 @@ use crate::core::discovery::daemon::{
 };
 use crate::core::remote::inspect;
 use crate::core::remote::protocol::{self, WireEvent};
-use crate::core::remote::registry;
 use crate::core::types::DeviceState;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -326,8 +325,6 @@ impl RemoteSession {
     fn apply_snapshot(&self, snapshot: &Value) {
         if let Some(name) = snapshot.get("protocol").and_then(Value::as_str) {
             *self.protocol.lock().unwrap() = Some(name.to_string());
-            *self.metadata.lock().unwrap() =
-                registry::protocol_info(name).map(|info| info.to_json());
         }
         if let Some(state) = snapshot.get("state") {
             if let Ok(state) = protocol::decode_state(state) {

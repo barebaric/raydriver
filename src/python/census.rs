@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 use pyo3_stub_gen::{ImportRef, PyStubType, TypeInfo};
 use serde_json::Value;
 
+use crate::core::remote::registry::CensusKind;
 use crate::python::grbl::probe::GrblDeviceInfo;
 use crate::python::marlin::probe::MarlinDeviceInfo;
 use crate::python::octoprint::probe::OctoPrintDeviceInfo;
@@ -52,14 +53,14 @@ impl PyStubType for DeviceCensus {
     }
 }
 
-/// Builds the census pyclass for *protocol* from its wire form.
+/// Builds the census pyclass for *census* from its wire form.
 pub(crate) fn census_from_json(
     py: Python<'_>,
-    protocol: &str,
+    census: CensusKind,
     value: &Value,
 ) -> PyResult<DeviceCensus> {
-    let any: Py<PyAny> = match protocol {
-        "grbl" | "grbl_simple" | "esp3d" => {
+    let any: Py<PyAny> = match census {
+        CensusKind::Grbl => {
             let census =
                 crate::grbl::probe::GrblCensus::from_json(value.clone())
                     .map_err(|err| {
@@ -67,7 +68,7 @@ pub(crate) fn census_from_json(
                     })?;
             Py::new(py, GrblDeviceInfo { inner: census })?.into_any()
         }
-        "marlin" => {
+        CensusKind::Marlin => {
             let census =
                 crate::marlin::probe::MarlinCensus::from_json(value.clone())
                     .map_err(|err| {
@@ -75,7 +76,7 @@ pub(crate) fn census_from_json(
                     })?;
             Py::new(py, MarlinDeviceInfo { inner: census })?.into_any()
         }
-        "smoothie" => {
+        CensusKind::Smoothie => {
             let census = crate::smoothie::probe::SmoothieCensus::from_json(
                 value.clone(),
             )
@@ -84,7 +85,7 @@ pub(crate) fn census_from_json(
             })?;
             Py::new(py, SmoothieDeviceInfo { inner: census })?.into_any()
         }
-        "octoprint" => {
+        CensusKind::OctoPrint => {
             let census = crate::octoprint::probe::OctoPrintCensus::from_json(
                 value.clone(),
             )
@@ -92,11 +93,6 @@ pub(crate) fn census_from_json(
                 pyo3::exceptions::PyValueError::new_err(err.to_string())
             })?;
             Py::new(py, OctoPrintDeviceInfo { inner: census })?.into_any()
-        }
-        other => {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown protocol {other:?}"
-            )));
         }
     };
     Ok(DeviceCensus(any))

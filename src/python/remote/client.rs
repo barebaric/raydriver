@@ -462,6 +462,14 @@ impl RemoteSession {
         boot_lines: Option<Vec<String>>,
     ) -> PyResult<PyAwait<'py, DeviceCensus>> {
         let protocol = self.inner.protocol().unwrap_or_default();
+        let census = crate::protocols::registry()
+            .info(&protocol)
+            .map(|info| info.census)
+            .ok_or_else(|| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "unknown protocol {protocol:?}"
+                ))
+            })?;
         let inner = self.inner.clone();
         spawn_future(py, async move {
             let args = match boot_lines {
@@ -472,7 +480,7 @@ impl RemoteSession {
                 .command("probe_device", args)
                 .await
                 .map_err(connection)?;
-            Python::attach(|py| census_from_json(py, &protocol, &value))
+            Python::attach(|py| census_from_json(py, census, &value))
         })
     }
 
