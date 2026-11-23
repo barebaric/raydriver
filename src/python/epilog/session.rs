@@ -98,7 +98,7 @@ impl PyEpilogSession {
     /// Upload a complete print job and wait until the machine accepts
     /// it.
     ///
-    /// :param payload: the encoder's PJL/PCL/HPGL byte stream.
+    /// :param payload: the encoder's byte stream for this job.
     /// :param title: the job name shown in the machine's job list.
     fn upload<'py>(
         &self,

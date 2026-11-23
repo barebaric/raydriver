@@ -6,9 +6,10 @@ use pyo3::prelude::*;
 
 pub(crate) const MODULE_DOC: &str = "\
 Epilog laser support implemented in Rust. EpilogSession uploads \
-PJL/PCL/HPGL print jobs over the BSD LPD protocol (port 515) and \
-reports reachability. The machine exposes no status, homing, \
-jogging or power-over-network operations.
+pre-encoded print jobs (the encoder decides the printer language) \
+over the BSD LPD protocol (port 515) and reports reachability. The \
+machine exposes no status channel, so every other operation raises \
+NotImplementedError.
 ";
 
 pyo3_stub_gen::module_doc!("raydriver.epilog", "{}", MODULE_DOC);
