@@ -20,6 +20,22 @@ use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
 /// Default LPD port of a printer.
 pub const DEFAULT_PORT: u16 = 515;
 
+/// Default print queue name.
+///
+/// RFC 1179 makes this the operand of the receive-job command, and
+/// Epilog's own setup instructions name the queue "Laser".
+pub const DEFAULT_QUEUE: &str = "Laser";
+
+/// Name of the machine submitting the job (RFC 1179's `H` line).
+///
+/// The machine lists it with queued jobs. Raydriver carries no OS
+/// hostname dependency (the crate also builds for wasm), so embedders
+/// supply it; the default is generic.
+pub const DEFAULT_SUBMIT_HOST: &str = "rayforge";
+
+/// Default submitting user recorded in the control file.
+pub const DEFAULT_USER: &str = "rayforge";
+
 /// Default deadline for connecting, writing and reading one ack.
 const DEFAULT_TIMEOUT: f64 = 30.0;
 
@@ -31,6 +47,13 @@ const WRITE_CHUNK: usize = 64 * 1024;
 pub struct EpilogConfig {
     pub host: String,
     pub port: u16,
+    /// Print queue the job is submitted to (RFC 1179 receive-job
+    /// operand).
+    pub queue: String,
+    /// Host name recorded in the control file's `H` line (RFC 1179).
+    pub submit_host: String,
+    /// User id recorded in the control file's `P` line (RFC 1179).
+    pub user: String,
     /// Per-stage connect/write/ack deadline in seconds.
     pub timeout: f64,
 }
@@ -40,12 +63,34 @@ impl EpilogConfig {
         Self {
             host: host.to_string(),
             port: DEFAULT_PORT,
+            queue: DEFAULT_QUEUE.to_string(),
+            submit_host: DEFAULT_SUBMIT_HOST.to_string(),
+            user: DEFAULT_USER.to_string(),
             timeout: DEFAULT_TIMEOUT,
         }
     }
 
     fn deadline(&self) -> Duration {
         Duration::from_secs_f64(self.timeout.max(0.001))
+    }
+
+    /// The queue operand, reduced to something a daemon accepts.
+    ///
+    /// The name travels as a command operand terminated by LF, so
+    /// only printable characters without whitespace survive; an empty
+    /// name falls back to the default queue.
+    fn queue_operand(&self) -> String {
+        let cleaned: String = self
+            .queue
+            .chars()
+            .filter(|c| c.is_ascii_graphic())
+            .take(31)
+            .collect();
+        if cleaned.is_empty() {
+            DEFAULT_QUEUE.to_string()
+        } else {
+            cleaned
+        }
     }
 }
 
@@ -245,16 +290,50 @@ impl EpilogSession {
         let token = upload_token();
         let name = format!("dfA{token}rayforge");
         let control_name = format!("cfA{token}rayforge");
-        let control = control_file(title, &name);
+        let control = control_file(
+            &self.config.submit_host,
+            &self.config.user,
+            title,
+            &name,
+        );
 
-        self.stage(stream, b"\x02\n", "receive a job", deadline)
+        let receive = format!("\x02{}\n", self.config.queue_operand());
+        self.stage(stream, receive.as_bytes(), "receive a job", deadline)
             .await?;
 
+        // From here on the daemon owns a partially created job, so a
+        // failure aborts it instead of leaving a half job behind
+        // (RFC 1179 §6.1).
+        let result = self
+            .transfer_files(
+                stream,
+                &control,
+                &control_name,
+                &name,
+                payload,
+                deadline,
+            )
+            .await;
+        if result.is_err() {
+            self.send_abort(stream, deadline).await;
+        }
+        result
+    }
+
+    async fn transfer_files(
+        &self,
+        stream: &mut DynStream,
+        control: &[u8],
+        control_name: &str,
+        name: &str,
+        payload: &[u8],
+        deadline: Duration,
+    ) -> Result<(), TransferError> {
         let header = format!("\x02{} {control_name}\n", control.len());
         self.stage(stream, header.as_bytes(), "the control header", deadline)
             .await?;
 
-        let mut control_block = control;
+        let mut control_block = control.to_vec();
         control_block.push(0);
         self.stage(stream, &control_block, "the control file", deadline)
             .await?;
@@ -266,6 +345,19 @@ impl EpilogSession {
         self.write_all(stream, payload, deadline).await?;
         self.read_ack(stream, "the job data", deadline).await?;
         Ok(())
+    }
+
+    /// Tell the daemon to discard the partially received job.
+    ///
+    /// Best effort: the connection is about to be closed either way,
+    /// and the RFC replies to the abort with an ack nobody needs.
+    async fn send_abort(&self, stream: &mut DynStream, deadline: Duration) {
+        let _ =
+            tokio::time::timeout(deadline, stream.write_all(b"\x01\n")).await;
+        let _ = tokio::time::timeout(deadline, stream.flush()).await;
+        let mut ack = [0u8; 1];
+        let _ =
+            tokio::time::timeout(deadline, stream.read_exact(&mut ack)).await;
     }
 
     async fn stage(
@@ -373,12 +465,52 @@ impl std::fmt::Display for TransferError {
 
 /// The control file describing one job.
 ///
-/// `H` is the submitting host, `P` the submitting user, `J` the job
-/// name, and the `l`/`U` lines name the data file.
-fn control_file(title: &str, data_name: &str) -> Vec<u8> {
+/// Following RFC 1179: `H` names the submitting host, `P` the user,
+/// `J` the job name the machine lists, `N` the source file name, and
+/// `l`/`U` print and then remove the data file.
+fn control_file(
+    host: &str,
+    user: &str,
+    title: &str,
+    data_name: &str,
+) -> Vec<u8> {
     let job = sanitize_title(title);
-    format!("Hrayforge\nPrayforge\nJ{job}\nl{data_name}\nU{data_name}\n")
-        .into_bytes()
+    format!(
+        "H{}\nP{}\nJ{job}\nN{job}\nl{data_name}\nU{data_name}\n",
+        operand(host, 31),
+        operand(user, 31),
+    )
+    .into_bytes()
+}
+
+/// Reduce a control-file operand to RFC 1179's printable characters
+/// and length bound.
+fn operand(value: &str, max_len: usize) -> String {
+    let cleaned: String = value
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .take(max_len)
+        .collect();
+    let trimmed = cleaned.trim();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Where the last job number handed out reached.
+static LAST_JOB_NUMBER: AtomicU64 = AtomicU64::new(0);
+
+/// A three-digit suffix that keeps queued jobs distinguishable.
+///
+/// Cycled through a process-wide counter rather than derived from the
+/// clock: two uploads in the same millisecond must not collide.
+/// The reserve/acknowledge protocol numbers jobs 0..=999, so only the
+/// low three digits travel.
+fn upload_token() -> String {
+    let issued = LAST_JOB_NUMBER.fetch_add(1, Ordering::SeqCst);
+    format!("{:03}", issued % 1000)
 }
 
 /// Keep the job name printable and free of LPD control characters.
@@ -400,15 +532,6 @@ fn sanitize_title(title: &str) -> String {
     } else {
         trimmed.to_string()
     }
-}
-
-/// A three-digit suffix that keeps queued jobs distinguishable.
-fn upload_token() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.subsec_micros())
-        .unwrap_or(0);
-    format!("{:03}", nanos % 1000)
 }
 
 #[async_trait]
@@ -490,7 +613,7 @@ impl Session for EpilogSession {
     }
 
     async fn select_tool(&self, _tool_number: i64) -> Result<(), SessionError> {
-        Ok(())
+        Err(unsupported("select_tool"))
     }
 }
 

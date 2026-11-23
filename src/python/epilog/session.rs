@@ -28,6 +28,15 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<EpilogConfig> {
     if let Some(v) = get_i64(dict, "port")? {
         config.port = v.clamp(1, u16::MAX.into()) as u16;
     }
+    if let Some(v) = get_str(dict, "queue").ok().flatten() {
+        config.queue = v;
+    }
+    if let Some(v) = get_str(dict, "submit_host").ok().flatten() {
+        config.submit_host = v;
+    }
+    if let Some(v) = get_str(dict, "user").ok().flatten() {
+        config.user = v;
+    }
     if let Some(v) = get_f64(dict, "timeout")? {
         config.timeout = v;
     }

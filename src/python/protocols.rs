@@ -204,7 +204,7 @@ pub(crate) fn protocol_registry() -> core::Registry {
             // Epilog print jobs are PJL/PCL/HPGL, not G-code.
             dialect_family: "",
             connection: "network",
-            config_keys: &["host", "port", "timeout"],
+            config_keys: &["host", "port", "queue", "timeout"],
             // The machine has no status channel, so only the job
             // upload and the machine-space coordinate query apply.
             methods: core::methods(&[
