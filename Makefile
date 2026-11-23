@@ -34,6 +34,9 @@ lint-rust:
 	cargo fmt --check
 	cargo clippy --features python -- -D warnings
 	cargo clippy --no-default-features -- -D warnings
+	# The opt-in TLS root provider must stay buildable (native roots
+	# are covered by the `python` build above).
+	cargo check --no-default-features --features tls-webpki-roots
 
 lint-python:
 	ruff check tests/ python/ tools/

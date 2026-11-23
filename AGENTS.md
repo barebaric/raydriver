@@ -188,12 +188,20 @@ verify with `make check-wasm`.
 | `serial` | tokio-serial transport impl | OS file descriptors (Web Serial replaces it; port *enumeration* via `serialport` stays available without the feature) |
 | `remote-daemon` | `remote::daemon` | TCP listener, TLS certs from the filesystem; implies `net` |
 | `m2` | `xtool::m2` | tokio-tungstenite has no wasm build; implies `net` |
+| `tls-native-roots` / `tls-webpki-roots` | the M2 WebSocket client's TLS trust store (exactly one is required by `m2`) | no OS trust store on wasm; `m2` is off there |
 | `python` | `src/python/` | Implies all desktop features + tokio `rt-multi-thread` |
 
 Rules:
 
-- `default = ["net", "mdns", "serial", "remote-daemon", "m2"]`; a
-  wasm build is `--no-default-features` with **no** features.
+- `default = ["net", "mdns", "serial", "remote-daemon", "m2",
+  "tls-native-roots"]`; a wasm build is `--no-default-features` with
+  **no** features.
+- `m2` needs exactly one TLS root provider: `tls-native-roots` (the
+  default — the OS store, so administrator-installed CAs work and
+  `webpki-roots` stays out of the dependency graph) or
+  `tls-webpki-roots` (bundled Mozilla roots).  Both imply `m2`; a
+  `--no-default-features --features m2` build without either fails at
+  compile time with an explanatory error.
 - Device-facing network code (HTTP/WS clients, telnet transport,
   esp3d/octoprint/xtool sessions) dials through
   `core::connector::dial` and must compile unconditionally; on hosts

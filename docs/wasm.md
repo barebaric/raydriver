@@ -55,10 +55,20 @@ to disable functionality:
 | `serial` | the tokio-serial transport impl | OS file descriptors (Web Serial replaces it — see above; port *enumeration* via `serialport` stays compiled and degrades gracefully) |
 | `remote-daemon` | the session-host daemon | TCP listener, TLS certs from the filesystem |
 | `m2` | the xTool M2 session | its tokio-tungstenite stack has no wasm build |
+| `tls-native-roots` / `tls-webpki-roots` | the M2 client's TLS trust store (exactly one is required by `m2`) | no OS trust store on wasm; `m2` is off there |
 
-`default = ["net", "mdns", "serial", "remote-daemon", "m2"]`, so
-native consumers see no change; a wasm build is
-`--no-default-features`.
+`default = ["net", "mdns", "serial", "remote-daemon", "m2",
+"tls-native-roots"]`, so native consumers see no change; a wasm build
+is `--no-default-features`.
+
+`m2` requires exactly one TLS root provider.  `tls-native-roots`
+(the default) uses the OS trust store, which follows the
+administrator's policy and keeps `webpki-roots` out of the dependency
+graph — distributions that cannot ship it (e.g. Debian) build with
+`--no-default-features --features tls-native-roots` (or `python`).
+`tls-webpki-roots` bundles the Mozilla roots for self-contained
+builds.  Both features imply `m2`; enabling `m2` without a provider
+is a compile-time error.
 
 ## Embedder runtime recipe
 

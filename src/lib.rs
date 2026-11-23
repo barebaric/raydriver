@@ -23,7 +23,23 @@
 //! (`mdns`, the remote daemon listener, the remote client, OS serial
 //! ports, the tungstenite-based M2 session); everything else —
 //! including the HTTP/WS device sessions — compiles and runs on
-//! wasm against embedder-provided streams (see docs/wasm.md).
+//! wasm against embedder-provided streams (see docs/wasm.md).  The
+//! M2 session's TLS roots are chosen by `tls-native-roots` (default)
+//! or `tls-webpki-roots`.
+
+// The M2 WebSocket client needs a rustls trust store, selected at
+// build time.  Both provider features imply `m2`; this guard catches
+// `--no-default-features --features m2` with an actionable message
+// instead of a cryptic missing-`Connector` variant error.
+#[cfg(all(
+    feature = "m2",
+    not(any(feature = "tls-native-roots", feature = "tls-webpki-roots"))
+))]
+compile_error!(
+    "the `m2` feature requires a TLS root provider: enable \
+     `tls-native-roots` (OS trust store, the default) or \
+     `tls-webpki-roots` (bundled Mozilla roots)"
+);
 
 pub mod core;
 pub mod esp3d;
