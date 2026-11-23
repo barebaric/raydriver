@@ -17,7 +17,14 @@ repository = "https://github.com/barebaric/raydriver"
 # physically cannot do.  Native desktop consumers get the full set
 # via `default`; the Python build enables `python` (see
 # [tool.maturin] in pyproject.toml).
-default = ["net", "mdns", "serial", "remote-daemon", "m2"]
+default = [
+    "net",
+    "mdns",
+    "serial",
+    "remote-daemon",
+    "m2",
+    "tls-native-roots",
+]
 python = [
     "dep:pyo3",
     "dep:pyo3-stub-gen",
@@ -31,6 +38,7 @@ python = [
     "serial",
     "remote-daemon",
     "m2",
+    "tls-native-roots",
 ]
 # Host-side TCP/IP networking that needs real sockets: the network
 # discovery scanners (probes, subnet scan, TLS control streams) and
@@ -60,6 +68,15 @@ serial = ["dep:tokio-serial"]
 # The remote session-host daemon: a host-side TCP/TLS server.
 # Not meaningful on wasm.
 remote-daemon = ["net", "dep:uuid"]
+# TLS trust store for the M2 WebSocket client.  `m2` requires exactly
+# one of these providers.  Native roots are the default: they follow
+# the host's trust policy (administrator-installed CAs) and keep the
+# bundled Mozilla root set — unavailable in some distributions, e.g.
+# Debian — out of the dependency graph.  Consumers that want a
+# self-contained build, or whose target has no OS trust store, select
+# `tls-webpki-roots` instead.
+tls-native-roots = ["m2", "tokio-tungstenite/rustls-tls-native-roots"]
+tls-webpki-roots = ["m2", "tokio-tungstenite/rustls-tls-webpki-roots"]
 
 [dependencies]
 
@@ -91,10 +108,11 @@ tokio = { version = "1", default-features = false, features = [
     "io-util",
 ] }
 tokio-serial = { version = "5.4", optional = true }
+# The TLS root provider is chosen by the `tls-native-roots` /
+# `tls-webpki-roots` features.
 tokio-tungstenite = { version = "0.30", default-features = false, features = [
     "connect",
     "handshake",
-    "rustls-tls-webpki-roots",
 ], optional = true }
 uuid = { version = "1", features = ["v4"], optional = true }
 
