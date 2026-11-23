@@ -62,8 +62,11 @@ def test_registry_capabilities():
         is False
     )
     for info in PROTOCOLS.values():
-        assert info.capabilities["uses_gcode"] is True
-        assert info.dialect_family
+        # A dialect family marks a G-code protocol; print-job devices
+        # (Epilog) carry none and must not claim G-code support.
+        assert info.capabilities["uses_gcode"] is bool(info.dialect_family)
+    assert protocol_info("epilog").capabilities["uses_gcode"] is False
+    assert protocol_info("grbl").capabilities["uses_gcode"] is True
 
 
 @pytest_asyncio.fixture

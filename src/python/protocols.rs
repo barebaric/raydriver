@@ -198,6 +198,23 @@ pub(crate) fn protocol_registry() -> core::Registry {
                 signature: "FIRMWARE",
             }),
         },
+        core::ProtocolInfo {
+            name: "epilog",
+            label: "Epilog",
+            // Epilog print jobs are PJL/PCL/HPGL, not G-code.
+            dialect_family: "",
+            connection: "network",
+            config_keys: &["host", "port", "timeout"],
+            // The machine has no status channel, so only the job
+            // upload and the machine-space coordinate query apply.
+            methods: core::methods(&[
+                "upload",
+                "read_wcs_offsets",
+                "read_parser_state",
+            ]),
+            properties: core::common_properties(),
+            probe: None,
+        },
     ])
 }
 

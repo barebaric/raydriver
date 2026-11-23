@@ -16,6 +16,7 @@ from conftest import DEFAULT_DIALECT, EventRecorder
 from raydriver.core import SessionEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
+from raydriver.epilog import EpilogSession
 from raydriver.grbl import GrblSession
 from raydriver.grbl.simple import GrblSimpleSession
 from raydriver.marlin import MarlinSession
@@ -33,6 +34,7 @@ SESSIONS = {
     "smoothie": SmoothieSession,
     "marlin": MarlinSession,
     "octoprint": OctoPrintSession,
+    "epilog": EpilogSession,
 }
 
 REMOTE_TIMINGS = {
