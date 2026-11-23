@@ -43,7 +43,10 @@ pub struct ProbeFingerprint {
 impl ProtocolInfo {
     pub fn capabilities(&self) -> Value {
         json!({
-            "uses_gcode": true,
+            // Some sessions drive print-job devices (e.g. Epilog
+            // laser cutters) whose machine language is not G-code;
+            // they carry no dialect family.
+            "uses_gcode": !self.dialect_family.is_empty(),
             "supports_settings": self.methods.contains("read_settings"),
             "supports_probing": self.methods.contains("run_probe_cycle"),
             "supports_hold": self.methods.contains("set_hold"),

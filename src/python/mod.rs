@@ -3,6 +3,7 @@
 pub(crate) mod census;
 pub(crate) mod config;
 pub(crate) mod core;
+pub(crate) mod epilog;
 pub(crate) mod events;
 pub(crate) mod grbl;
 pub(crate) mod marlin;
@@ -167,6 +168,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     marlin::register(m)?;
     smoothie::register(m)?;
     octoprint::register(m)?;
+    epilog::register(m)?;
     xtool::register(m)?;
     remote::register(m)?;
     register_atexit_hook(m)?;
