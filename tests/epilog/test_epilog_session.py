@@ -208,15 +208,13 @@ async def test_connect_reports_reachable_machine():
 
 
 async def test_connect_failure_reports_error():
-    # Grab a free port, then close it again so nothing listens.
-    server = await asyncio.start_server(lambda r, w: None, "127.0.0.1", 0)
-    port = server.sockets[0].getsockname()[1]
-    server.close()
-    await server.wait_closed()
-
+    # A closed port is not deterministic: on Windows a SYN to a
+    # recently closed port is silently dropped, so the connect times
+    # out instead of being refused. An unroutable address always
+    # fails, and the session maps it to the same error path.
     events = EventRecorder()
-    session = make_session(port, events)
-    with pytest.raises(ConnectionError):
+    session = make_session(9, events, host="192.0.2.1", timeout=0.5)
+    with pytest.raises((ConnectionError, TimeoutError)):
         await session.connect()
     await events.wait_for(
         SessionEvent.ConnectionStatusChanged,
