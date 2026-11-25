@@ -10,9 +10,140 @@ from raydriver import core
 from raydriver import driver
 import typing
 __all__ = [
+    "GlueScript",
     "RuidaDriver",
     "encode_script",
 ]
+
+@typing.final
+class GlueScript:
+    r"""
+    The Ruida job authoring and compilation model.
+    
+    Call the authoring methods to build a job, then `stage_gluescript()`
+    compiles it into rpascript. `stage_gluescript(lines)` also replays a
+    persisted transcript.
+    """
+    @property
+    def gluescript(self) -> builtins.list[builtins.str]:
+        r"""
+        The canonical transcript lines.
+        """
+    @property
+    def rpascript(self) -> builtins.list[builtins.str]:
+        r"""
+        The compiled rpascript lines.
+        """
+    @property
+    def job_complete(self) -> builtins.bool:
+        r"""
+        Whether `end_job()` finalized the job.
+        """
+    def __new__(cls) -> GlueScript: ...
+    def new_gluescript(self) -> None:
+        r"""
+        Reset all per-job state.
+        """
+    def comment(self, comments: typing.Sequence[builtins.str]) -> None:
+        r"""
+        Append comment lines to the job header.
+        """
+    def declare_job(self, label: builtins.str, ref_point: builtins.str = 'MACHINE', abs_xy: typing.Optional[typing.Sequence[builtins.float]] = None, columns: builtins.int = 1, rows: builtins.int = 1, xstep: builtins.float = 0.0, ystep: builtins.float = 0.0) -> None:
+        r"""
+        Declare a job.
+        """
+    def end_job(self) -> None:
+        r"""
+        Finalize the job.
+        """
+    def declare_layer(self, label: builtins.str, color: builtins.str, mode: builtins.str = 'VECTOR', overscan: builtins.str = 'NONE', speed: builtins.float = 100.0, frequency: builtins.float = 20.0, min_power_1: builtins.float = 8.0, max_power_1: builtins.float = 70.0) -> None:
+        r"""
+        Declare a layer.
+        """
+    def power(self, percent: typing.Optional[builtins.float]) -> None:
+        r"""
+        Set immediate power for an IMAGE/DEPTHMAP layer.
+        """
+    def power_range(self, min_power: typing.Optional[builtins.float], max_power: typing.Optional[builtins.float]) -> None:
+        r"""
+        Save a power ramp range for the next cut.
+        """
+    def cut_speed(self, speed: builtins.float) -> None:
+        r"""
+        Save the cut speed for the next cut.
+        """
+    def move_speed(self, speed: builtins.float) -> None:
+        r"""
+        Record a move speed (comment-only).
+        """
+    def frequency(self, frequency: builtins.float) -> None:
+        r"""
+        Save the layer frequency for the next flush.
+        """
+    def pwm(self, duration: builtins.float) -> None:
+        r"""
+        Record the pulse width (comment-only).
+        """
+    def select_laser(self, laser: builtins.int) -> None:
+        r"""
+        Select a laser head.
+        """
+    def air_assist_on(self) -> None:
+        r"""
+        Enable air assist.
+        """
+    def air_assist_off(self) -> None:
+        r"""
+        Disable air assist.
+        """
+    def set_mode(self, mode: builtins.str) -> None:
+        r"""
+        Switch the layer mode mid-stream.
+        """
+    def set_overscan(self, overscan: builtins.str) -> None:
+        r"""
+        Set the overscan for the current layer.
+        """
+    def set_max_cut_speed(self, speed: builtins.float) -> None:
+        r"""
+        Set the maximum cut speed used by power scaling.
+        """
+    def set_power_floor(self, floor: builtins.float) -> None:
+        r"""
+        Set the laser's minimum firing power.
+        """
+    def set_power_scaling_enabled(self, enabled: builtins.bool) -> None:
+        r"""
+        Enable or disable effective-min power scaling.
+        """
+    def move_xy_to(self, x: builtins.float, y: builtins.float) -> None:
+        r"""
+        Move to an absolute XY position.
+        """
+    def move_x_to(self, x: builtins.float) -> None:
+        r"""
+        Move to an absolute X position.
+        """
+    def move_y_to(self, y: builtins.float) -> None:
+        r"""
+        Move to an absolute Y position.
+        """
+    def cut_xy_to(self, x: builtins.float, y: builtins.float) -> None:
+        r"""
+        Cut to an absolute XY position.
+        """
+    def cut_x_to(self, x: builtins.float) -> None:
+        r"""
+        Cut to an absolute X position.
+        """
+    def cut_y_to(self, y: builtins.float) -> None:
+        r"""
+        Cut to an absolute Y position.
+        """
+    def stage_gluescript(self, gluescript: typing.Optional[typing.Sequence[builtins.str]] = None, require_complete: builtins.bool = True) -> builtins.str:
+        r"""
+        Compile the job, or replay a transcript and compile it.
+        """
 
 @typing.final
 class RuidaDriver(driver.Driver):

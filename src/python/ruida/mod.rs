@@ -1,6 +1,7 @@
 //! The `raydriver.ruida` Python submodule.
 
 pub(crate) mod driver;
+pub(crate) mod gluescript;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -22,8 +23,12 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let ruida_mod = PyModule::new(py, "ruida")?;
 
     ruida_mod.setattr("__doc__", MODULE_DOC)?;
-    ruida_mod.add("__all__", vec!["RuidaDriver", "encode_script"])?;
+    ruida_mod.add(
+        "__all__",
+        vec!["RuidaDriver", "GlueScript", "encode_script"],
+    )?;
     ruida_mod.add_class::<driver::PyRuidaDriver>()?;
+    ruida_mod.add_class::<gluescript::PyGlueScript>()?;
     ruida_mod
         .add_function(wrap_pyfunction!(encode_script, ruida_mod.clone())?)?;
 
