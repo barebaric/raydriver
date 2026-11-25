@@ -203,9 +203,9 @@ impl PyGcodeSpec {
 
 /// Parameters for the Epilog print-job encoder.
 ///
-/// `context_json` is a JSON-serialised ``EpilogContext``: job title,
-/// resolution, frequency, bed size, speed reference, origin layout and
-/// the rotary flag.
+/// `context_json` is a JSON-serialised ``EpilogContext``: model family,
+/// job title, resolution, frequency, bed size, speed reference, origin
+/// layout and the rotary flag.
 #[gen_stub_pyclass(module = "raydriver.encode")]
 #[pyclass(
     name = "EpilogSpec",

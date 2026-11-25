@@ -1,8 +1,11 @@
 //! Encode machine-space Ops as an Epilog laser print job.
 //!
-//! Epilog laser cutters (Zing 16 / Zing 24-6030) do not speak G-code.
-//! They accept a print job: a PCL5 body (PJL-style envelope, raster
-//! part, HPGL vector part) submitted to the machine's print queue.
+//! Epilog laser cutters (Zing 16 / Zing 24-6030 and the Helix family)
+//! do not speak G-code. They accept a print job: a PCL5 body (PJL-style
+//! envelope, raster part, HPGL vector part) submitted to the machine's
+//! print queue. The families share the job format; their supported
+//! raster resolutions differ (Zing: 100, 200, 250, 400, 500, 1000 DPI;
+//! Helix: 75, 150, 200, 300, 400, 600, 1200 DPI).
 //! This encoder produces both a human-readable listing that callers
 //! can show and export, and the exact byte stream the driver uploads.
 //!
@@ -53,8 +56,43 @@ use raygeo::ops::enums::{CommandType, RasterMode, SectionType};
 use raygeo::ops::state::AirAssistMode;
 use raygeo::ops::types::{MarkerCmd, MoveCmd, OpCategory, StateCmd};
 
-/// Supported raster resolutions in dots per inch.
-pub const RESOLUTIONS: [u32; 6] = [100, 200, 250, 400, 500, 1000];
+/// Raster resolutions supported by the Epilog Zing family, in DPI.
+pub const ZING_RESOLUTIONS: [u32; 6] = [100, 200, 250, 400, 500, 1000];
+
+/// Raster resolutions supported by the Epilog Helix family, in DPI.
+pub const HELIX_RESOLUTIONS: [u32; 7] = [75, 150, 200, 300, 400, 600, 1200];
+
+/// Backwards-compatible alias for the Zing resolution set.
+pub const RESOLUTIONS: [u32; 6] = ZING_RESOLUTIONS;
+
+/// The Epilog model family a job is encoded for.
+///
+/// The families share the print language; they differ in the raster
+/// resolutions the machine accepts.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EpilogModel {
+    #[default]
+    Zing,
+    Helix,
+}
+
+impl EpilogModel {
+    /// Raster resolutions this model accepts, in DPI.
+    pub fn resolutions(self) -> &'static [u32] {
+        match self {
+            Self::Zing => &ZING_RESOLUTIONS,
+            Self::Helix => &HELIX_RESOLUTIONS,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Zing => "Zing",
+            Self::Helix => "Helix",
+        }
+    }
+}
 
 /// Default raster/vector resolution.
 pub const DEFAULT_RESOLUTION: u32 = 500;
@@ -83,6 +121,9 @@ pub struct EpilogContext {
     /// Job title shown on the machine's job list.
     #[serde(default)]
     pub title: Option<String>,
+    /// Machine family whose resolution set applies.
+    #[serde(default)]
+    pub model: EpilogModel,
     /// Raster and vector resolution in DPI.
     #[serde(default = "default_resolution")]
     pub resolution: u32,
@@ -225,9 +266,10 @@ impl<'a> JobEncoder<'a> {
             return Err("internal error: the machine origin must be top-left"
                 .to_string());
         }
-        if !RESOLUTIONS.contains(&ctx.resolution) {
+        if !ctx.model.resolutions().contains(&ctx.resolution) {
             return Err(format!(
-                "unsupported Epilog resolution: {} DPI",
+                "unsupported Epilog {} resolution: {} DPI",
+                ctx.model.name(),
                 ctx.resolution
             ));
         }

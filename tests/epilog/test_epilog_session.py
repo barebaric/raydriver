@@ -57,8 +57,9 @@ async def test_upload_performs_the_lpd_exchange():
 
     async def receive(reader, writer):
         try:
-            # RFC 1179 §5.2: the receive-job operand is the queue name.
-            assert await reader.readline() == b"\x02Laser\n"
+            # RFC 1179 §5.2: the receive-job operand is the queue name;
+            # it is empty unless the print server needs one.
+            assert await reader.readline() == b"\x02\n"
             writer.write(b"\x00")
             control_header = await reader.readline()
             assert control_header.startswith(b"\x02")
@@ -316,7 +317,7 @@ async def test_queue_name_is_configurable():
         await session.disconnect()
 
 
-async def test_blank_queue_falls_back_to_the_default():
+async def test_blank_queue_is_sent_empty():
     first_line = asyncio.get_running_loop().create_future()
 
     async def record(reader, writer):
@@ -326,7 +327,7 @@ async def test_blank_queue_falls_back_to_the_default():
     async with printer(record) as port:
         session = make_session(port, events, queue="   ")
         task = asyncio.ensure_future(session.upload(b"x", "job"))
-        assert await asyncio.wait_for(first_line, 2) == b"\x02Laser\n"
+        assert await asyncio.wait_for(first_line, 2) == b"\x02\n"
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await session.disconnect()

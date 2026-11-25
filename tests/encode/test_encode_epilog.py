@@ -132,6 +132,30 @@ def _encode_part(part, assembler, ctx=None) -> EncodeOutput:
     return node.output
 
 
+def _encode_error(ctx) -> str:
+    clear_cache()
+    src = NodeRequest(
+        key="src",
+        generation_id=1,
+        stage=StageSpec.Compute(
+            part=_square_part(),
+            params=ComputePayload(
+                assembler=Assembler(ContourSpec()),
+                power=0.5,
+                cut_speed=600,
+            ),
+        ),
+    )
+    enc = NodeRequest(
+        key="enc",
+        generation_id=1,
+        stage=EncodeSpec(source_key="src", encoder=Encoder(EpilogSpec(ctx))),
+    )
+    node = _collect([src, enc])["enc"]
+    assert node.error is not None
+    return node.error
+
+
 @pytest.fixture(autouse=True)
 def _clear_cache():
     clear_cache()
@@ -368,6 +392,27 @@ def test_rejects_unsupported_resolution():
     node = _collect([src, enc])["enc"]
     assert node.error is not None
     assert "resolution" in node.error
+
+
+@pytest.mark.parametrize("dpi", [75, 150, 200, 300, 400, 600, 1200])
+def test_helix_resolutions_are_accepted(dpi):
+    out = _encode_part(
+        _square_part(),
+        ContourSpec(),
+        _ctx(model="helix", resolution=dpi),
+    )
+    assert _payload(out)
+
+
+@pytest.mark.parametrize("dpi", [250, 500, 1000])
+def test_helix_rejects_zing_only_resolutions(dpi):
+    error = _encode_error(_ctx(model="helix", resolution=dpi))
+    assert "unsupported Epilog Helix resolution" in error
+
+
+def test_zing_rejects_helix_only_resolution():
+    error = _encode_error(_ctx(resolution=75))
+    assert "unsupported Epilog Zing resolution" in error
 
 
 def test_rejects_bottom_origin_as_an_invariant_violation():
