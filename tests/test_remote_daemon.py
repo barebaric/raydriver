@@ -21,7 +21,7 @@ from raydriver.analyzer.listener import (
     make_client_ssl_context,
 )
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.remote import protocol
 from raydriver.remote.daemon import ClientQueue, Daemon, DaemonConfig
@@ -201,7 +201,7 @@ async def rig():
 
     def factory(protocol_name, config, dialect, event_callback):
         assert protocol_name == "grbl"
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -499,7 +499,7 @@ async def test_unknown_type_method_session_property(rig):
 
 async def test_auto_open_sessions():
     def factory(protocol_name, config, dialect, event_callback):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             MockTransport(),
             config=config,
             dialect=dialect,

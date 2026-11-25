@@ -8,5 +8,5 @@
 //! P-number mapping) and `crate::grbl::errors` (alarm-code to
 //! device-error mapping).
 
+pub mod driver;
 pub mod probe;
-pub mod session;

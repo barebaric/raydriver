@@ -11,7 +11,7 @@ import pytest
 
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 
 
@@ -99,7 +99,7 @@ class EventRecorder:
 
 def make_session(mock, events, config=None, dialect=None):
     config = {**FAST_TIMINGS, **(config or {})}
-    return GrblSession.with_transport(
+    return GrblSerialDriver.with_transport(
         mock,
         config=config,
         dialect={**DEFAULT_DIALECT, **(dialect or {})},

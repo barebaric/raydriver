@@ -1,5 +1,5 @@
-//! The `GrblSimpleSession` PyO3 wrapper: the minimal ping-pong
-//! session exposed to Python.
+//! The `GrblSerialSimpleDriver` PyO3 wrapper: the minimal ping-pong
+//! driver exposed to Python.
 
 use std::sync::Arc;
 
@@ -8,21 +8,19 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::driver::{CancelMode, Driver};
+use crate::core::driver::Driver;
 use crate::core::transport::TransportKind;
-use crate::grbl::simple::{GrblSimpleSession, SimpleConfig};
+use crate::grbl::simple::{GrblSerialSimpleDriver, GrblSimpleConfig};
 
 use crate::python::core::mock::MockTransport;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
+use crate::python::grbl::driver::{get_bool, get_f64, parse_dialect};
 use crate::python::grbl::probe::GrblDeviceInfo;
-use crate::python::grbl::session::{
-    get_bool, get_f64, parse_dialect, transport_kind_from_config,
-};
 use crate::python::pyfuture::{spawn_future, PyAwait};
 
 pub(crate) const MODULE_DOC: &str = "\
-The minimal ping-pong GRBL session: one line at a time, waiting for \
+The minimal ping-pong GRBL driver: one line at a time, waiting for \
 each ok/error acknowledgement. For hardware where the full driver \
 misbehaves.
 ";
@@ -30,10 +28,9 @@ misbehaves.
 pyo3_stub_gen::module_doc!("raydriver.grbl.simple", "{}", MODULE_DOC);
 
 fn build_simple_config(
-    kind: TransportKind,
     dict: Option<&Bound<'_, PyDict>>,
-) -> PyResult<SimpleConfig> {
-    let mut config = SimpleConfig::new(kind);
+) -> PyResult<GrblSimpleConfig> {
+    let mut config = GrblSimpleConfig::new();
     let Some(dict) = dict else {
         return Ok(config);
     };
@@ -76,25 +73,25 @@ fn build_simple_config(
     Ok(config)
 }
 
-/// A minimal GRBL device session using ping-pong communication.
+/// A minimal GRBL device driver using ping-pong communication.
 ///
 /// Sends one G-code line at a time and waits for `ok` before
 /// proceeding.  No character-counting, no buffer management, no
 /// deadlock detection — for hardware where the full
-/// [`GrblSession`][raydriver.grbl.GrblSession] misbehaves.
+/// [`GrblSerialDriver`][raydriver.grbl.GrblSerialDriver] misbehaves.
 ///
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "GrblSimpleSession", module = "raydriver.grbl.simple")]
-pub struct PyGrblSimpleSession {
-    core: Arc<GrblSimpleSession>,
+#[pyclass(name = "GrblSerialSimpleDriver", module = "raydriver.grbl.simple")]
+pub struct PyGrblSerialSimpleDriver {
+    core: Arc<GrblSerialSimpleDriver>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyGrblSimpleSession {
+impl PyGrblSerialSimpleDriver {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -112,12 +109,13 @@ impl PyGrblSimpleSession {
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let config = crate::python::config::config_dict(config.as_ref())?;
-        let kind = transport_kind_from_config(config.as_ref())?;
-        let session_config = build_simple_config(kind, config.as_ref())?;
-        Self::build(session_config, dialect, event_callback)
+        let kind =
+            crate::python::grbl::driver::serial_transport(config.as_ref())?;
+        let simple_config = build_simple_config(config.as_ref())?;
+        Self::build(kind, simple_config, dialect, event_callback)
     }
 
-    /// Build a session around a [`MockTransport`] (for tests).
+    /// Build a driver around a [`MockTransport`] (for tests).
     #[staticmethod]
     #[pyo3(signature = (transport, config=None, dialect=None, event_callback=None))]
     fn with_transport(
@@ -137,21 +135,22 @@ impl PyGrblSimpleSession {
     ) -> PyResult<Self> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = TransportKind::Mock(transport.inner.clone());
-        let session_config = build_simple_config(kind, config.as_ref())?;
-        Self::build(session_config, dialect, event_callback)
+        let simple_config = build_simple_config(config.as_ref())?;
+        Self::build(kind, simple_config, dialect, event_callback)
     }
 
-    /// Open the connection and start the background tasks.
     /// Run the device census: query `$I` and `$$`, and return the
-    /// structured result as a dict.
+    /// structured result.
     fn probe_device<'py>(
         &self,
         py: Python<'py>,
     ) -> PyResult<PyAwait<'py, GrblDeviceInfo>> {
         let core = self.core.clone();
         spawn_future(py, async move {
-            let build_info = core.execute_interactive_command("$I").await?;
-            let settings_lines = core.execute_interactive_command("$$").await?;
+            let build_info =
+                Driver::execute_interactive_command(&*core, "$I").await?;
+            let settings_lines =
+                Driver::execute_interactive_command(&*core, "$$").await?;
             Ok(GrblDeviceInfo {
                 inner: crate::grbl::probe::describe(
                     &build_info,
@@ -160,51 +159,56 @@ impl PyGrblSimpleSession {
             })
         })
     }
+
     /// Current snapshot of the device state.
     #[getter]
     fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
+        DeviceState::new(Driver::state(&*self.core))
     }
 
+    /// True while a job is running or held.
     #[getter]
     fn job_running(&self) -> bool {
-        self.core.is_job_running()
+        Driver::is_job_running(&*self.core)
     }
 
+    /// Identifier of the physical resource, or `None`.
     #[getter]
     fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
+        Driver::resource_uri(&*self.core)
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "GrblSimpleSession(resource_uri={:?}, job_running={})",
-            self.resource_uri(),
-            self.job_running()
+            "GrblSerialSimpleDriver(resource_uri={:?}, job_running={})",
+            Driver::resource_uri(&*self.core),
+            Driver::is_job_running(&*self.core),
         )
     }
 }
 
-impl PyGrblSimpleSession {
+impl PyGrblSerialSimpleDriver {
     fn build(
-        config: SimpleConfig,
+        kind: TransportKind,
+        config: GrblSimpleConfig,
         dialect: Option<Bound<'_, PyDict>>,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = GrblSimpleSession::new(config, dialect, events.clone());
+        let core =
+            GrblSerialSimpleDriver::new(kind, config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
 pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.setattr("__doc__", MODULE_DOC)?;
-    m.add("__all__", vec!["GrblSimpleSession"])?;
-    m.add_class::<PyGrblSimpleSession>()?;
+    m.add("__all__", vec!["GrblSerialSimpleDriver"])?;
+    m.add_class::<PyGrblSerialSimpleDriver>()?;
     Ok(())
 }
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyGrblSimpleSession);
+uniform_session_api!(PyGrblSerialSimpleDriver);

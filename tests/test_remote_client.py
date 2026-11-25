@@ -19,7 +19,7 @@ from conftest import (
 
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.remote import protocol
 from raydriver.remote.client import RemoteSession, create_session
@@ -44,7 +44,7 @@ async def remote_rig():
 
     def factory(protocol_name, config, dialect, event_callback):
         assert protocol_name == "grbl"
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -98,7 +98,7 @@ def test_factory_routes_local():
     session = create_session(
         "grbl", {"port": "/dev/ttyUSB0"}, DEFAULT_DIALECT, None
     )
-    assert isinstance(session, GrblSession)
+    assert isinstance(session, GrblSerialDriver)
 
 
 async def test_factory_routes_remote(remote_rig):
@@ -152,7 +152,7 @@ async def test_run_progress_parity(remote_rig):
     local_emulator = GrblEmulator(local_mock, speed_factor=10)
     local_task = asyncio.ensure_future(local_emulator.run())
     local_events = EventRecorder()
-    local = GrblSession.with_transport(
+    local = GrblSerialDriver.with_transport(
         local_mock,
         config=FAST_TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -207,7 +207,7 @@ async def test_read_settings_parity(remote_rig):
     local_emulator = GrblEmulator(local_mock, speed_factor=10)
     local_task = asyncio.ensure_future(local_emulator.run())
     local_events = EventRecorder()
-    local = GrblSession.with_transport(
+    local = GrblSerialDriver.with_transport(
         local_mock,
         config=FAST_TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -313,7 +313,7 @@ async def test_token_loopback_without_tls():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -347,7 +347,7 @@ async def test_tls_token_roundtrip():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},

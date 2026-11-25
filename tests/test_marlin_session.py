@@ -12,7 +12,7 @@ from conftest import DEFAULT_DIALECT, sent_bytes, wait_until
 
 from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.marlin import MarlinSession
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
 from raydriver.marlin.parser import parse_m115_firmware_info
 
@@ -37,7 +37,7 @@ def gcode_sends(mock):
 
 
 def make_marlin_session(mock, events, config=None):
-    return MarlinSession.with_transport(
+    return MarlinSerialDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,

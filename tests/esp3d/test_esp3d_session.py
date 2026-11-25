@@ -8,7 +8,8 @@ import pytest
 
 from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.esp3d import Esp3dConfig, Esp3dSession
+from raydriver.config import Esp3dConfig
+from raydriver.grbl import GrblNetworkDriver
 from raydriver.esp3d.emulator import Esp3dEmulator
 
 FAST_CONFIG = {
@@ -67,7 +68,7 @@ class EventRecorder:
 
 def make_session(events, config=None, dialect=None):
     merged = {**FAST_CONFIG, **(config or {})}
-    return Esp3dSession(
+    return GrblNetworkDriver(
         config=Esp3dConfig(**merged),
         dialect={**DIALECT, **(dialect or {})},
         event_callback=events.callback,
@@ -118,9 +119,7 @@ class TestConnection:
         )
 
     async def test_daemon_factory_builds_esp3d_session(self, emulator, events):
-        from raydriver.esp3d import Esp3dSession
-
-        session = Esp3dSession(
+        session = GrblNetworkDriver(
             config={
                 **FAST_CONFIG,
                 "http_port": emulator.http_port,

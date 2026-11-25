@@ -79,7 +79,7 @@ impl XtoolConfig {
 
 /// The xTool session: connection lifecycle, interactive commands,
 /// homing/jogging sequences and job execution.
-pub struct XtoolSession {
+pub struct XtoolNetworkDriver {
     config: XtoolConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn DriverEvents>,
@@ -98,7 +98,7 @@ pub struct XtoolSession {
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl XtoolSession {
+impl XtoolNetworkDriver {
     pub fn new(
         config: XtoolConfig,
         dialect: Dialect,
@@ -755,7 +755,7 @@ fn format_power(template: &str, power: f64) -> String {
 /// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Driver for XtoolSession {
+impl Driver for XtoolNetworkDriver {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

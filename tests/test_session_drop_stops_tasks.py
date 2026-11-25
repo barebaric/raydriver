@@ -11,9 +11,9 @@ import gc
 from conftest import DEFAULT_DIALECT
 
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
-from raydriver.marlin import MarlinSession
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
 
 TIMINGS = {
@@ -29,7 +29,7 @@ TIMINGS = {
 async def test_grbl_drop_without_disconnect_stops_tasks():
     mock = MockTransport()
     device_task = asyncio.ensure_future(GrblEmulator(mock).run())
-    session = GrblSession.with_transport(
+    session = GrblSerialDriver.with_transport(
         mock,
         config=TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -63,7 +63,7 @@ async def test_grbl_drop_without_disconnect_stops_tasks():
 async def test_marlin_drop_without_disconnect_stops_tasks():
     mock = MockTransport()
     device_task = asyncio.ensure_future(MarlinEmulator(mock).run())
-    session = MarlinSession.with_transport(
+    session = MarlinSerialDriver.with_transport(
         mock,
         config=TIMINGS,
         dialect=DEFAULT_DIALECT,

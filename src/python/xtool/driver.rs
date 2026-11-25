@@ -1,4 +1,4 @@
-//! The `XtoolSession` PyO3 wrapper: thin async methods delegating to
+//! The `XtoolNetworkDriver` PyO3 wrapper: thin async methods delegating to
 //! the Rust session core.
 
 use std::sync::Arc;
@@ -8,15 +8,15 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::driver::{CancelMode, Driver};
+use crate::core::driver::Driver;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 // The config/dialect dict helpers are shared across the protocol
 // bindings and live with the largest consumer (grbl), mirroring how
 // the smoothie and marlin bindings reuse them.
-use crate::python::grbl::session::{get_f64, get_i64, get_str, parse_dialect};
+use crate::python::grbl::driver::{get_f64, get_i64, get_str, parse_dialect};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::session::{XtoolConfig, XtoolSession};
+use crate::xtool::driver::{XtoolConfig, XtoolNetworkDriver};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
     let host = dict
@@ -60,27 +60,27 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "XtoolSession", module = "raydriver.xtool")]
-pub struct PyXtoolSession {
-    core: Arc<XtoolSession>,
+#[pyclass(name = "XtoolNetworkDriver", module = "raydriver.xtool")]
+pub struct PyXtoolNetworkDriver {
+    core: Arc<XtoolNetworkDriver>,
     events: Arc<PyEvents>,
 }
 
-impl PyXtoolSession {
+impl PyXtoolNetworkDriver {
     fn build(
         config: XtoolConfig,
         dialect: Dialect,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = XtoolSession::new(config, dialect, events.clone());
+        let core = XtoolNetworkDriver::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyXtoolSession {
+impl PyXtoolNetworkDriver {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -132,7 +132,7 @@ impl PyXtoolSession {
 
     fn __repr__(&self) -> String {
         format!(
-            "XtoolSession(resource_uri={:?}, job_running={})",
+            "XtoolNetworkDriver(resource_uri={:?}, job_running={})",
             self.core.resource_uri(),
             self.core.is_job_running(),
         )
@@ -141,4 +141,4 @@ impl PyXtoolSession {
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyXtoolSession);
+uniform_session_api!(PyXtoolNetworkDriver);

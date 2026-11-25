@@ -85,7 +85,7 @@ impl M2Config {
     }
 }
 
-pub struct M2Session {
+pub struct XtoolM2Driver {
     config: M2Config,
     events: Arc<dyn DriverEvents>,
     state: Arc<Mutex<DeviceState>>,
@@ -94,7 +94,7 @@ pub struct M2Session {
     connection_task: Mutex<Option<JoinHandle<()>>>,
 }
 
-impl M2Session {
+impl XtoolM2Driver {
     pub fn new(config: M2Config, events: Arc<dyn DriverEvents>) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -867,7 +867,7 @@ fn apply_mode(
 /// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Driver for M2Session {
+impl Driver for XtoolM2Driver {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

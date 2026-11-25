@@ -1,4 +1,4 @@
-//! The `MarlinSession` PyO3 wrapper.
+//! The `MarlinSerialDriver` PyO3 wrapper.
 
 use std::sync::Arc;
 
@@ -7,13 +7,13 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::driver::{CancelMode, Driver};
+use crate::core::driver::Driver;
 use crate::core::transport::TransportKind;
-use crate::marlin::session::{MarlinConfig, MarlinSession};
+use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::session::{
-    get_bool, get_f64, parse_dialect, transport_kind_from_config,
+use crate::python::grbl::driver::{
+    get_bool, get_f64, parse_dialect, serial_transport,
 };
 use crate::python::marlin::probe::MarlinDeviceInfo;
 use crate::python::pyfuture::{spawn_future, PyAwait};
@@ -60,15 +60,15 @@ fn build_marlin_config(
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "MarlinSession", module = "raydriver.marlin")]
-pub struct PyMarlinSession {
-    core: Arc<MarlinSession>,
+#[pyclass(name = "MarlinSerialDriver", module = "raydriver.marlin")]
+pub struct PyMarlinSerialDriver {
+    core: Arc<MarlinSerialDriver>,
     events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyMarlinSession {
+impl PyMarlinSerialDriver {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -86,7 +86,7 @@ impl PyMarlinSession {
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let config = crate::python::config::config_dict(config.as_ref())?;
-        let kind = transport_kind_from_config(config.as_ref())?;
+        let kind = serial_transport(config.as_ref())?;
         let session_config = build_marlin_config(kind, config.as_ref())?;
         Self::build(session_config, dialect, event_callback)
     }
@@ -162,14 +162,14 @@ impl PyMarlinSession {
 
     fn __repr__(&self) -> String {
         format!(
-            "MarlinSession(resource_uri={:?}, job_running={})",
+            "MarlinSerialDriver(resource_uri={:?}, job_running={})",
             self.resource_uri(),
             self.job_running()
         )
     }
 }
 
-impl PyMarlinSession {
+impl PyMarlinSerialDriver {
     fn build(
         config: MarlinConfig,
         dialect: Option<Bound<'_, PyDict>>,
@@ -177,12 +177,12 @@ impl PyMarlinSession {
     ) -> PyResult<Self> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = MarlinSession::new(config, dialect, events.clone());
+        let core = MarlinSerialDriver::new(config, dialect, events.clone());
         Ok(Self { core, events })
     }
 }
 
-impl Drop for PyMarlinSession {
+impl Drop for PyMarlinSerialDriver {
     fn drop(&mut self) {
         // Stop the background tasks even when the session is dropped
         // without disconnect(); otherwise they orphan on the shared
@@ -194,4 +194,4 @@ impl Drop for PyMarlinSession {
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyMarlinSession);
+uniform_session_api!(PyMarlinSerialDriver);

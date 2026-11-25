@@ -10,7 +10,7 @@ from conftest import EventRecorder
 
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.protocols import PROTOCOLS, protocol_info
 from raydriver.remote import protocol
@@ -76,7 +76,7 @@ async def rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(name, config, dialect, cb):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect=dialect or {},
@@ -233,7 +233,7 @@ async def test_open_unknown_device():
     def factory(name, config, dialect, cb):
         if config.get("port") != "/dev/ttyUSB0":
             raise OSError("no such port")
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             MockTransport(),
             config={**FAST_TIMINGS, **(config or {})},
             dialect=dialect or {},

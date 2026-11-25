@@ -28,7 +28,7 @@ from raydriver.cli.debug import add_debug_parser
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.parser import strip_gcode_comments
 
 
@@ -131,7 +131,7 @@ def _open_session(args, on_event):
 
         mock = MockTransport()
         emulator = GrblEmulator(mock, speed_factor=args.speed_factor)
-        session = GrblSession.with_transport(
+        session = GrblSerialDriver.with_transport(
             mock,
             config=config,
             dialect={},
@@ -139,7 +139,7 @@ def _open_session(args, on_event):
         )
         return session, asyncio.ensure_future(emulator.run())
     return (
-        GrblSession(
+        GrblSerialDriver(
             config={
                 "port": args.port,
                 "baudrate": args.baudrate,

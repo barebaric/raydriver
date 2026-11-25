@@ -398,6 +398,292 @@ pub trait Driver: Send + Sync {
     }
 }
 
+/// Implements [`Driver`] for a driver struct that embeds an engine
+/// and forwards every operation to it.
+///
+/// Several drivers share one protocol engine (the GRBL streaming
+/// stack, for example); forwarding keeps each driver a distinct type
+/// without duplicating the trait surface.
+macro_rules! delegate_driver {
+    ($ty:ty, $field:ident) => {
+        #[async_trait::async_trait]
+        impl $crate::core::driver::Driver for $ty {
+            fn state(&self) -> $crate::core::types::DeviceState {
+                $crate::core::driver::Driver::state(&*self.$field)
+            }
+
+            fn is_job_running(&self) -> bool {
+                $crate::core::driver::Driver::is_job_running(&*self.$field)
+            }
+
+            fn resource_uri(&self) -> Option<String> {
+                $crate::core::driver::Driver::resource_uri(&*self.$field)
+            }
+
+            fn update_dialect(
+                &self,
+                dialect: $crate::core::dialect::Dialect,
+            ) {
+                $crate::core::driver::Driver::update_dialect(
+                    &*self.$field,
+                    dialect,
+                )
+            }
+
+            fn abort_background_tasks_now(&self) {
+                $crate::core::driver::Driver::abort_background_tasks_now(
+                    &*self.$field,
+                )
+            }
+
+            async fn connect(
+                self: std::sync::Arc<Self>,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::connect(self.$field.clone()).await
+            }
+
+            async fn cleanup(&self) {
+                $crate::core::driver::Driver::cleanup(&*self.$field).await
+            }
+
+            async fn run(
+                self: std::sync::Arc<Self>,
+                gcode: &str,
+                op_map: &std::collections::HashMap<usize, i64>,
+                op_estimates: &[f64],
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::run(
+                    self.$field.clone(),
+                    gcode,
+                    op_map,
+                    op_estimates,
+                )
+                .await
+            }
+
+            async fn run_raw(
+                self: std::sync::Arc<Self>,
+                machine_code: &str,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::run_raw(
+                    self.$field.clone(),
+                    machine_code,
+                )
+                .await
+            }
+
+            async fn cancel(
+                &self,
+                mode: $crate::core::driver::CancelMode,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::cancel(&*self.$field, mode).await
+            }
+
+            async fn execute_interactive_command(
+                &self,
+                command: &str,
+            ) -> Result<Vec<String>, $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::execute_interactive_command(
+                    &*self.$field,
+                    command,
+                )
+                .await
+            }
+
+            async fn execute_command(
+                &self,
+                command: &str,
+            ) -> Result<Vec<String>, $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::execute_command(
+                    &*self.$field,
+                    command,
+                )
+                .await
+            }
+
+            fn buffer_count(&self) -> usize {
+                $crate::core::driver::Driver::buffer_count(&*self.$field)
+            }
+
+            fn rx_buffer_size(&self) -> usize {
+                $crate::core::driver::Driver::rx_buffer_size(&*self.$field)
+            }
+
+            fn pending_commands(&self) -> Vec<String> {
+                $crate::core::driver::Driver::pending_commands(&*self.$field)
+            }
+
+            async fn home(
+                &self,
+                axes: Option<Vec<String>>,
+                active_wcs: &str,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::home(
+                    &*self.$field,
+                    axes,
+                    active_wcs,
+                )
+                .await
+            }
+
+            async fn move_to(
+                &self,
+                speed: f64,
+                x: f64,
+                y: f64,
+                z: Option<f64>,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::move_to(
+                    &*self.$field,
+                    speed,
+                    x,
+                    y,
+                    z,
+                )
+                .await
+            }
+
+            async fn jog(
+                &self,
+                speed: f64,
+                deltas: &[(String, f64)],
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::jog(&*self.$field, speed, deltas)
+                    .await
+            }
+
+            async fn select_tool(
+                &self,
+                tool_number: i64,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::select_tool(
+                    &*self.$field,
+                    tool_number,
+                )
+                .await
+            }
+
+            async fn set_power(
+                &self,
+                power: Option<f64>,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::set_power(&*self.$field, power)
+                    .await
+            }
+
+            async fn set_focus_power(
+                &self,
+                power: Option<f64>,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::set_focus_power(
+                    &*self.$field,
+                    power,
+                )
+                .await
+            }
+
+            async fn set_hold(
+                &self,
+                hold: bool,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::set_hold(&*self.$field, hold)
+                    .await
+            }
+
+            async fn clear_alarm(
+                &self,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::clear_alarm(&*self.$field).await
+            }
+
+            async fn set_wcs_offset(
+                &self,
+                wcs_slot: &str,
+                x: f64,
+                y: f64,
+                z: Option<f64>,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::set_wcs_offset(
+                    &*self.$field,
+                    wcs_slot,
+                    x,
+                    y,
+                    z,
+                )
+                .await
+            }
+
+            async fn read_settings(
+                &self,
+            ) -> Result<Vec<(String, String)>, $crate::core::driver::DriverError>
+            {
+                $crate::core::driver::Driver::read_settings(&*self.$field).await
+            }
+
+            async fn write_setting(
+                &self,
+                key: &str,
+                value: &str,
+            ) -> Result<(), $crate::core::driver::DriverError> {
+                $crate::core::driver::Driver::write_setting(
+                    &*self.$field,
+                    key,
+                    value,
+                )
+                .await
+            }
+
+            async fn read_wcs_offsets(
+                &self,
+            ) -> Result<
+                std::collections::HashMap<String, (f64, f64, f64)>,
+                $crate::core::driver::DriverError,
+            > {
+                $crate::core::driver::Driver::read_wcs_offsets(&*self.$field)
+                    .await
+            }
+
+            async fn read_parser_state(
+                &self,
+            ) -> Result<Option<String>, $crate::core::driver::DriverError>
+            {
+                $crate::core::driver::Driver::read_parser_state(&*self.$field)
+                    .await
+            }
+
+            async fn run_probe_cycle(
+                &self,
+                axis_letter: &str,
+                max_travel: f64,
+                feed_rate: f64,
+            ) -> Result<
+                Option<(f64, f64, f64)>,
+                $crate::core::driver::DriverError,
+            > {
+                $crate::core::driver::Driver::run_probe_cycle(
+                    &*self.$field,
+                    axis_letter,
+                    max_travel,
+                    feed_rate,
+                )
+                .await
+            }
+
+            async fn detect_unit_system(
+                &self,
+            ) -> Result<
+                Option<$crate::core::types::UnitSystem>,
+                $crate::core::driver::DriverError,
+            > {
+                $crate::core::driver::Driver::detect_unit_system(&*self.$field)
+                    .await
+            }
+        }
+    };
+}
+
+pub(crate) use delegate_driver;
+
 /// An asyncio.Event-style latch built on tokio primitives: the
 /// `handshake` latch of the line sessions and generally useful for
 /// session implementations.

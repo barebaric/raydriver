@@ -1,4 +1,4 @@
-//! The `EpilogSession` PyO3 wrapper: LPD job submission, exposed
+//! The `EpilogDriver` PyO3 wrapper: LPD job submission, exposed
 //! through the uniform session surface plus the protocol-specific
 //! `upload` that carries the encoder's byte stream.
 
@@ -9,10 +9,10 @@ use pyo3::types::{PyByteArray, PyBytes, PyDict};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::driver::{CancelMode, Driver};
-use crate::epilog::session::{EpilogConfig, EpilogSession};
+use crate::epilog::driver::{EpilogConfig, EpilogDriver};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::session::{get_f64, get_i64, get_str};
+use crate::python::grbl::driver::{get_f64, get_i64, get_str};
 use crate::python::pyfuture::{
     spawn_future, spawn_future_with_cancel, PyAwait,
 };
@@ -51,23 +51,23 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<EpilogConfig> {
 /// The machine has no status channel, so most session operations
 /// raise `NotImplementedError`; job submission uses `upload`.
 #[gen_stub_pyclass(module = "raydriver.epilog")]
-#[pyclass(name = "EpilogSession", module = "raydriver.epilog")]
-pub struct PyEpilogSession {
-    core: Arc<EpilogSession>,
+#[pyclass(name = "EpilogDriver", module = "raydriver.epilog")]
+pub struct PyEpilogDriver {
+    core: Arc<EpilogDriver>,
     events: Arc<PyEvents>,
 }
 
-impl PyEpilogSession {
+impl PyEpilogDriver {
     fn build(config: EpilogConfig, event_callback: Option<Py<PyAny>>) -> Self {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = Arc::new(EpilogSession::new(config, events.clone()));
+        let core = Arc::new(EpilogDriver::new(config, events.clone()));
         Self { core, events }
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyEpilogSession {
+impl PyEpilogDriver {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -166,7 +166,7 @@ impl PyEpilogSession {
 
     fn __repr__(&self) -> String {
         format!(
-            "EpilogSession(resource_uri={:?}, job_running={})",
+            "EpilogDriver(resource_uri={:?}, job_running={})",
             self.core.resource_uri(),
             self.core.is_job_running(),
         )
@@ -175,4 +175,4 @@ impl PyEpilogSession {
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyEpilogSession);
+uniform_session_api!(PyEpilogDriver);

@@ -78,7 +78,7 @@ impl MarlinConfig {
 
 /// The Marlin session: connection lifecycle, M114 position polling
 /// and ping-pong command exchange.
-pub struct MarlinSession {
+pub struct MarlinSerialDriver {
     base: LineDriverBase,
     config: MarlinConfig,
     /// Set once the device announced itself; commands must not be
@@ -87,7 +87,7 @@ pub struct MarlinSession {
     connected: AsyncEvent,
 }
 
-impl MarlinSession {
+impl MarlinSerialDriver {
     pub fn new(
         config: MarlinConfig,
         dialect: Dialect,
@@ -251,7 +251,7 @@ impl MarlinSession {
 }
 
 #[async_trait]
-impl PingPongDriver for MarlinSession {
+impl PingPongDriver for MarlinSerialDriver {
     fn base(&self) -> &LineDriverBase {
         &self.base
     }
@@ -374,7 +374,7 @@ impl PingPongDriver for MarlinSession {
 /// skeleton's free functions; the Marlin-specific operations carry
 /// their real bodies here.
 #[async_trait]
-impl Driver for MarlinSession {
+impl Driver for MarlinSerialDriver {
     fn state(&self) -> DeviceState {
         self.base.state()
     }

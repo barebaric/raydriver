@@ -19,11 +19,11 @@ from raydriver.analyzer.capture import Recorder
 from raydriver.analyzer.golden import assert_capture_matches_golden
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
-from raydriver.marlin import MarlinSession
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 GOLDEN_DIR = Path(__file__).parent / "golden"
@@ -75,7 +75,7 @@ async def grbl_scenario():
     device_task = asyncio.ensure_future(emulator.run())
     events = EventRecorder()
     recorder = Recorder(forward=events.callback)
-    session = GrblSession.with_transport(
+    session = GrblSerialDriver.with_transport(
         mock,
         config={
             **FAST_TIMINGS,
@@ -112,7 +112,7 @@ async def smoothie_scenario():
     device_task = asyncio.ensure_future(emulator.run())
     events = EventRecorder()
     recorder = Recorder(forward=events.callback)
-    session = SmoothieSession.with_transport(
+    session = SmoothieDriver.with_transport(
         mock,
         config=SMOOTHIE_MARLIN_TIMINGS,
         dialect={},
@@ -138,7 +138,7 @@ async def marlin_scenario():
     device_task = asyncio.ensure_future(emulator.run())
     events = EventRecorder()
     recorder = Recorder(forward=events.callback)
-    session = MarlinSession.with_transport(
+    session = MarlinSerialDriver.with_transport(
         mock,
         config={**SMOOTHIE_MARLIN_TIMINGS, "connect_settle": 0.05},
         dialect={},

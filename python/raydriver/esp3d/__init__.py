@@ -1,11 +1,10 @@
-"""ESP3D / FluidNC devices.
+"""ESP3D / FluidNC connection parameters.
 
-The session is the GRBL session over an HTTP command endpoint and a
-WebSocket response channel; jobs are uploaded and executed instead of
-being streamed line by line.
+The driver is the GRBL network driver: commands travel over an HTTP
+endpoint and a WebSocket response channel; jobs are uploaded and
+executed instead of being streamed line by line.
 """
 
 from raydriver.config import Esp3dConfig
-from raydriver.grbl import GrblSession as Esp3dSession
 
-__all__ = ["Esp3dConfig", "Esp3dSession"]
+__all__ = ["Esp3dConfig"]

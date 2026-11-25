@@ -7,7 +7,7 @@ import pytest
 from conftest import EventRecorder
 
 from raydriver.core import DriverEvent
-from raydriver.octoprint import OctoPrintSession
+from raydriver.octoprint import OctoPrintDriver
 from raydriver.octoprint.emulator import OctoPrintEmulator
 from raydriver.octoprint.probe import OctoPrintDeviceInfo, describe
 from raydriver.protocols import protocol_info
@@ -23,7 +23,7 @@ GCODE = "G1 X1 F1000\nG1 X2 F1000\n"
 
 
 def make_session(events, emulator, config=None, api_key="test-api-key"):
-    return OctoPrintSession(
+    return OctoPrintDriver(
         config={
             "host": "127.0.0.1",
             "port": emulator.http_port,

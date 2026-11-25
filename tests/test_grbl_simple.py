@@ -18,7 +18,7 @@ from conftest import (
 )
 
 from raydriver.core import DriverEvent
-from raydriver.grbl.simple import GrblSimpleSession
+from raydriver.grbl.simple import GrblSerialSimpleDriver
 
 GCODE = "G1 X1 F1000\nG1 X2 F1000\nG1 X3 F1000\n"
 
@@ -29,7 +29,7 @@ def gcode_sends(mock):
 
 
 def make_simple_session(mock, events, config=None):
-    return GrblSimpleSession.with_transport(
+    return GrblSerialSimpleDriver.with_transport(
         mock,
         config={**FAST_TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -211,7 +211,7 @@ class TestConfig:
 
     def test_config_requires_transport_details(self, events):
         with pytest.raises(RuntimeError, match="port"):
-            GrblSimpleSession(
+            GrblSerialSimpleDriver(
                 None, dialect=None, event_callback=events.callback
             )
 

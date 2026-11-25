@@ -291,12 +291,14 @@ impl PySessionFactory {
         callback: Py<PyAny>,
     ) -> PyResult<Py<PyAny>> {
         let (module, class) = match protocol {
-            "grbl" => ("raydriver.grbl", "GrblSession"),
-            "grbl_simple" => ("raydriver.grbl.simple", "GrblSimpleSession"),
-            "esp3d" => ("raydriver.esp3d", "Esp3dSession"),
-            "smoothie" => ("raydriver.smoothie", "SmoothieSession"),
-            "octoprint" => ("raydriver.octoprint", "OctoPrintSession"),
-            "marlin" => ("raydriver.marlin", "MarlinSession"),
+            "grbl" => ("raydriver.grbl", "GrblSerialDriver"),
+            "grbl_simple" => {
+                ("raydriver.grbl.simple", "GrblSerialSimpleDriver")
+            }
+            "esp3d" => ("raydriver.grbl", "GrblNetworkDriver"),
+            "smoothie" => ("raydriver.smoothie", "SmoothieDriver"),
+            "octoprint" => ("raydriver.octoprint", "OctoPrintDriver"),
+            "marlin" => ("raydriver.marlin", "MarlinSerialDriver"),
             _ => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "unknown protocol {protocol:?}"

@@ -70,12 +70,12 @@ impl SmoothieConfig {
 
 /// The Smoothie session: connection lifecycle, status polling and
 /// ping-pong command exchange.
-pub struct SmoothieSession {
+pub struct SmoothieDriver {
     base: LineDriverBase,
     config: SmoothieConfig,
 }
 
-impl SmoothieSession {
+impl SmoothieDriver {
     pub fn new(
         config: SmoothieConfig,
         dialect: Dialect,
@@ -210,7 +210,7 @@ impl SmoothieSession {
 /// bodies.  Everything shared streams through the
 /// [`PingPongDriver`] supertrait.
 #[async_trait]
-impl PingPongDriver for SmoothieSession {
+impl PingPongDriver for SmoothieDriver {
     fn base(&self) -> &LineDriverBase {
         &self.base
     }
@@ -310,7 +310,7 @@ impl PingPongDriver for SmoothieSession {
 /// the skeleton's free functions; the Smoothie-specific operations
 /// carry their real bodies here.
 #[async_trait]
-impl Driver for SmoothieSession {
+impl Driver for SmoothieDriver {
     fn state(&self) -> DeviceState {
         self.base.state()
     }

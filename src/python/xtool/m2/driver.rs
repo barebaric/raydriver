@@ -1,4 +1,4 @@
-//! The `raydriver.xtool.m2.session` submodule: the `M2Session`
+//! The `raydriver.xtool.m2.session` submodule: the `XtoolM2Driver`
 //! pyclass mirroring the Rust `M2Core` surface (config parsing,
 //! asyncio futures, event marshaling).
 
@@ -8,12 +8,12 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::core::driver::{CancelMode, Driver};
+use crate::core::driver::Driver;
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
+use crate::python::grbl::driver::{get_bool, get_f64, get_i64, get_str};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::xtool::m2::session::{M2Config, M2Session};
+use crate::xtool::m2::driver::{M2Config, XtoolM2Driver};
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
     let host = dict
@@ -49,23 +49,23 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(name = "M2Session", module = "raydriver.xtool.m2")]
-pub struct PyM2Session {
-    core: Arc<M2Session>,
+#[pyclass(name = "XtoolM2Driver", module = "raydriver.xtool.m2")]
+pub struct PyXtoolM2Driver {
+    core: Arc<XtoolM2Driver>,
     events: Arc<PyEvents>,
 }
 
-impl PyM2Session {
+impl PyXtoolM2Driver {
     fn build(config: M2Config, event_callback: Option<Py<PyAny>>) -> Self {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = M2Session::new(config, events.clone());
+        let core = XtoolM2Driver::new(config, events.clone());
         Self { core, events }
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyM2Session {
+impl PyXtoolM2Driver {
     #[new]
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
@@ -113,14 +113,14 @@ impl PyM2Session {
 
     fn __repr__(&self) -> String {
         format!(
-            "M2Session(resource_uri={:?}, job_running={})",
+            "XtoolM2Driver(resource_uri={:?}, job_running={})",
             self.core.resource_uri(),
             self.core.is_job_running(),
         )
     }
 }
 
-impl Drop for PyM2Session {
+impl Drop for PyXtoolM2Driver {
     fn drop(&mut self) {
         self.events.close();
         self.core.abort_background_tasks_now();
@@ -129,4 +129,4 @@ impl Drop for PyM2Session {
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyM2Session);
+uniform_session_api!(PyXtoolM2Driver);

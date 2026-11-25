@@ -5,6 +5,6 @@
 //! GRBL also documents, so the session reuses
 //! `crate::grbl::parser::gcode_to_p_number`.
 
+pub mod driver;
 pub mod parser;
 pub mod probe;
-pub mod session;

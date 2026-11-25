@@ -12,7 +12,7 @@ from conftest import DEFAULT_DIALECT, sent_bytes, wait_until
 
 from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 GCODE = "G1 X1 F1000\nG1 X2 F1000\nG1 X3 F1000\n"
@@ -35,7 +35,7 @@ def gcode_sends(mock):
 
 
 def make_smoothie_session(mock, events, config=None):
-    return SmoothieSession.with_transport(
+    return SmoothieDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,

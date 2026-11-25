@@ -41,8 +41,7 @@ use crate::core::types::{
 
 /// Configuration for the simple ping-pong session.
 #[derive(Clone)]
-pub struct SimpleConfig {
-    pub transport: TransportKind,
+pub struct GrblSimpleConfig {
     pub poll_status_while_running: bool,
     pub command_timeout: f64,
     pub homing_timeout: f64,
@@ -57,10 +56,9 @@ pub struct SimpleConfig {
     pub safety_shutdown_delay: f64,
 }
 
-impl SimpleConfig {
-    pub fn new(transport: TransportKind) -> Self {
+impl GrblSimpleConfig {
+    pub fn new() -> Self {
         Self {
-            transport,
             poll_status_while_running: false,
             command_timeout: 30.0,
             homing_timeout: 0.0,
@@ -77,21 +75,28 @@ impl SimpleConfig {
     }
 }
 
+impl Default for GrblSimpleConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The simple session: connection lifecycle, status polling and
 /// ping-pong command exchange, all in one small state machine.
-pub struct GrblSimpleSession {
+pub struct GrblSerialSimpleDriver {
     base: LineDriverBase,
-    config: SimpleConfig,
+    config: GrblSimpleConfig,
     report_in_inches: AtomicBool,
 }
 
-impl GrblSimpleSession {
+impl GrblSerialSimpleDriver {
     pub fn new(
-        config: SimpleConfig,
+        transport: TransportKind,
+        config: GrblSimpleConfig,
         dialect: Dialect,
         events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
-        let transport = config.transport.build();
+        let transport = transport.build();
         Arc::new(Self {
             base: LineDriverBase::new(
                 dialect,
@@ -233,7 +238,7 @@ impl GrblSimpleSession {
 }
 
 #[async_trait]
-impl PingPongDriver for GrblSimpleSession {
+impl PingPongDriver for GrblSerialSimpleDriver {
     fn base(&self) -> &LineDriverBase {
         &self.base
     }
@@ -359,7 +364,7 @@ impl PingPongDriver for GrblSimpleSession {
 /// operations call the skeleton's free functions; the GRBL-specific
 /// operations carry their real bodies here.
 #[async_trait]
-impl Driver for GrblSimpleSession {
+impl Driver for GrblSerialSimpleDriver {
     fn state(&self) -> DeviceState {
         self.base.state()
     }

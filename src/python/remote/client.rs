@@ -867,8 +867,8 @@ const REMOTE_KEYS: [&str; 6] = [
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[gen_stub(override_return_type(
     type_repr = "typing.Union[RemoteSession, grbl.GrblSession, \
-                simple.GrblSimpleSession, smoothie.SmoothieSession, \
-                octoprint.OctoPrintSession, marlin.MarlinSession]",
+                simple.GrblSimpleSession, smoothie.SmoothieDriver, \
+                octoprint.OctoPrintDriver, marlin.MarlinSerialDriver]",
     imports = (
         "typing",
         "raydriver.grbl",

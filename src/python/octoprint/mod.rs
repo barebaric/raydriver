@@ -1,12 +1,12 @@
 //! The `raydriver.octoprint` Python submodule.
 
+pub(crate) mod driver;
 pub(crate) mod probe;
-pub(crate) mod session;
 
 use pyo3::prelude::*;
 
 pub(crate) const MODULE_DOC: &str = "\
-OctoPrint server support implemented in Rust. OctoPrintSession \
+OctoPrint server support implemented in Rust. OctoPrintDriver \
 submits G-code jobs over the server's REST API and tracks printer \
 state via its SockJS WebSocket (with REST polling fallback).
 ";
@@ -18,9 +18,9 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let octoprint_mod = PyModule::new(py, "octoprint")?;
 
     octoprint_mod.setattr("__doc__", MODULE_DOC)?;
-    octoprint_mod.add("__all__", vec!["OctoPrintSession", "probe"])?;
+    octoprint_mod.add("__all__", vec!["OctoPrintDriver", "probe"])?;
     probe::register(&octoprint_mod)?;
-    octoprint_mod.add_class::<session::PyOctoPrintSession>()?;
+    octoprint_mod.add_class::<driver::PyOctoPrintDriver>()?;
 
     m.add_submodule(&octoprint_mod)?;
     // Note: raydriver.octoprint is intentionally NOT registered in

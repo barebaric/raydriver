@@ -12,7 +12,7 @@ from raydriver.config import (
     SmoothieConfig,
     XtoolConfig,
 )
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.remote.client import create_session
 
 
@@ -71,7 +71,7 @@ def test_configs_are_keyword_only():
 
 
 def test_session_accepts_typed_config():
-    session = GrblSession(
+    session = GrblSerialDriver(
         config=GrblSerialConfig(port="/dev/null"),
     )
     assert session.resource_uri == "serial:///dev/null"

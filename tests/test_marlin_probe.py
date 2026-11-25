@@ -8,7 +8,7 @@ import pytest
 from conftest import DEFAULT_DIALECT
 
 from raydriver.core import DriverEvent
-from raydriver.marlin import MarlinSession
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
 from raydriver.marlin.probe import MarlinDeviceInfo, describe
 
@@ -32,7 +32,7 @@ FULL_M503_LINES = [
 
 
 def make_marlin_session(mock, events, config=None):
-    return MarlinSession.with_transport(
+    return MarlinSerialDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,

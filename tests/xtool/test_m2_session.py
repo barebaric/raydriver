@@ -4,12 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from raydriver.xtool.m2 import M2Session
+from raydriver.xtool.m2 import XtoolM2Driver
 from raydriver.xtool.m2.emulator import M2Emulator
 
 
 def test_session_exposes_m2_resource_uri_and_state():
-    session = M2Session(config={"host": "192.0.2.20"})
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
 
     assert session.resource_uri == "wss://192.0.2.20:28900/websocket"
     assert session.state.status.name == "UNKNOWN"
@@ -18,7 +18,7 @@ def test_session_exposes_m2_resource_uri_and_state():
 
 @pytest.mark.asyncio
 async def test_session_has_control_operations_but_no_gcode_streamer():
-    session = M2Session(config={"host": "192.0.2.20"})
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
 
     assert callable(session.start)
     assert callable(session.set_hold)
@@ -31,7 +31,7 @@ async def test_session_has_control_operations_but_no_gcode_streamer():
 
 @pytest.mark.asyncio
 async def test_operations_fail_cleanly_before_connecting():
-    session = M2Session(config={"host": "192.0.2.20"})
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
 
     with pytest.raises(ConnectionError, match="not connected"):
         await session.home()
@@ -47,7 +47,7 @@ async def test_session_connects_and_controls_m2_jobs():
     )
     emulator = M2Emulator(context)
     await emulator.start()
-    session = M2Session(
+    session = XtoolM2Driver(
         config={
             "host": "127.0.0.1",
             "port": emulator.port,

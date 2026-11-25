@@ -1,11 +1,11 @@
 //! The `raydriver.epilog` Python submodule.
 
-pub(crate) mod session;
+pub(crate) mod driver;
 
 use pyo3::prelude::*;
 
 pub(crate) const MODULE_DOC: &str = "\
-Epilog laser support implemented in Rust. EpilogSession uploads \
+Epilog laser support implemented in Rust. EpilogDriver uploads \
 pre-encoded print jobs (the encoder decides the printer language) \
 over the BSD LPD protocol (port 515) and reports reachability. The \
 machine exposes no status channel, so every other operation raises \
@@ -19,8 +19,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let epilog_mod = PyModule::new(py, "epilog")?;
 
     epilog_mod.setattr("__doc__", MODULE_DOC)?;
-    epilog_mod.add("__all__", vec!["EpilogSession"])?;
-    epilog_mod.add_class::<session::PyEpilogSession>()?;
+    epilog_mod.add("__all__", vec!["EpilogDriver"])?;
+    epilog_mod.add_class::<driver::PyEpilogDriver>()?;
 
     m.add_submodule(&epilog_mod)?;
     // Note: raydriver.epilog is intentionally NOT registered in

@@ -51,7 +51,7 @@ macro_rules! uniform_session_api {
                 dialect: Bound<'_, PyDict>,
             ) -> PyResult<()> {
                 self.core.update_dialect(
-                    $crate::python::grbl::session::parse_dialect(Some(&dialect))?,
+                    $crate::python::grbl::driver::parse_dialect(Some(&dialect))?,
                 );
                 Ok(())
             }
@@ -171,9 +171,9 @@ macro_rules! uniform_session_api {
                 let core = self.core.clone();
                 spawn_future(py, async move {
                     let mode = if emergency {
-                        CancelMode::Immediate
+                        $crate::core::driver::CancelMode::Immediate
                     } else {
-                        CancelMode::Graceful
+                        $crate::core::driver::CancelMode::Graceful
                     };
                     $crate::core::driver::Driver::cancel(&*core, mode).await?;
                     Ok(())

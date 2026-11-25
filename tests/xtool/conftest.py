@@ -7,7 +7,7 @@ import time
 import pytest
 
 from raydriver.core import DriverEvent
-from raydriver.xtool import XtoolSession
+from raydriver.xtool import XtoolNetworkDriver
 from raydriver.xtool.emulator import XtoolEmulator
 
 FAST_CONFIG = {
@@ -67,7 +67,7 @@ async def wait_until(predicate, timeout=5.0, interval=0.01):
 
 
 def make_session(events, config=None, dialect=None):
-    return XtoolSession(
+    return XtoolNetworkDriver(
         config={**FAST_CONFIG, **(config or {})},
         dialect={**DIALECT, **(dialect or {})},
         event_callback=events.callback,

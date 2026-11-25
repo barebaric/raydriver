@@ -97,8 +97,8 @@ macro_rules! config_pyclass {
 }
 
 config_pyclass!(
-    /// Timing and flow-control options shared by GRBL sessions.
-    GrblSessionOptions,
+    /// Timing and flow-control options shared by GRBL drivers.
+    GrblOptions,
     required: [],
     fields: [
         poll_status_while_running: bool = false,
@@ -366,7 +366,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "Typed session configuration classes: transport and timing \
          fields per protocol, rejecting typos at type-checking time.",
     )?;
-    module.add_class::<GrblSessionOptions>()?;
+    module.add_class::<GrblOptions>()?;
     module.add_class::<GrblSerialConfig>()?;
     module.add_class::<GrblTelnetConfig>()?;
     module.add_class::<GrblBluetoothConfig>()?;

@@ -37,8 +37,7 @@ tokio::task_local! {
 
 /// Driver configuration with the Python driver's default timings.
 #[derive(Clone)]
-pub struct SessionConfig {
-    pub transport: TransportKind,
+pub struct GrblStreamConfig {
     pub poll_status_while_running: bool,
     pub deadlock_detection: bool,
     pub rx_buffer_size_override: i64,
@@ -59,10 +58,9 @@ pub struct SessionConfig {
     pub homing_timeout: f64,
 }
 
-impl SessionConfig {
-    pub fn new(transport: TransportKind) -> Self {
+impl GrblStreamConfig {
+    pub fn new() -> Self {
         Self {
-            transport,
             poll_status_while_running: false,
             deadlock_detection: false,
             rx_buffer_size_override: 0,
@@ -86,6 +84,12 @@ impl SessionConfig {
 
     fn secs(v: f64) -> Duration {
         Duration::from_secs_f64(v.max(0.0))
+    }
+}
+
+impl Default for GrblStreamConfig {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -186,8 +190,8 @@ impl StreamHandle {
 
 /// Shared session state, owned jointly by the public handle and the
 /// background tasks.
-pub struct GrblSession {
-    config: SessionConfig,
+pub struct GrblStream {
+    config: GrblStreamConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn DriverEvents>,
     transport: Arc<dyn Transport>,
@@ -216,13 +220,14 @@ pub struct GrblSession {
     cmd_lock: tokio::sync::Mutex<()>,
 }
 
-impl GrblSession {
+impl GrblStream {
     pub fn new(
-        config: SessionConfig,
+        transport: TransportKind,
+        config: GrblStreamConfig,
         dialect: Dialect,
         events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
-        let transport: Arc<dyn Transport> = config.transport.build();
+        let transport: Arc<dyn Transport> = transport.build();
         let (cmd_tx, _) = mpsc::unbounded_channel();
         let core = Self {
             config,
@@ -325,12 +330,12 @@ impl GrblSession {
 
     async fn await_handshake(&self) -> Result<bool, DriverError> {
         let deadline = tokio::time::Instant::now()
-            + SessionConfig::secs(self.config.handshake_timeout);
+            + GrblStreamConfig::secs(self.config.handshake_timeout);
         loop {
             self.events.raw_tx("?");
             self.transport.write(b"?").await?;
             let poll_deadline = tokio::time::Instant::now()
-                + SessionConfig::secs(self.config.handshake_poll_interval);
+                + GrblStreamConfig::secs(self.config.handshake_poll_interval);
             tokio::select! {
                 _ = self.handshake_received.wait() => return Ok(true),
                 _ = tokio::time::sleep_until(poll_deadline) => {
@@ -406,7 +411,7 @@ impl GrblSession {
             }
             log::debug!("Connection lost. Reconnecting.");
             self.update_connection_status(TransportStatus::Sleeping, None);
-            tokio::time::sleep(SessionConfig::secs(
+            tokio::time::sleep(GrblStreamConfig::secs(
                 self.config.reconnect_delay,
             ))
             .await;
@@ -421,7 +426,7 @@ impl GrblSession {
             if !self.config.poll_status_while_running
                 && self.job_running.load(Ordering::SeqCst)
             {
-                tokio::time::sleep(SessionConfig::secs(
+                tokio::time::sleep(GrblStreamConfig::secs(
                     self.config.status_poll_interval,
                 ))
                 .await;
@@ -440,7 +445,7 @@ impl GrblSession {
                 log::warn!("Connection lost while sending poll: {err}");
                 break;
             }
-            tokio::time::sleep(SessionConfig::secs(
+            tokio::time::sleep(GrblStreamConfig::secs(
                 self.config.status_poll_interval,
             ))
             .await;
@@ -1130,7 +1135,7 @@ impl GrblSession {
                 .send_gcode_line(
                     command_bytes.as_bytes(),
                     op_index,
-                    SessionConfig::secs(timeout),
+                    GrblStreamConfig::secs(timeout),
                 )
                 .await
             {
@@ -1165,7 +1170,7 @@ impl GrblSession {
         if !self.is_cancelled() && self.job_exception.lock().unwrap().is_none()
         {
             log::debug!("All G-code sent. Waiting for all 'ok' responses.");
-            self.drain_pending_acks(SessionConfig::secs(
+            self.drain_pending_acks(GrblStreamConfig::secs(
                 self.config.stall_timeout_default,
             ))
             .await;
@@ -1335,7 +1340,7 @@ impl GrblSession {
             return false;
         }
         for _ in 0..self.config.poll_response_attempts {
-            tokio::time::sleep(SessionConfig::secs(
+            tokio::time::sleep(GrblStreamConfig::secs(
                 self.config.poll_response_interval,
             ))
             .await;
@@ -1506,7 +1511,7 @@ impl GrblSession {
         if !self.transport.is_open() {
             return;
         }
-        tokio::time::sleep(SessionConfig::secs(
+        tokio::time::sleep(GrblStreamConfig::secs(
             self.config.safety_shutdown_delay,
         ))
         .await;
@@ -1585,7 +1590,7 @@ impl GrblSession {
 /// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Driver for GrblSession {
+impl Driver for GrblStream {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
@@ -1668,7 +1673,7 @@ impl Driver for GrblSession {
     ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let timeout =
-            SessionConfig::secs(if self.config.homing_timeout > 0.0 {
+            GrblStreamConfig::secs(if self.config.homing_timeout > 0.0 {
                 self.config.homing_timeout
             } else {
                 self.config.command_timeout
@@ -2064,7 +2069,7 @@ impl Driver for GrblSession {
                 self.send_command_bytes(format!("{command}\n").as_bytes())
                     .await?;
                 match tokio::time::timeout(
-                    SessionConfig::secs(self.config.command_timeout),
+                    GrblStreamConfig::secs(self.config.command_timeout),
                     request.finished.wait(),
                 )
                 .await
@@ -2107,7 +2112,7 @@ impl Driver for GrblSession {
         &self,
         command: &str,
     ) -> Result<Vec<String>, DriverError> {
-        let timeout = SessionConfig::secs(self.config.command_timeout);
+        let timeout = GrblStreamConfig::secs(self.config.command_timeout);
         self.execute_command_with_timeout(command, timeout).await
     }
 

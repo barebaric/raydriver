@@ -14,7 +14,7 @@ import pytest
 from conftest import DEFAULT_DIALECT
 
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 
 TIMINGS = {
@@ -36,7 +36,7 @@ JOB_TIMINGS = {
 
 async def _reconnect_cycle(disconnect: bool) -> None:
     mock = MockTransport()
-    session = GrblSession.with_transport(
+    session = GrblSerialDriver.with_transport(
         mock,
         config=TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -70,7 +70,7 @@ async def _stream_disconnect_cycle() -> None:
     mock = MockTransport()
     emulator = GrblEmulator(mock)
     device_task = asyncio.ensure_future(emulator.run())
-    session = GrblSession.with_transport(
+    session = GrblSerialDriver.with_transport(
         mock,
         config=JOB_TIMINGS,
         dialect=DEFAULT_DIALECT,

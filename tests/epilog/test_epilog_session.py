@@ -14,7 +14,7 @@ import pytest
 from conftest import EventRecorder
 
 from raydriver.core import DriverEvent
-from raydriver.epilog import EpilogSession
+from raydriver.epilog import EpilogDriver
 
 
 @asynccontextmanager
@@ -45,7 +45,7 @@ async def printer(handler):
 
 
 def make_session(port, events, **config):
-    return EpilogSession(
+    return EpilogDriver(
         config={"host": "127.0.0.1", "port": port, "timeout": 2.0, **config},
         event_callback=events.callback,
     )

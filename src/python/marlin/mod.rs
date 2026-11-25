@@ -1,8 +1,8 @@
 //! The `raydriver.marlin` Python submodule.
 
+pub(crate) mod driver;
 pub(crate) mod parser;
 pub(crate) mod probe;
-pub(crate) mod session;
 
 use pyo3::prelude::*;
 
@@ -19,8 +19,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let marlin_mod = PyModule::new(py, "marlin")?;
 
     marlin_mod.setattr("__doc__", MODULE_DOC)?;
-    marlin_mod.add("__all__", vec!["MarlinSession", "parser", "probe"])?;
-    marlin_mod.add_class::<session::PyMarlinSession>()?;
+    marlin_mod.add("__all__", vec!["MarlinSerialDriver", "parser", "probe"])?;
+    marlin_mod.add_class::<driver::PyMarlinSerialDriver>()?;
 
     let parser_mod = PyModule::new(py, "parser")?;
     parser::register(&parser_mod)?;

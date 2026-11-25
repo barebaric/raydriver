@@ -14,7 +14,7 @@ import gc
 import pytest
 
 from raydriver.core.transport import MockTransport
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 GCODE = "".join(f"G1 X{i} F6000\n" for i in range(20))
@@ -32,7 +32,7 @@ async def _cancel_cycle(disconnect: bool) -> None:
     mock = MockTransport()
     emulator = SmoothieEmulator(mock)
     device_task = asyncio.ensure_future(emulator.run())
-    session = SmoothieSession.with_transport(
+    session = SmoothieDriver.with_transport(
         mock,
         config=TIMINGS,
         dialect=DIALECT,
@@ -86,7 +86,7 @@ async def test_drop_without_disconnect_stops_background_tasks():
     the transport."""
     status = b"<Idle|MPos:0.000,0.000,0.000|WPos:0.000,0.000,0.000|FS:0,0>\r\n"
     mock = MockTransport()
-    session = SmoothieSession.with_transport(
+    session = SmoothieDriver.with_transport(
         mock,
         config={**TIMINGS, "status_poll_interval": 0.05},
         dialect=DIALECT,

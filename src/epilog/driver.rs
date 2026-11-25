@@ -100,7 +100,7 @@ struct ActiveUpload {
 }
 
 /// The Epilog LPD session core.
-pub struct EpilogSession {
+pub struct EpilogDriver {
     config: EpilogConfig,
     events: Arc<dyn DriverEvents>,
     state: Mutex<DeviceState>,
@@ -111,7 +111,7 @@ pub struct EpilogSession {
     upload: Mutex<Option<ActiveUpload>>,
 }
 
-impl EpilogSession {
+impl EpilogDriver {
     pub fn new(config: EpilogConfig, events: Arc<dyn DriverEvents>) -> Self {
         Self {
             config,
@@ -535,7 +535,7 @@ fn sanitize_title(title: &str) -> String {
 }
 
 #[async_trait]
-impl Driver for EpilogSession {
+impl Driver for EpilogDriver {
     async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.connection(TransportStatus::Connecting, None);
         match self.probe().await {
@@ -617,7 +617,7 @@ impl Driver for EpilogSession {
     }
 }
 
-impl EpilogSession {
+impl EpilogDriver {
     /// Store the upload task so `cancel` can abort it.
     fn track_upload(
         &self,

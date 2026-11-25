@@ -16,25 +16,25 @@ from conftest import DEFAULT_DIALECT, EventRecorder
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
-from raydriver.epilog import EpilogSession
-from raydriver.grbl import GrblSession
-from raydriver.grbl.simple import GrblSimpleSession
-from raydriver.marlin import MarlinSession
-from raydriver.octoprint import OctoPrintSession
+from raydriver.epilog import EpilogDriver
+from raydriver.grbl import GrblSerialDriver
+from raydriver.grbl.simple import GrblSerialSimpleDriver
+from raydriver.marlin import MarlinSerialDriver
+from raydriver.octoprint import OctoPrintDriver
 from raydriver.protocols import PROTOCOLS
 from raydriver.remote.client import RemoteSession, create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 SESSIONS = {
-    "grbl": GrblSession,
-    "grbl_simple": GrblSimpleSession,
-    "esp3d": GrblSession,
-    "smoothie": SmoothieSession,
-    "marlin": MarlinSession,
-    "octoprint": OctoPrintSession,
-    "epilog": EpilogSession,
+    "grbl": GrblSerialDriver,
+    "grbl_simple": GrblSerialSimpleDriver,
+    "esp3d": GrblSerialDriver,
+    "smoothie": SmoothieDriver,
+    "marlin": MarlinSerialDriver,
+    "octoprint": OctoPrintDriver,
+    "epilog": EpilogDriver,
 }
 
 REMOTE_TIMINGS = {
@@ -65,7 +65,7 @@ async def test_remote_home_smoothie():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(name, config, dialect, callback):
-        return SmoothieSession.with_transport(
+        return SmoothieDriver.with_transport(
             mock,
             config={**REMOTE_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},

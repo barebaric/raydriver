@@ -1,4 +1,4 @@
-//! The `OctoPrintSession` PyO3 wrapper: the server's REST API and
+//! The `OctoPrintDriver` PyO3 wrapper: the server's REST API and
 //! SockJS WebSocket, exposed through the uniform session surface.
 
 use std::sync::Arc;
@@ -7,12 +7,12 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::core::driver::{CancelMode, Driver};
-use crate::octoprint::session::{OctoPrintConfig, OctoPrintSession};
+use crate::core::driver::Driver;
+use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
 use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
-use crate::python::grbl::session::{get_f64, get_i64, get_str};
+use crate::python::grbl::driver::{get_f64, get_i64, get_str};
 use crate::python::octoprint::probe::OctoPrintDeviceInfo;
 use crate::python::pyfuture::{spawn_future, PyAwait};
 
@@ -29,7 +29,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
     }
     if let Some(v) = get_str(dict, "path").ok().flatten() {
         config.path_prefix =
-            crate::octoprint::session::normalize_path_prefix(&v);
+            crate::octoprint::driver::normalize_path_prefix(&v);
     }
     if let Some(v) = get_str(dict, "api_key").ok().flatten() {
         config.api_key = v;
@@ -60,26 +60,26 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
 /// Operations the OctoPrint API cannot perform (e.g. writing
 /// firmware settings) raise `NotImplementedError`.
 #[gen_stub_pyclass(module = "raydriver.octoprint")]
-#[pyclass(name = "OctoPrintSession", module = "raydriver.octoprint")]
-pub struct PyOctoPrintSession {
-    core: Arc<OctoPrintSession>,
+#[pyclass(name = "OctoPrintDriver", module = "raydriver.octoprint")]
+pub struct PyOctoPrintDriver {
+    core: Arc<OctoPrintDriver>,
     events: Arc<PyEvents>,
 }
 
-impl PyOctoPrintSession {
+impl PyOctoPrintDriver {
     fn build(
         config: OctoPrintConfig,
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         let events = Arc::new(PyEvents::new(event_callback));
-        let core = OctoPrintSession::new(config, events.clone());
+        let core = OctoPrintDriver::new(config, events.clone());
         Ok(Self { core, events })
     }
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
-impl PyOctoPrintSession {
+impl PyOctoPrintDriver {
     #[new]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
@@ -160,7 +160,7 @@ impl PyOctoPrintSession {
 
     fn __repr__(&self) -> String {
         format!(
-            "OctoPrintSession(resource_uri={:?}, job_running={})",
+            "OctoPrintDriver(resource_uri={:?}, job_running={})",
             self.core.resource_uri(),
             self.core.is_job_running(),
         )
@@ -169,4 +169,4 @@ impl PyOctoPrintSession {
 
 use crate::python::session_api::uniform_session_api;
 
-uniform_session_api!(PyOctoPrintSession);
+uniform_session_api!(PyOctoPrintDriver);

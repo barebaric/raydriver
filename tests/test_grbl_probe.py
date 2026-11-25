@@ -14,7 +14,7 @@ from conftest import (
 
 from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.grbl.probe import GrblDeviceInfo, GrblFlavor, describe
 from raydriver.remote.client import create_session
@@ -149,7 +149,7 @@ async def remote_rig():
 
     def factory(protocol_name, config, dialect, event_callback):
         assert protocol_name == "grbl"
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
