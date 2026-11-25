@@ -22,7 +22,7 @@ use tokio::io::{
 };
 
 use crate::core::connector::DynStream;
-use crate::core::session::SessionError;
+use crate::core::driver::DriverError;
 
 const WS_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -57,9 +57,9 @@ impl From<std::io::Error> for WsError {
     }
 }
 
-impl From<WsError> for SessionError {
+impl From<WsError> for DriverError {
     fn from(err: WsError) -> Self {
-        SessionError::Connection(err.0)
+        DriverError::Connection(err.0)
     }
 }
 
@@ -77,7 +77,7 @@ pub type WsClient = WsStream<DynStream>;
 
 impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
     /// Send a text message to the server.
-    pub async fn send_text(&mut self, text: &str) -> Result<(), SessionError> {
+    pub async fn send_text(&mut self, text: &str) -> Result<(), DriverError> {
         self.send_frame(0x1, text.as_bytes()).await
     }
 
@@ -85,7 +85,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
         &mut self,
         opcode: u8,
         payload: &[u8],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut frame = vec![0x80 | opcode];
         if payload.len() > 125 {
             frame.push(0x80 | 126);
@@ -101,13 +101,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
         self.writer
             .write_all(&frame)
             .await
-            .map_err(|e| SessionError::Connection(e.to_string()))
+            .map_err(|e| DriverError::Connection(e.to_string()))
     }
 
     /// Receive the next text message, transparently answering pings
     /// and swallowing pongs.  Server-initiated closes surface as a
     /// connection error.
-    pub async fn receive(&mut self) -> Result<String, SessionError> {
+    pub async fn receive(&mut self) -> Result<String, DriverError> {
         let mut message = Vec::new();
         loop {
             let frame = self.read_frame().await?;
@@ -124,7 +124,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
                     self.send_control(0xA, &frame.payload).await?;
                 }
                 0x8 => {
-                    return Err(SessionError::Connection(
+                    return Err(DriverError::Connection(
                         "websocket closed by device".to_string(),
                     ));
                 }
@@ -133,17 +133,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
         }
     }
 
-    async fn read_frame(&mut self) -> Result<Frame, SessionError> {
+    async fn read_frame(&mut self) -> Result<Frame, DriverError> {
         read_frame(&mut self.reader)
             .await
-            .map_err(|e| SessionError::Connection(e.0))
+            .map_err(|e| DriverError::Connection(e.0))
     }
 
     async fn send_control(
         &mut self,
         opcode: u8,
         payload: &[u8],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut frame = vec![0x80 | opcode];
         frame.push(0x80 | payload.len() as u8);
         let mask = random_mask();
@@ -154,7 +154,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> WsStream<S> {
         self.writer
             .write_all(&frame)
             .await
-            .map_err(|e| SessionError::Connection(e.to_string()))
+            .map_err(|e| DriverError::Connection(e.to_string()))
     }
 }
 
@@ -166,7 +166,7 @@ impl WsStream<DynStream> {
         port: u16,
         origin: Option<&str>,
         timeout: Duration,
-    ) -> Result<Self, SessionError> {
+    ) -> Result<Self, DriverError> {
         Self::connect_path(host, port, "/", origin, timeout).await
     }
 
@@ -178,17 +178,17 @@ impl WsStream<DynStream> {
         path: &str,
         origin: Option<&str>,
         timeout: Duration,
-    ) -> Result<Self, SessionError> {
+    ) -> Result<Self, DriverError> {
         tokio::time::timeout(timeout, async {
             let stream = crate::core::connector::dial(host, port)
                 .await
                 .map_err(|e| WsError(e.to_string()))?;
             handshake(stream, host, port, path, origin)
                 .await
-                .map_err(|e| SessionError::Connection(e.0))
+                .map_err(|e| DriverError::Connection(e.0))
         })
         .await
-        .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
+        .map_err(|_| DriverError::Timeout("operation timed out".to_string()))?
     }
 }
 

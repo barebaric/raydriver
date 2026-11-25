@@ -17,8 +17,8 @@ from conftest import (
     wait_until,
 )
 
-from raydriver.core import SessionEvent
-from raydriver.grbl.simple import GrblSimpleSession
+from raydriver.core import DriverEvent
+from raydriver.grbl.simple import GrblSerialSimpleDriver
 
 GCODE = "G1 X1 F1000\nG1 X2 F1000\nG1 X3 F1000\n"
 
@@ -29,7 +29,7 @@ def gcode_sends(mock):
 
 
 def make_simple_session(mock, events, config=None):
-    return GrblSimpleSession.with_transport(
+    return GrblSerialSimpleDriver.with_transport(
         mock,
         config={**FAST_TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -54,7 +54,7 @@ async def connect_scripted(mock, events, config=None):
     mock.push(b"Grbl 1.1h ['$' for help]\r\n")
     await connect_task
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     await wait_status_polls(mock)
@@ -82,7 +82,7 @@ class TestStrictOrdering:
         mock.push(b"ok\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await session.disconnect()
 
     async def test_device_error_halts_stream(self, mock, events):
@@ -94,7 +94,7 @@ class TestStrictOrdering:
         mock.push(b"error:20\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.2)
         assert len(gcode_sends(mock)) == 2
         assert session.state.error is not None
@@ -112,7 +112,7 @@ class TestStrictOrdering:
         # The device never acknowledges: the hard timeout must
         # interrupt the job and fire the safety shutdown.
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.2)
         assert len(gcode_sends(mock)) == 1
         assert b"M5\n" in sent_bytes(mock)
@@ -126,7 +126,7 @@ class TestStrictOrdering:
         # Line 2 is never acknowledged; cancel must abort the wait.
         await session.cancel()
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.2)
         assert len(gcode_sends(mock)) == 1
         assert b"\x18" in sent_bytes(mock)
@@ -152,7 +152,7 @@ class TestStrictOrdering:
         await wait_until(lambda: len(gcode_sends(mock)) >= 3)
         mock.push(b"ok\r\n")
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await session.disconnect()
 
 
@@ -164,7 +164,7 @@ async def simple_rig(mock, events):
     session = make_simple_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     await wait_status_polls(mock)
@@ -185,7 +185,7 @@ class TestEmulatorJobs:
     async def test_job_completes_and_moves(self, simple_rig):
         session, mock, emulator, events = simple_rig
         await session.run("G1 X10 F1000\nG1 Y5 F1000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert emulator.mpos == pytest.approx([10.0, 5.0, 0.0])
 
@@ -196,7 +196,7 @@ class TestEmulatorJobs:
         text = "\n".join(f"G1 X{i % 50} F1000" for i in range(40))
         op_map = {**{i: 0 for i in range(20)}, 30: 1}
         await session.run(text, op_map, progress_callback=done.append)
-        await events.wait_for(SessionEvent.JobFinished, timeout=30)
+        await events.wait_for(DriverEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 
     async def test_interactive_error_returned_as_line(self, simple_rig):
@@ -211,7 +211,7 @@ class TestConfig:
 
     def test_config_requires_transport_details(self, events):
         with pytest.raises(RuntimeError, match="port"):
-            GrblSimpleSession(
+            GrblSerialSimpleDriver(
                 None, dialect=None, event_callback=events.callback
             )
 
@@ -233,7 +233,7 @@ class TestConfig:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -254,7 +254,7 @@ class TestConfig:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -276,7 +276,7 @@ class TestConfig:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -301,11 +301,11 @@ class TestConfig:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             await session.run("G1 X20 F100\n", {0: 0}, [5.0])
-            await events.wait_for(SessionEvent.JobFinished)
+            await events.wait_for(DriverEvent.JobFinished)
         finally:
             await session.disconnect()
             device_task.cancel()
@@ -327,11 +327,11 @@ class TestConfig:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             await session.run("G1 X20 F100\n")
-            await events.wait_for(SessionEvent.JobFinished)
+            await events.wait_for(DriverEvent.JobFinished)
         finally:
             await session.disconnect()
             device_task.cancel()

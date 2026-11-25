@@ -10,9 +10,10 @@ import asyncio
 import pytest
 from conftest import DEFAULT_DIALECT, sent_bytes, wait_until
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
+from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceStatus
-from raydriver.marlin import MarlinSession
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
 from raydriver.marlin.parser import parse_m115_firmware_info
 
@@ -37,7 +38,7 @@ def gcode_sends(mock):
 
 
 def make_marlin_session(mock, events, config=None):
-    return MarlinSession.with_transport(
+    return MarlinSerialDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -60,7 +61,7 @@ async def connect_scripted(mock, events):
     mock.push(BOOT)
     await connect_task
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
@@ -80,14 +81,14 @@ class TestHandshake:
         # No `start` within the handshake timeout: the port is
         # flagged as a phantom, then the loop retries (SLEEPING).
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: (
                 e.status == "ERROR" and e.message == "No response from device"
             ),
             timeout=5,
         )
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: e.status == "SLEEPING",
             timeout=5,
         )
@@ -106,7 +107,7 @@ class TestHandshake:
         mock.push(b"PR\r\n")
         mock.push(b"ok\r\n")
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
             timeout=5,
         )
@@ -120,7 +121,7 @@ class TestHandshake:
         await wait_until(lambda: mock.is_connected)
         mock.push(b"Marlin 2.1.2\r\necho:SD card ok\r\n")
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
             timeout=5,
         )
@@ -133,7 +134,7 @@ class TestPositionReports:
         mock.push(b"X:1.50 Y:-2.00 Z:0.00 E:0.00 Count X:150 Y:-200 Z:0\r\n")
         mock.push(b"ok\r\n")
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.machine_pos == [1.5, -2.0, 0.0],
         )
         assert session.state.status == DeviceStatus.IDLE
@@ -159,7 +160,7 @@ class TestStrictOrdering:
         mock.push(b"ok\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await session.disconnect()
 
     async def test_device_error_halts_stream_with_safety_shutdown(
@@ -173,7 +174,7 @@ class TestStrictOrdering:
         mock.push(b"Error:Line number is not a line number\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.2)
         assert len(gcode_sends(mock)) == 2
         assert session.state.error is not None
@@ -187,7 +188,7 @@ class TestStrictOrdering:
 
         await session.cancel()
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         sent = sent_bytes(mock)
         assert b"M410\n" in sent
         assert b"M5\n" in sent
@@ -203,7 +204,7 @@ async def marlin_rig(mock, events):
     session = make_marlin_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
@@ -223,17 +224,17 @@ class TestEmulatorJobs:
     async def test_job_completes_and_moves(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         await session.run("G1 X10 F90000\nG1 Y5 F90000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert emulator.mpos == pytest.approx([10.0, 5.0, 0.0])
 
     async def test_m114_reports_reach_state(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         await session.run_raw("G1 X7 F90000")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         # The periodic M114 poll picks up the new position.
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.machine_pos == [7.0, 0.0, 0.0],
             timeout=10,
         )
@@ -245,15 +246,43 @@ class TestEmulatorJobs:
         text = "\n".join(f"G1 X{i % 50} F90000" for i in range(40))
         op_map = {**{i: 0 for i in range(20)}, 30: 1}
         await session.run(text, op_map, progress_callback=done.append)
-        await events.wait_for(SessionEvent.JobFinished, timeout=30)
+        await events.wait_for(DriverEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 
     async def test_m115_probing(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         lines = await session.execute_interactive_command("M115")
+        assert "ok" not in lines
         info = parse_m115_firmware_info(lines)
         assert info["firmware_name"].startswith("Marlin")
 
     async def test_detect_unit_system(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         assert await session.detect_unit_system() == "metric"
+
+
+class TestMarlinDriverBehavior:
+    async def test_boot_lines_are_captured(self, events):
+        mock = MockTransport()
+        session = await connect_scripted(mock, events)
+        try:
+            assert any("Marlin" in line for line in session.boot_lines)
+        finally:
+            await session.disconnect()
+
+    async def test_set_hold_is_a_best_effort_noop(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        await session.set_hold(True)
+        await session.set_hold(False)
+
+    async def test_jog_restores_absolute_mode(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        before = len(mock.sent())
+        await session.jog(1000, deltas=[("x", 1.0)])
+        sent = b"".join(mock.sent()[before:])
+        assert b"G90" in sent
+
+    async def test_disconnect_resets_the_device_status(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        await session.disconnect()
+        assert session.state.status == DeviceStatus.UNKNOWN

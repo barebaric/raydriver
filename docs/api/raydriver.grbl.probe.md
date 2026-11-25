@@ -110,7 +110,9 @@ The mapping form of the census (the daemon wire form).
 | --------- | ------ | ----------- |
 | _Returns_ | `dict` |             |
 
-## GrblFlavor
+## GrblFlavor(enum.Enum)
+
+Inherits from `enum.Enum`; the inherited members are documented on the base class.
 
 The firmware family a device identifies itself as.
 

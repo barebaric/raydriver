@@ -4,7 +4,7 @@
 //! [`HostedSession`] for a protocol name and its JSON config. Pure
 //! Rust embedders implement these traits directly; the Python
 //! bindings adapt the existing PyO3 session objects.  Errors are
-//! the crate's [`SessionError`].
+//! the crate's [`DriverError`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,8 +12,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::Value;
 
+use crate::core::driver::DriverError;
 use crate::core::remote::protocol::WireEvent;
-use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 
 /// Receives events from a hosted session in wire form.
@@ -33,8 +33,8 @@ pub trait HostedSession: Send + Sync {
     fn pending_commands(&self) -> Vec<String>;
     fn set_event_sink(&self, sink: Arc<dyn RemoteEventSink>);
 
-    async fn connect(&self) -> Result<(), SessionError>;
-    async fn disconnect(&self) -> Result<(), SessionError>;
+    async fn connect(&self) -> Result<(), DriverError>;
+    async fn disconnect(&self) -> Result<(), DriverError>;
 
     /// Execute one non-job session method. Arguments arrive as a
     /// JSON object; the result is the method's return value.
@@ -42,7 +42,7 @@ pub trait HostedSession: Send + Sync {
         &self,
         method: &str,
         args: Value,
-    ) -> Result<Value, SessionError>;
+    ) -> Result<Value, DriverError>;
 
     /// Stream a job. Progress and job errors are emitted through the
     /// event sink; the daemon marks the job finished when this
@@ -52,7 +52,7 @@ pub trait HostedSession: Send + Sync {
         gcode: String,
         op_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
-    ) -> Result<(), SessionError>;
+    ) -> Result<(), DriverError>;
 }
 
 /// Creates sessions for the daemon.
@@ -63,5 +63,5 @@ pub trait SessionFactory: Send + Sync {
         config: Value,
         dialect: Value,
         sink: Arc<dyn RemoteEventSink>,
-    ) -> Result<Arc<dyn HostedSession>, SessionError>;
+    ) -> Result<Arc<dyn HostedSession>, DriverError>;
 }

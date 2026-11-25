@@ -6,8 +6,8 @@ import asyncio
 import pytest
 from conftest import DEFAULT_DIALECT
 
-from raydriver.core import SessionEvent
-from raydriver.smoothie import SmoothieSession
+from raydriver.core import DriverEvent
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 from raydriver.smoothie.probe import SmoothieDeviceInfo, describe
 
@@ -21,7 +21,7 @@ TIMINGS = {
 
 
 def make_smoothie_session(mock, events, config=None):
-    return SmoothieSession.with_transport(
+    return SmoothieDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -38,7 +38,7 @@ async def smoothie_rig(mock, events):
     session = make_smoothie_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()

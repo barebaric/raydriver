@@ -6,8 +6,8 @@ import time
 
 import pytest
 
-from raydriver.core import SessionEvent
-from raydriver.xtool import XtoolSession
+from raydriver.core import DriverEvent
+from raydriver.xtool import XtoolNetworkDriver
 from raydriver.xtool.emulator import XtoolEmulator
 
 FAST_CONFIG = {
@@ -39,7 +39,7 @@ class EventRecorder:
         return [type(event).__name__ for event in self.events]
 
     async def wait_for(self, kind, pred=None, timeout=5.0):
-        """Wait until an event of *kind* (a SessionEvent variant
+        """Wait until an event of *kind* (a DriverEvent variant
         class) matching *pred* was recorded."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -67,7 +67,7 @@ async def wait_until(predicate, timeout=5.0, interval=0.01):
 
 
 def make_session(events, config=None, dialect=None):
-    return XtoolSession(
+    return XtoolNetworkDriver(
         config={**FAST_CONFIG, **(config or {})},
         dialect={**DIALECT, **(dialect or {})},
         event_callback=events.callback,
@@ -111,7 +111,7 @@ async def rig(emulator, events):
     )
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     events.events.clear()

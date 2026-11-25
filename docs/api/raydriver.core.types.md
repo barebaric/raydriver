@@ -92,7 +92,9 @@ work_pos: list[Optional[float]]
 
 Work position in mm; entries may be `None`.
 
-## DeviceStatus
+## DeviceStatus(enum.Enum)
+
+Inherits from `enum.Enum`; the inherited members are documented on the base class.
 
 Machine state as reported in Grbl status reports.
 

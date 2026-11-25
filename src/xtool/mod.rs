@@ -19,6 +19,6 @@
 //! implemented.  The `m2` session needs the `m2` feature (its
 //! tokio-tungstenite stack has no wasm build).
 
+pub mod driver;
 #[cfg(feature = "m2")]
 pub mod m2;
-pub mod session;

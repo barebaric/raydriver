@@ -12,9 +12,9 @@ from conftest import (
     server_port,
 )
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.grbl.probe import GrblDeviceInfo, GrblFlavor, describe
 from raydriver.remote.client import create_session
@@ -148,8 +148,8 @@ async def remote_rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        assert protocol_name == "grbl"
-        return GrblSession.with_transport(
+        assert protocol_name == "GrblSerialDriver"
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -177,7 +177,7 @@ class TestProbeDeviceRemote:
         port = remote_rig
         events = EventRecorder()
         session = create_session(
-            "grbl",
+            "GrblSerialDriver",
             {"remote_host": "127.0.0.1", "remote_port": port},
             None,
             events.callback,
@@ -185,7 +185,7 @@ class TestProbeDeviceRemote:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             info = await session.probe_device()

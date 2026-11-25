@@ -17,9 +17,9 @@ from conftest import (
     wait_until,
 )
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
 from raydriver.remote import protocol
 from raydriver.remote.client import RemoteSession, create_session
@@ -43,8 +43,8 @@ async def remote_rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        assert protocol_name == "grbl"
-        return GrblSession.with_transport(
+        assert protocol_name == "GrblSerialDriver"
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -73,7 +73,9 @@ def make_proxy(port, events, **extra):
         "remote_port": port,
         **extra,
     }
-    session = create_session("grbl", config, DEFAULT_DIALECT, events.callback)
+    session = create_session(
+        "GrblSerialDriver", config, DEFAULT_DIALECT, events.callback
+    )
     assert isinstance(session, RemoteSession)
     return session
 
@@ -88,7 +90,7 @@ async def connect_and_wait(session, events, timeout=10.0):
     """
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
         timeout=timeout,
     )
@@ -96,15 +98,15 @@ async def connect_and_wait(session, events, timeout=10.0):
 
 def test_factory_routes_local():
     session = create_session(
-        "grbl", {"port": "/dev/ttyUSB0"}, DEFAULT_DIALECT, None
+        "GrblSerialDriver", {"port": "/dev/ttyUSB0"}, DEFAULT_DIALECT, None
     )
-    assert isinstance(session, GrblSession)
+    assert isinstance(session, GrblSerialDriver)
 
 
 async def test_factory_routes_remote(remote_rig):
     port, mock = remote_rig
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         None,
         None,
@@ -114,7 +116,7 @@ async def test_factory_routes_remote(remote_rig):
 
 def test_factory_parses_url():
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"url": "raydriver://example.org:9999#secret"},
         None,
         None,
@@ -127,7 +129,9 @@ def test_factory_parses_url():
 
 def test_factory_rejects_bad_url():
     with pytest.raises(ValueError):
-        create_session("grbl", {"url": "http://example.org"}, None, None)
+        create_session(
+            "GrblSerialDriver", {"url": "http://example.org"}, None, None
+        )
 
 
 async def test_connect_and_interactive_command(remote_rig):
@@ -152,7 +156,7 @@ async def test_run_progress_parity(remote_rig):
     local_emulator = GrblEmulator(local_mock, speed_factor=10)
     local_task = asyncio.ensure_future(local_emulator.run())
     local_events = EventRecorder()
-    local = GrblSession.with_transport(
+    local = GrblSerialDriver.with_transport(
         local_mock,
         config=FAST_TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -207,7 +211,7 @@ async def test_read_settings_parity(remote_rig):
     local_emulator = GrblEmulator(local_mock, speed_factor=10)
     local_task = asyncio.ensure_future(local_emulator.run())
     local_events = EventRecorder()
-    local = GrblSession.with_transport(
+    local = GrblSerialDriver.with_transport(
         local_mock,
         config=FAST_TIMINGS,
         dialect=DEFAULT_DIALECT,
@@ -245,7 +249,7 @@ async def test_disconnect_sleeping_and_reattach(remote_rig):
         with pytest.raises(ConnectionError):
             await run_task
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "SLEEPING",
         )
         await proxy.attach()
@@ -313,7 +317,7 @@ async def test_token_loopback_without_tls():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -347,7 +351,7 @@ async def test_tls_token_roundtrip():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -408,7 +412,7 @@ async def test_version_mismatch_refused():
 
     server = await asyncio.start_server(handler, "127.0.0.1", 0)
     proxy = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {
             "remote_host": "127.0.0.1",
             "remote_port": server_port(server),

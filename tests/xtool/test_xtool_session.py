@@ -1,4 +1,4 @@
-"""Session lifecycle, command exchange and job tests, driven against
+"""Driver lifecycle, command exchange and job tests, driven against
 the xTool WiFi firmware emulator."""
 
 import asyncio
@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from conftest import make_session, wait_until
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
 
 
@@ -22,7 +22,7 @@ class TestConnection:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             assert session.resource_uri == (
@@ -47,7 +47,7 @@ class TestConnection:
         try:
             await session.connect()
             event = await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "ERROR",
             )
             assert "did not identify" in event.message
@@ -67,7 +67,7 @@ class TestConnection:
         )
         await session.connect()
         event = await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: e.status == "ERROR",
         )
         assert event.message is not None
@@ -80,7 +80,7 @@ class TestCommands:
         assert lines == []
         assert emulator.commands == ["M5"]
         await events.wait_for(
-            SessionEvent.CommandStatusChanged,
+            DriverEvent.CommandStatusChanged,
             lambda e: e.status == "IDLE",
         )
 
@@ -156,15 +156,15 @@ class TestJobs:
         session, emulator, events = rig
         task = asyncio.ensure_future(session.run("M17 S1\nG1 X10 F1000\nM5\n"))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         assert emulator.uploaded == b"M17 S1\nG1 X10 F1000\nM5\n"
         assert emulator.started_files == ["/tmp.gcode"]
         await asyncio.wait_for(task, 5.0)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "IDLE",
         )
 
@@ -172,7 +172,7 @@ class TestJobs:
         session, emulator, events = rig
         await asyncio.wait_for(session.run_raw("M5\n"), 5.0)
         assert emulator.uploaded == b"M5\n"
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
 
     async def test_run_fails_when_job_never_starts(self, rig):
         session, emulator, _ = rig
@@ -185,15 +185,15 @@ class TestJobs:
         emulator.job_duration = 5.0
         task = asyncio.ensure_future(session.run("M5\n"))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await session.cancel()
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert "stop" in emulator.job_actions
         await asyncio.wait_for(task, 5.0)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "IDLE",
         )
 
@@ -201,17 +201,17 @@ class TestJobs:
         session, emulator, events = rig
         task = asyncio.ensure_future(session.run("M5\n"))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await session.set_hold(True)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "HOLD",
         )
         await session.set_hold(False)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await asyncio.wait_for(task, 5.0)
@@ -232,9 +232,7 @@ class TestEvents:
     async def test_raw_lines_are_forwarded(self, rig):
         session, emulator, events = rig
         emulator.broadcast("ok:IDLE")
-        await events.wait_for(
-            SessionEvent.RawRx, lambda e: e.line == "ok:IDLE"
-        )
+        await events.wait_for(DriverEvent.RawRx, lambda e: e.line == "ok:IDLE")
 
     async def test_job_states_drive_the_device_state(self, rig):
         session, emulator, _ = rig
@@ -252,7 +250,7 @@ class TestDisconnect:
         emulator.job_duration = 30.0
         task = asyncio.ensure_future(session.run("M5\n"))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await emulator.stop()
@@ -263,7 +261,7 @@ class TestDisconnect:
         session, emulator, events = rig
         await session.disconnect()
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: e.status == "DISCONNECTED",
         )
 
@@ -294,17 +292,49 @@ class TestStartFailure:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "ERROR",
             )
             # The device appears (power plugged back in) on the same
             # ports, and the reconnect loop picks it up.
             await emulator.start(http_port=http_port, ws_port=ws_port)
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
                 timeout=8.0,
             )
         finally:
             await session.disconnect()
             await emulator.stop()
+
+
+async def test_detect_unit_system_is_metric(rig):
+    session, emulator, events = rig
+    assert await session.detect_unit_system() == "metric"
+
+
+async def test_home_rejects_a_single_axis(rig):
+    session, emulator, events = rig
+    with pytest.raises(NotImplementedError):
+        await session.home(axes=["x"])
+
+
+async def test_clear_alarm_only_clears_the_local_state(rig):
+    session, emulator, events = rig
+    await session.clear_alarm()
+
+
+async def test_read_wcs_offsets_is_empty(rig):
+    session, emulator, events = rig
+    assert await session.read_wcs_offsets() == {}
+
+
+async def test_job_reports_every_op_at_start(rig):
+    session, emulator, events = rig
+    done = []
+    await session.run(
+        "G1 X0\nG1 X1\nG1 X2\n",
+        {0: 0, 1: 0, 2: 1},
+        progress_callback=done.append,
+    )
+    assert done == [0, 1]

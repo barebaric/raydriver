@@ -37,6 +37,14 @@ sidebar_label: raydriver.remote.protocol
 
 `str`
 
+### DRIVERS
+
+`list[str]`
+
+### DRIVER_LIST
+
+`str`
+
 ### EVENT
 
 `str`
@@ -89,14 +97,6 @@ sidebar_label: raydriver.remote.protocol
 
 `str`
 
-### PROTOCOLS
-
-`list[str]`
-
-### PROTOCOL_LIST
-
-`str`
-
 ### PROTOCOL_VERSION
 
 `int`
@@ -129,17 +129,9 @@ sidebar_label: raydriver.remote.protocol
 
 `str`
 
-### SESSION_METHODS
-
-`list[str]`
-
 ### SESSION_OPEN
 
 `str`
-
-### SESSION_PROPERTIES
-
-`list[str]`
 
 ### SESSION_PROPERTY
 
@@ -193,15 +185,15 @@ pack(value: int) -> bytes
 ### `decode_event()`
 
 ```python
-decode_event(payload: dict[str, object]) -> Optional[core.SessionEvent]
+decode_event(payload: dict[str, object]) -> Optional[core.DriverEvent]
 ```
 
 Decodes an event frame payload; `None` when it is not an event.
 
-| Parameter | Type                          | Description |
-| --------- | ----------------------------- | ----------- |
-| `payload` | `dict[str, object]`           |             |
-| _Returns_ | `Optional[core.SessionEvent]` |             |
+| Parameter | Type                         | Description |
+| --------- | ---------------------------- | ----------- |
+| `payload` | `dict[str, object]`          |             |
+| _Returns_ | `Optional[core.DriverEvent]` |             |
 
 ### `decode_frame()`
 
@@ -232,12 +224,12 @@ decode_state(payload: dict[str, object]) -> types.DeviceState
 ### `encode_event()`
 
 ```python
-encode_event(event: core.SessionEvent) -> dict[str, object]
+encode_event(event: core.DriverEvent) -> dict[str, object]
 ```
 
 | Parameter | Type                | Description |
 | --------- | ------------------- | ----------- |
-| `event`   | `core.SessionEvent` |             |
+| `event`   | `core.DriverEvent`  |             |
 | _Returns_ | `dict[str, object]` |             |
 
 ### `encode_frame()`

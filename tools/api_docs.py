@@ -703,6 +703,7 @@ def collect_members(body: list[ast.stmt]) -> dict:
             cls_info = {
                 "name": item.name,
                 "doc": doc,
+                "bases": [ast.unparse(base) for base in item.bases],
                 "methods": [],
                 "properties": [],
                 "enum_members": [],
@@ -906,8 +907,20 @@ def render_members(members: dict, mod_doc: str | None) -> str:
 
     if has_classes:
         for cls in sorted(members["classes"], key=lambda x: x["name"]):
-            lines.append(f"## {cls['name']}")
+            bases = cls.get("bases") or []
+            heading = cls["name"]
+            if bases:
+                heading += f"({', '.join(bases)})"
+            lines.append(f"## {heading}")
             lines.append("")
+            if bases:
+                lines.append(
+                    "Inherits from "
+                    + ", ".join(f"`{base}`" for base in bases)
+                    + "; the inherited members are documented on the "
+                    "base class."
+                )
+                lines.append("")
             doc, _, _, _ = format_docstring(cls["doc"])
             if doc:
                 lines.append(doc)

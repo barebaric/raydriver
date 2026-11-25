@@ -38,3 +38,13 @@ context_json: str
 ```python
 dialect: GcodeDialectSpec
 ```
+
+## RuidaSpec
+
+Typed Python wrapper around the Rust `RuidaSpec`.
+
+### `context_json`
+
+```python
+context_json: str
+```

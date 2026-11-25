@@ -3,7 +3,7 @@
 r"""
 GRBL device drivers implemented in Rust.
 
-The central type is GrblSession: it owns the connection lifecycle (handshake, status polling, reconnect), interactive commands, and job streaming with character-counting flow control, stall detection and deadlock recovery. GrblSimpleSession (raydriver.grbl.simple) is the minimal alternative: strict ping-pong, for hardware where the full driver misbehaves. Dialects remain data owned by Rayforge: resolved command templates are passed into the session.
+GrblSerialDriver, GrblTelnetDriver, GrblBluetoothDriver and GrblNetworkDriver each own a connection lifecycle (handshake, status polling, reconnect), interactive commands, and job streaming with character-counting flow control, stall detection and deadlock recovery; they differ only in their transport. GrblSerialSimpleDriver (raydriver.grbl.simple) is the minimal alternative: strict ping-pong, for hardware where the full driver misbehaves. Dialects remain data owned by the application: resolved command templates are passed into the driver.
 """
 
 import builtins
@@ -11,150 +11,90 @@ import collections.abc
 from raydriver import config
 from raydriver import core
 from raydriver.core import transport
-from raydriver.core import types
+from raydriver import driver
 import typing
 from . import parser
 from . import probe
 from . import simple
 __all__ = [
-    "GrblSession",
+    "GrblBluetoothDriver",
+    "GrblNetworkDriver",
+    "GrblSerialDriver",
+    "GrblTelnetDriver",
     "parser",
     "probe",
     "simple",
 ]
 
 @typing.final
-class GrblSession:
+class GrblBluetoothDriver(driver.Driver):
     r"""
-    A GRBL device session: connection lifecycle, streaming and
-    interactive commands, entirely in Rust.
-    
-    All async methods return asyncio futures; a typed `SessionEvent`
-    is delivered to `event_callback(event)` on the event loop thread.
+    A GRBL-compatible device on a Bluetooth serial channel.
     """
-    @property
-    def state(self) -> types.DeviceState:
-        r"""
-        Current snapshot of the device state.
-        """
-    @property
-    def buffer_count(self) -> builtins.int: ...
-    @property
-    def rx_buffer_size(self) -> builtins.int: ...
-    @property
-    def pending_commands(self) -> builtins.list[builtins.str]:
-        r"""
-        Commands awaiting their 'ok' acknowledgement.
-        """
-    @property
-    def job_running(self) -> builtins.bool: ...
-    @property
-    def resource_uri(self) -> typing.Optional[builtins.str]: ...
-    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> GrblSession: ...
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblBluetoothConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblBluetoothDriver: ...
     @staticmethod
-    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]] = None) -> GrblSession:
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblBluetoothConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblBluetoothDriver:
         r"""
-        Build a session around a [`MockTransport`] (for tests).
+        Build a driver around a [`MockTransport`] (for
+        tests).
         """
     def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
-        Open the connection and start the background tasks.
-        Run the device census: query `$I` and `$$`, and return the
-        structured result as a dict.
+        Run the device census: query `$I` and `$$`.
         """
     def __repr__(self) -> builtins.str: ...
-    def connect(self) -> collections.abc.Awaitable[None]:
+
+@typing.final
+class GrblNetworkDriver(driver.Driver):
+    r"""
+    A GRBL-compatible device on the FluidNC / ESP3D HTTP + WebSocket interface.
+    """
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.Esp3dConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblNetworkDriver: ...
+    @staticmethod
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.Esp3dConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblNetworkDriver:
         r"""
-        Open the connection and keep it up until `disconnect`.
+        Build a driver around a [`MockTransport`] (for
+        tests).
         """
-    def disconnect(self) -> collections.abc.Awaitable[None]:
+    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
-        Stop all background tasks and close the connection.
+        Run the device census: query `$I` and `$$`.
         """
-    def update_dialect(self, dialect: dict) -> None:
+    def __repr__(self) -> builtins.str: ...
+
+@typing.final
+class GrblSerialDriver(driver.Driver):
+    r"""
+    A GRBL-compatible device on a serial port: connection lifecycle, streaming and interactive commands, entirely in Rust.
+    """
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblSerialDriver: ...
+    @staticmethod
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblSerialConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblSerialDriver:
         r"""
-        Replace the command templates.
+        Build a driver around a [`MockTransport`] (for
+        tests).
         """
-    def execute_interactive_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
+    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
-        Send one interactive command and return its response
-        lines.
+        Run the device census: query `$I` and `$$`.
         """
-    def execute_command(self, command: builtins.str) -> collections.abc.Awaitable[builtins.list[builtins.str]]:
+    def __repr__(self) -> builtins.str: ...
+
+@typing.final
+class GrblTelnetDriver(driver.Driver):
+    r"""
+    A GRBL-compatible device over a telnet connection.
+    """
+    def __new__(cls, config: typing.Optional[typing.Union[dict, config.GrblTelnetConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblTelnetDriver: ...
+    @staticmethod
+    def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.GrblTelnetConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> GrblTelnetDriver:
         r"""
-        Send one command and return its response lines.
+        Build a driver around a [`MockTransport`] (for
+        tests).
         """
-    def run(self, gcode: builtins.str, op_line_map: typing.Optional[typing.Mapping[builtins.int, builtins.int]] = None, op_estimates: typing.Optional[typing.Sequence[builtins.float]] = None, progress_callback: typing.Optional[collections.abc.Callable[[builtins.int], builtins.object]] = None) -> collections.abc.Awaitable[None]:
+    def probe_device(self) -> collections.abc.Awaitable[probe.GrblDeviceInfo]:
         r"""
-        Stream a G-code job.
+        Run the device census: query `$I` and `$$`.
         """
-    def run_raw(self, machine_code: builtins.str) -> collections.abc.Awaitable[None]:
-        r"""
-        Execute pre-rendered machine code.
-        """
-    def cancel(self, emergency: builtins.bool = False) -> collections.abc.Awaitable[None]:
-        r"""
-        Cancel the running job.
-        """
-    def set_hold(self, hold: builtins.bool = True) -> collections.abc.Awaitable[None]:
-        r"""
-        Pause or resume the running job.
-        """
-    def home(self, axes: typing.Optional[typing.Sequence[builtins.str]] = None, active_wcs: typing.Optional[builtins.str] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Home all axes or the given axes.
-        """
-    def move_to(self, speed: builtins.float, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Absolute move in the machine's current coordinate frame.
-        """
-    def jog(self, speed: builtins.float, deltas: typing.Optional[typing.Sequence[tuple[builtins.str, builtins.float]]] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Relative jog by per-axis distances.
-        """
-    def select_tool(self, tool_number: builtins.int) -> collections.abc.Awaitable[None]:
-        r"""
-        Select a tool.
-        """
-    def set_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Set the laser/spindle power; `None` disables the tool.
-        """
-    def set_focus_power(self, power: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Set the laser power used while focusing.
-        """
-    def clear_alarm(self) -> collections.abc.Awaitable[None]:
-        r"""
-        Clear a device alarm.
-        """
-    def set_wcs_offset(self, wcs_slot: builtins.str, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
-        r"""
-        Write a work-coordinate-system offset.
-        """
-    def read_settings(self) -> collections.abc.Awaitable[builtins.list[tuple[builtins.str, builtins.str]]]:
-        r"""
-        Read the device's firmware settings.
-        """
-    def write_setting(self, key: builtins.str, value: builtins.str) -> collections.abc.Awaitable[None]:
-        r"""
-        Write one firmware setting.
-        """
-    def read_wcs_offsets(self) -> collections.abc.Awaitable[builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]]:
-        r"""
-        Read the work-coordinate-system offsets.
-        """
-    def read_parser_state(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Read the G-code parser state.
-        """
-    def run_probe_cycle(self, axis_letter: builtins.str, max_travel: builtins.float, feed_rate: builtins.float) -> collections.abc.Awaitable[typing.Optional[tuple[builtins.float, builtins.float, builtins.float]]]:
-        r"""
-        Run a probe cycle; `None` = no trigger reported.
-        """
-    def detect_unit_system(self) -> collections.abc.Awaitable[typing.Optional[builtins.str]]:
-        r"""
-        Detect the device's unit system (`"metric"` or
-        `"imperial"`), or `None` when unknown.
-        """
+    def __repr__(self) -> builtins.str: ...
 

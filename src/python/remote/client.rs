@@ -148,7 +148,7 @@ impl RemoteSession {
         ))]
         dialect: Option<Py<PyAny>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("typing", "collections.abc", "raydriver.core", "builtins")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -866,9 +866,9 @@ const REMOTE_KEYS: [&str; 6] = [
 
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[gen_stub(override_return_type(
-    type_repr = "typing.Union[RemoteSession, grbl.GrblSession, \
-                simple.GrblSimpleSession, smoothie.SmoothieSession, \
-                octoprint.OctoPrintSession, marlin.MarlinSession]",
+    type_repr = "typing.Union[RemoteSession, grbl.GrblSerialDriver, \
+                simple.GrblSerialSimpleDriver, smoothie.SmoothieDriver, \
+                octoprint.OctoPrintDriver, marlin.MarlinSerialDriver]",
     imports = (
         "typing",
         "raydriver.grbl",
@@ -893,7 +893,7 @@ pub(crate) fn create_session(
     ))]
     dialect: Option<Py<PyAny>>,
     #[gen_stub(override_type(
-        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
         imports = ("typing", "collections.abc", "raydriver.core", "builtins")
     ))]
     event_callback: Option<Py<PyAny>>,
@@ -970,7 +970,7 @@ pub(crate) fn open_session(
     ))]
     dialect: Option<Py<PyAny>>,
     #[gen_stub(override_type(
-        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
         imports = ("typing", "collections.abc", "raydriver.core", "builtins")
     ))]
     event_callback: Option<Py<PyAny>>,
@@ -1027,7 +1027,7 @@ pub(crate) fn list_devices<'py>(
 
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
-pub(crate) fn list_protocols<'py>(
+pub(crate) fn list_drivers<'py>(
     py: Python<'py>,
     #[gen_stub(override_type(
         type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
@@ -1038,7 +1038,7 @@ pub(crate) fn list_protocols<'py>(
     let endpoint = parse_endpoint(py, &endpoint)?;
     spawn_future(py, async move {
         let protocols =
-            core::list_protocols(&endpoint).await.map_err(connection)?;
+            core::list_drivers(&endpoint).await.map_err(connection)?;
         Python::attach(|py| {
             protocols
                 .iter()

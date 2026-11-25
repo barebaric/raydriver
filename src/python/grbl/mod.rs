@@ -1,9 +1,9 @@
-//! The `raydriver.grbl` Python submodule: GRBL sessions, transports
+//! The `raydriver.grbl` Python submodule: GRBL drivers, transports
 //! and value types.
 
+pub(crate) mod driver;
 pub(crate) mod parser;
 pub(crate) mod probe;
-pub(crate) mod session;
 pub(crate) mod simple;
 
 use pyo3::prelude::*;
@@ -11,13 +11,15 @@ use pyo3::prelude::*;
 pub(crate) const MODULE_DOC: &str = "\
 GRBL device drivers implemented in Rust.
 
-The central type is GrblSession: it owns the connection lifecycle \
-(handshake, status polling, reconnect), interactive commands, and \
-job streaming with character-counting flow control, stall detection \
-and deadlock recovery. GrblSimpleSession (raydriver.grbl.simple) is \
-the minimal alternative: strict ping-pong, for hardware where the \
-full driver misbehaves. Dialects remain data owned by Rayforge: \
-resolved command templates are passed into the session.
+GrblSerialDriver, GrblTelnetDriver, GrblBluetoothDriver and \
+GrblNetworkDriver each own a connection lifecycle (handshake, status \
+polling, reconnect), interactive commands, and job streaming with \
+character-counting flow control, stall detection and deadlock \
+recovery; they differ only in their transport. \
+GrblSerialSimpleDriver (raydriver.grbl.simple) is the minimal \
+alternative: strict ping-pong, for hardware where the full driver \
+misbehaves. Dialects remain data owned by the application: resolved \
+command templates are passed into the driver.
 ";
 
 pyo3_stub_gen::module_doc!("raydriver.grbl", "{}", MODULE_DOC);
@@ -27,9 +29,22 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let grbl_mod = PyModule::new(py, "grbl")?;
 
     grbl_mod.setattr("__doc__", MODULE_DOC)?;
-    grbl_mod.add("__all__", vec!["GrblSession", "parser", "probe"])?;
+    grbl_mod.add(
+        "__all__",
+        vec![
+            "GrblSerialDriver",
+            "GrblTelnetDriver",
+            "GrblBluetoothDriver",
+            "GrblNetworkDriver",
+            "parser",
+            "probe",
+        ],
+    )?;
 
-    grbl_mod.add_class::<session::PyGrblSession>()?;
+    grbl_mod.add_class::<driver::PyGrblSerialDriver>()?;
+    grbl_mod.add_class::<driver::PyGrblTelnetDriver>()?;
+    grbl_mod.add_class::<driver::PyGrblBluetoothDriver>()?;
+    grbl_mod.add_class::<driver::PyGrblNetworkDriver>()?;
 
     let simple_mod = PyModule::new(py, "simple")?;
     simple::register(&simple_mod)?;

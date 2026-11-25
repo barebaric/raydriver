@@ -35,7 +35,7 @@ from raydriver.analyzer.proxy import (
 )
 from raydriver.analyzer.replay import replay_capture
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblSerialDriver
 
 
 def _parse_endpoint(value: str) -> tuple[str, int]:
@@ -46,7 +46,7 @@ def _parse_endpoint(value: str) -> tuple[str, int]:
 
 
 def _open_recording_session(args, recorder):
-    """A GrblSession with the recorder attached, against the
+    """A GrblSerialDriver with the recorder attached, against the
     emulator or a serial port.  Returns (session, device_task,
     source label)."""
     config = {"poll_status_while_running": not args.no_poll}
@@ -55,7 +55,7 @@ def _open_recording_session(args, recorder):
 
         mock = MockTransport()
         emulator = GrblEmulator(mock, speed_factor=args.speed_factor)
-        session = GrblSession.with_transport(
+        session = GrblSerialDriver.with_transport(
             mock, config=config, dialect={}, event_callback=recorder
         )
         return (
@@ -63,7 +63,7 @@ def _open_recording_session(args, recorder):
             asyncio.ensure_future(emulator.run()),
             "emulated GRBL device",
         )
-    session = GrblSession(
+    session = GrblSerialDriver(
         config={
             "port": args.port,
             "baudrate": args.baudrate,

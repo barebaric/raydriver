@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 
 #: Host to device.
 TX = "tx"
@@ -161,7 +161,7 @@ class Capture:
 
 
 class Recorder:
-    """Session event callback that records traffic into a Capture.
+    """Driver event callback that records traffic into a Capture.
 
     Pass the recorder (it is callable) as the session's
     ``event_callback``; every ``RawTx``/``RawRx`` event becomes a
@@ -174,11 +174,11 @@ class Recorder:
         self.capture = capture if capture is not None else Capture()
         self.forward = forward
 
-    def __call__(self, event: SessionEvent) -> None:
+    def __call__(self, event: DriverEvent) -> None:
         match event:
-            case SessionEvent.RawTx(line=line):
+            case DriverEvent.RawTx(line=line):
                 self.capture.append(TX, text=line)
-            case SessionEvent.RawRx(line=line):
+            case DriverEvent.RawRx(line=line):
                 self.capture.append(RX, text=line)
         if self.forward is not None:
             self.forward(event)

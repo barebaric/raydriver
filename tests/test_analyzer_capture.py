@@ -1,7 +1,7 @@
 """Tests for raydriver.analyzer.capture."""
 
 from raydriver.analyzer.capture import Capture, Frame, Recorder
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 
 
 def test_frame_payload_roundtrip():
@@ -46,8 +46,8 @@ def test_capture_load_rejects_garbage(tmp_path):
 def test_recorder_records_raw_events_and_forwards():
     forwarded = []
     recorder = Recorder(forward=forwarded.append)
-    recorder(SessionEvent.RawTx("$I"))
-    recorder(SessionEvent.RawRx("ok"))
+    recorder(DriverEvent.RawTx("$I"))
+    recorder(DriverEvent.RawRx("ok"))
     directions = [f.direction for f in recorder.capture.frames]
     assert directions == ["tx", "rx"]
     assert recorder.capture.frames[0].text == "$I"

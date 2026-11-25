@@ -1,10 +1,9 @@
 """The remote RPC surface must match every hosted session class.
 
-The daemon validates method names from the protocol registry, then
-calls the Python session method with the client's arguments.  A
-signature mismatch therefore fails inside the daemon, not at the
-client.  These tests pin the uniform argument names and exercise two
-representative protocols end to end.
+The daemon calls the Python driver method with the client's
+arguments.  A signature mismatch therefore fails inside the daemon,
+not at the client.  These tests pin the uniform argument names and
+exercise two representative drivers end to end.
 """
 
 import asyncio
@@ -13,28 +12,27 @@ import inspect
 import pytest
 from conftest import DEFAULT_DIALECT, EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
-from raydriver.epilog import EpilogSession
-from raydriver.grbl import GrblSession
-from raydriver.grbl.simple import GrblSimpleSession
-from raydriver.marlin import MarlinSession
-from raydriver.octoprint import OctoPrintSession
-from raydriver.protocols import PROTOCOLS
+from raydriver.epilog import EpilogDriver
+from raydriver.grbl import GrblNetworkDriver, GrblSerialDriver
+from raydriver.grbl.simple import GrblSerialSimpleDriver
+from raydriver.marlin import MarlinSerialDriver
+from raydriver.octoprint import OctoPrintDriver
 from raydriver.remote.client import RemoteSession, create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 SESSIONS = {
-    "grbl": GrblSession,
-    "grbl_simple": GrblSimpleSession,
-    "esp3d": GrblSession,
-    "smoothie": SmoothieSession,
-    "marlin": MarlinSession,
-    "octoprint": OctoPrintSession,
-    "epilog": EpilogSession,
+    "GrblSerialDriver": GrblSerialDriver,
+    "GrblSerialSimpleDriver": GrblSerialSimpleDriver,
+    "GrblNetworkDriver": GrblNetworkDriver,
+    "SmoothieDriver": SmoothieDriver,
+    "MarlinSerialDriver": MarlinSerialDriver,
+    "OctoPrintDriver": OctoPrintDriver,
+    "EpilogDriver": EpilogDriver,
 }
 
 REMOTE_TIMINGS = {
@@ -46,7 +44,7 @@ REMOTE_TIMINGS = {
 }
 
 
-@pytest.mark.parametrize("protocol", sorted(PROTOCOLS))
+@pytest.mark.parametrize("protocol", sorted(SESSIONS))
 def test_hosted_sessions_accept_remote_arguments(protocol):
     """Every hostable session accepts the arguments the proxy sends."""
     cls = SESSIONS[protocol]
@@ -65,7 +63,7 @@ async def test_remote_home_smoothie():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(name, config, dialect, callback):
-        return SmoothieSession.with_transport(
+        return SmoothieDriver.with_transport(
             mock,
             config={**REMOTE_TIMINGS, **(config or {})},
             dialect={**DEFAULT_DIALECT, **(dialect or {})},
@@ -76,7 +74,7 @@ async def test_remote_home_smoothie():
         DaemonConfig(
             port=0,
             sessions=[
-                {"protocol": "smoothie", "config": {"port": "/dev/null"}}
+                {"protocol": "SmoothieDriver", "config": {"port": "/dev/null"}}
             ],
         ),
         session_factory=factory,
@@ -85,7 +83,7 @@ async def test_remote_home_smoothie():
     port = server.sockets[0].getsockname()[1]
     events = EventRecorder()
     session = create_session(
-        "smoothie",
+        "SmoothieDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         events.callback,
@@ -94,7 +92,7 @@ async def test_remote_home_smoothie():
     try:
         await asyncio.wait_for(session.connect(), timeout=5)
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
             timeout=5,
         )
@@ -146,7 +144,7 @@ async def test_remote_run_reports_job_errors():
     port = server.sockets[0].getsockname()[1]
     events = EventRecorder()
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         events.callback,
@@ -157,7 +155,7 @@ async def test_remote_run_reports_job_errors():
             await asyncio.wait_for(session.run("G1 X1\n", {0: 0}), timeout=5)
         assert "job exploded" in str(excinfo.value)
         await events.wait_for(
-            SessionEvent.JobError,
+            DriverEvent.JobError,
             lambda event: "job exploded" in event.message,
             timeout=5,
         )
@@ -196,7 +194,7 @@ async def test_daemon_reports_synchronous_session_errors():
     server = await daemon.start()
     port = server.sockets[0].getsockname()[1]
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         None,
@@ -241,7 +239,7 @@ async def test_daemon_preserves_timeout_error_kind():
     server = await daemon.start()
     port = server.sockets[0].getsockname()[1]
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         None,

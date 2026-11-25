@@ -29,13 +29,15 @@ from typing import Any
 
 from raydriver import service
 from raydriver.core import list_serial_ports
+from raydriver.driver import drivers
 from raydriver.paths import default_config_path
-from raydriver.protocols import PROTOCOLS
 from raydriver.remote import inspect as rins
 from raydriver.remote import mdns
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 DEFAULT_CONFIG_PATH = default_config_path()
+
+DRIVER_NAMES = {cls.__name__ for cls in drivers}
 
 OPENSSL_HINT = (
     "openssl req -x509 -newkey rsa:2048 -nodes "
@@ -96,10 +98,10 @@ def add_device(
 
     Creates the config with a generated token when none exists yet.
     """
-    if protocol_name not in PROTOCOLS:
+    if protocol_name not in DRIVER_NAMES:
         raise ValueError(
-            f"unknown protocol {protocol_name!r}; "
-            f"choose from {', '.join(sorted(PROTOCOLS))}"
+            f"unknown driver {protocol_name!r}; "
+            f"choose from {', '.join(sorted(DRIVER_NAMES))}"
         )
     lines = []
     if not path.exists():
@@ -270,9 +272,9 @@ def add_daemon_parser(subparsers) -> None:
     )
     parser.add_argument(
         "--protocol",
-        default="grbl",
-        choices=sorted(PROTOCOLS),
-        help="driver protocol for add (default: grbl)",
+        default="GrblSerialDriver",
+        choices=sorted(DRIVER_NAMES),
+        help="driver for add (default: GrblSerialDriver)",
     )
     parser.add_argument(
         "--baudrate",

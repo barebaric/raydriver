@@ -16,7 +16,7 @@ Submodules
 - raydriver.octoprint — OctoPrint server session
 - raydriver.xtool — xTool proprietary WiFi-API sessions
 - raydriver.remote — daemon and remote session proxy
-- raydriver.protocols — protocol registry metadata
+- raydriver.driver — the common Driver base class and driver list
 - raydriver.errors — exceptions shared by the analyzer and daemon
 """
 

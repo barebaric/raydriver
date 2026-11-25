@@ -6,10 +6,11 @@ import time
 
 import pytest
 
-from raydriver.core import SessionEvent
+from raydriver.config import Esp3dConfig
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.esp3d import Esp3dConfig, Esp3dSession
 from raydriver.esp3d.emulator import Esp3dEmulator
+from raydriver.grbl import GrblNetworkDriver
 
 FAST_CONFIG = {
     "host": "127.0.0.1",
@@ -67,7 +68,7 @@ class EventRecorder:
 
 def make_session(events, config=None, dialect=None):
     merged = {**FAST_CONFIG, **(config or {})}
-    return Esp3dSession(
+    return GrblNetworkDriver(
         config=Esp3dConfig(**merged),
         dialect={**DIALECT, **(dialect or {})},
         event_callback=events.callback,
@@ -100,7 +101,7 @@ async def rig(emulator, events):
     )
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     events.events.clear()
@@ -118,9 +119,7 @@ class TestConnection:
         )
 
     async def test_daemon_factory_builds_esp3d_session(self, emulator, events):
-        from raydriver.esp3d import Esp3dSession
-
-        session = Esp3dSession(
+        session = GrblNetworkDriver(
             config={
                 **FAST_CONFIG,
                 "http_port": emulator.http_port,
@@ -131,7 +130,7 @@ class TestConnection:
         )
         await session.connect()
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
         )
         assert session.resource_uri == (
@@ -146,7 +145,7 @@ class TestConnection:
         )
         await session.connect()
         event = await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: e.status == "ERROR",
         )
         assert event.message is not None
@@ -172,7 +171,7 @@ class TestCommands:
         session, emulator, events = rig
         emulator.broadcast("[MSG:hello]")
         await events.wait_for(
-            SessionEvent.RawRx, lambda e: e.line == "[MSG:hello]"
+            DriverEvent.RawRx, lambda e: e.line == "[MSG:hello]"
         )
 
 
@@ -181,7 +180,7 @@ class TestStateAndSettings:
         _, emulator, events = rig
         emulator.set_status("<Run|MPos:1.000,2.000,3.000|FS:100,0>")
         event = await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status == DeviceStatus.RUN,
         )
         assert list(event.state.machine_pos) == [1.0, 2.0, 3.0]
@@ -235,25 +234,25 @@ class TestJobs:
         assert emulator.uploaded == b"M17 S1\nG1 X10 F1000\nM5\n"
         assert emulator.started_files == ["rayforge.gcode"]
         assert progress == [0, 1, 2]
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
 
     async def test_run_raw_uploads_and_starts(self, rig):
         session, emulator, events = rig
         await asyncio.wait_for(session.run_raw("M5\n"), 5.0)
         assert emulator.uploaded == b"M5\n"
         assert emulator.started_files == ["rayforge.gcode"]
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
 
     async def test_cancel_sends_soft_reset(self, rig):
         session, emulator, events = rig
         emulator.job_duration = 5.0
         task = asyncio.ensure_future(session.run("M5\n"))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await session.cancel()
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert "\x18" in emulator.commands
         await asyncio.wait_for(task, 5.0)
 
@@ -263,6 +262,6 @@ class TestDisconnect:
         session, _, events = rig
         await session.disconnect()
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda e: e.status == "DISCONNECTED",
         )

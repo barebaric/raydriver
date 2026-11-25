@@ -25,7 +25,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     core_mod.add(
         "__all__",
         vec![
-            "SessionEvent",
+            "DriverEvent",
             "bluetooth",
             "discovery",
             "list_serial_ports",
@@ -33,7 +33,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
             "transport",
         ],
     )?;
-    core_mod.add_class::<crate::python::events::SessionEvent>()?;
+    core_mod.add_class::<crate::python::events::DriverEvent>()?;
     core_mod.add_function(wrap_pyfunction!(
         serial::list_serial_ports,
         &core_mod

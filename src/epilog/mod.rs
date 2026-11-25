@@ -46,4 +46,4 @@
 //! Jobs are handed to the session as the encoder's byte stream (see
 //! the `upload` extra rather than the G-code `run` path).
 
-pub mod session;
+pub mod driver;

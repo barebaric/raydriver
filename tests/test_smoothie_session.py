@@ -10,9 +10,9 @@ import asyncio
 import pytest
 from conftest import DEFAULT_DIALECT, sent_bytes, wait_until
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.smoothie import SmoothieSession
+from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 GCODE = "G1 X1 F1000\nG1 X2 F1000\nG1 X3 F1000\n"
@@ -35,7 +35,7 @@ def gcode_sends(mock):
 
 
 def make_smoothie_session(mock, events, config=None):
-    return SmoothieSession.with_transport(
+    return SmoothieDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -52,7 +52,7 @@ async def connect_scripted(mock, events):
     mock.push(STATUS)
     await connect_task
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
@@ -79,7 +79,7 @@ class TestStrictOrdering:
         mock.push(b"ok\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await session.disconnect()
 
     async def test_device_error_halts_stream(self, mock, events):
@@ -91,7 +91,7 @@ class TestStrictOrdering:
         mock.push(b"error:20\r\n")
 
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.2)
         assert len(gcode_sends(mock)) == 2
         assert session.state.error is not None
@@ -104,7 +104,7 @@ class TestStrictOrdering:
 
         await session.cancel()
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         sent = sent_bytes(mock)
         assert b"\x03" in sent
         assert b"M5\n" in sent
@@ -140,7 +140,7 @@ class TestStrictOrdering:
         await wait_until(lambda: len(gcode_sends(mock)) >= 3)
         mock.push(b"ok\r\n")
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await session.disconnect()
 
 
@@ -153,7 +153,7 @@ async def smoothie_rig(mock, events):
     session = make_smoothie_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
@@ -173,7 +173,7 @@ class TestEmulatorJobs:
     async def test_job_completes_and_moves(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
         await session.run("G1 X10 F6000\nG1 Y5 F6000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert emulator.mpos == pytest.approx([10.0, 5.0, 0.0])
 
@@ -188,7 +188,7 @@ class TestEmulatorJobs:
         text = "\n".join(f"G1 X{i % 50} F6000" for i in range(40))
         op_map = {**{i: 0 for i in range(20)}, 30: 1}
         await session.run(text, op_map, progress_callback=done.append)
-        await events.wait_for(SessionEvent.JobFinished, timeout=30)
+        await events.wait_for(DriverEvent.JobFinished, timeout=30)
         assert done == [0, 1]
 
     async def test_progress_survives_a_pending_drain(self, smoothie_rig):
@@ -224,18 +224,18 @@ class TestEmulatorJobs:
                 held.pop(0)()
                 await asyncio.sleep(0)
         await asyncio.wait_for(run_task, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert done == [0, 1]
 
     async def test_probe_queries(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
         version = await session.execute_interactive_command("version")
         assert version[0].startswith("Build version:")
-        assert version[-1] == "ok"
+        assert "ok" not in version
         alpha_max = await session.execute_interactive_command(
             "config-get alpha_max"
         )
-        assert alpha_max == ["200.0000", "ok"]
+        assert alpha_max == ["200.0000"]
 
     async def test_cancel_aborts_job(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
@@ -247,5 +247,11 @@ class TestEmulatorJobs:
 
         await session.cancel()
         await asyncio.wait_for(job, 5)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert b"\x03" in sent_bytes(mock)
+
+
+async def test_disconnect_resets_the_device_status(smoothie_rig):
+    session, mock, emulator, events = smoothie_rig
+    await session.disconnect()
+    assert session.state.status == DeviceStatus.UNKNOWN

@@ -8,13 +8,12 @@ import pytest
 import pytest_asyncio
 from conftest import EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
-from raydriver.grbl import GrblSession
+from raydriver.driver import driver_info, drivers
+from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.emulator import GrblEmulator
-from raydriver.protocols import PROTOCOLS, protocol_info
-from raydriver.remote import protocol
-from raydriver.remote.client import list_devices, list_protocols, open_session
+from raydriver.remote.client import list_devices, list_drivers, open_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
 
 FAST_TIMINGS = {
@@ -37,36 +36,38 @@ async def connect_and_wait(session, events, timeout=10.0):
     """
     await asyncio.wait_for(session.connect(), timeout=timeout)
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
         timeout=timeout,
     )
 
 
-def test_registry_capabilities():
-    grbl = protocol_info("grbl").capabilities
+def test_driver_capabilities():
+    grbl = driver_info("GrblSerialDriver").capabilities
     assert grbl["supports_probing"] is True
     assert grbl["supports_settings"] is True
     assert grbl["reports_buffer_stats"] is True
-    assert grbl["supports_clear_alarm"] is False
-    smoothie = protocol_info("smoothie").capabilities
-    assert smoothie["supports_probing"] is False
+    assert grbl["supports_clear_alarm"] is True
+    smoothie = driver_info("SmoothieDriver").capabilities
+    assert smoothie["supports_probing"] is True
     assert smoothie["supports_clear_alarm"] is True
     assert smoothie["supports_hold"] is True
-    marlin = protocol_info("marlin").capabilities
+    marlin = driver_info("MarlinSerialDriver").capabilities
     assert marlin["supports_hold"] is False
     assert marlin["supports_unit_detection"] is True
     assert marlin["supports_clear_alarm"] is True
     assert (
-        protocol_info("grbl_simple").capabilities["reports_buffer_stats"]
+        driver_info("GrblSerialSimpleDriver").capabilities[
+            "reports_buffer_stats"
+        ]
         is False
     )
-    for info in PROTOCOLS.values():
-        # A dialect family marks a G-code protocol; print-job devices
-        # (Epilog) carry none and must not claim G-code support.
-        assert info.capabilities["uses_gcode"] is bool(info.dialect_family)
-    assert protocol_info("epilog").capabilities["uses_gcode"] is False
-    assert protocol_info("grbl").capabilities["uses_gcode"] is True
+    for cls in drivers:
+        info = driver_info(cls.__name__)
+        assert info.name == cls.__name__
+        assert isinstance(info.capabilities["uses_gcode"], bool)
+    assert driver_info("EpilogDriver").capabilities["uses_gcode"] is False
+    assert driver_info("GrblSerialDriver").capabilities["uses_gcode"] is True
 
 
 @pytest_asyncio.fixture
@@ -76,7 +77,7 @@ async def rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(name, config, dialect, cb):
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
             dialect=dialect or {},
@@ -87,7 +88,10 @@ async def rig():
         DaemonConfig(
             port=0,
             sessions=[
-                {"protocol": "grbl", "config": {"port": "/dev/ttyUSB0"}}
+                {
+                    "protocol": "GrblSerialDriver",
+                    "config": {"port": "/dev/ttyUSB0"},
+                }
             ],
         ),
         session_factory=factory,
@@ -105,14 +109,14 @@ async def rig():
             pass
 
 
-async def test_protocol_list(rig):
+async def test_driver_list(rig):
     _, port = rig
-    protocols = await list_protocols(
+    infos = await list_drivers(
         {"remote_host": "127.0.0.1", "remote_port": port}
     )
-    assert {p["name"] for p in protocols} == set(PROTOCOLS)
-    grbl = next(p for p in protocols if p["name"] == "grbl")
-    assert grbl["label"] == "GRBL"
+    assert {p["name"] for p in infos} == {cls.__name__ for cls in drivers}
+    grbl = next(p for p in infos if p["name"] == "GrblSerialDriver")
+    assert grbl["connection"] == "serial"
     capabilities = grbl["capabilities"]
     assert isinstance(capabilities, dict)
     assert capabilities["supports_probing"] is True
@@ -125,8 +129,8 @@ async def test_device_list_includes_configured(rig):
     )
     assert len(devices) == 1
     assert devices[0]["device"] == "/dev/ttyUSB0"
-    assert devices[0]["protocol"] == "grbl"
-    assert devices[0]["label"] == "GRBL"
+    assert devices[0]["protocol"] == "GrblSerialDriver"
+    assert devices[0]["label"] == "GrblSerialDriver"
 
 
 async def test_open_by_device_resolves_protocol(rig):
@@ -141,9 +145,9 @@ async def test_open_by_device_resolves_protocol(rig):
     assert session.protocol is None
     try:
         await connect_and_wait(session, events)
-        assert session.protocol == "grbl"
+        assert session.protocol == "GrblSerialDriver"
         assert session.metadata is not None
-        assert session.metadata["dialect_family"] == "grbl"
+        assert session.metadata["name"] == "GrblSerialDriver"
         reply = await asyncio.wait_for(
             session.execute_interactive_command("$I"), timeout=10
         )
@@ -187,14 +191,14 @@ async def test_disconnect_releases_control_lease(rig):
 async def test_remote_jog_accepts_deltas(rig):
     # Jog deltas cross the wire as JSON lists; the daemon must restore
     # the tuples the Rust session expects.
-    from raydriver.core import SessionEvent
+    from raydriver.core import DriverEvent
 
     _, port = rig
     ready = asyncio.Event()
 
     def on_event(event):
         if (
-            isinstance(event, SessionEvent.ConnectionStatusChanged)
+            isinstance(event, DriverEvent.ConnectionStatusChanged)
             and event.status == "CONNECTED"
         ):
             ready.set()
@@ -222,7 +226,7 @@ async def test_open_by_url_endpoint(rig):
     )
     try:
         await asyncio.wait_for(session.connect(), timeout=10)
-        assert session.protocol == "grbl"
+        assert session.protocol == "GrblSerialDriver"
     finally:
         await session.disconnect()
 
@@ -233,7 +237,7 @@ async def test_open_unknown_device():
     def factory(name, config, dialect, cb):
         if config.get("port") != "/dev/ttyUSB0":
             raise OSError("no such port")
-        return GrblSession.with_transport(
+        return GrblSerialDriver.with_transport(
             MockTransport(),
             config={**FAST_TIMINGS, **(config or {})},
             dialect=dialect or {},
@@ -261,9 +265,11 @@ async def test_open_requires_device_or_session(rig):
         open_session({"remote_host": "127.0.0.1", "remote_port": port})
 
 
-async def test_per_protocol_method_validation(rig):
-    daemon, port = rig
-    # clear_alarm exists on Smoothie/Marlin, not GRBL: the daemon must
-    # reject it for a grbl session even though it is in the union.
-    assert "clear_alarm" not in protocol_info("grbl").methods
-    assert "clear_alarm" in protocol.SESSION_METHODS
+def test_driver_capabilities_are_typed():
+    # The daemon keeps no method-name table: GRBL simply does not
+    # claim alarm clearing, while Smoothie does.  Unsupported calls
+    # surface from the driver as NotImplementedError.
+    grbl = driver_info("GrblSerialDriver").capabilities
+    smoothie = driver_info("SmoothieDriver").capabilities
+    assert grbl["supports_clear_alarm"] is True
+    assert smoothie["supports_clear_alarm"] is True

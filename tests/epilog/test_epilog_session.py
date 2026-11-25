@@ -13,8 +13,8 @@ from contextlib import asynccontextmanager
 import pytest
 from conftest import EventRecorder
 
-from raydriver.core import SessionEvent
-from raydriver.epilog import EpilogSession
+from raydriver.core import DriverEvent
+from raydriver.epilog import EpilogDriver
 
 
 @asynccontextmanager
@@ -45,7 +45,7 @@ async def printer(handler):
 
 
 def make_session(port, events, **config):
-    return EpilogSession(
+    return EpilogDriver(
         config={"host": "127.0.0.1", "port": port, "timeout": 2.0, **config},
         event_callback=events.callback,
     )
@@ -207,7 +207,7 @@ async def test_connect_reports_reachable_machine():
         session = make_session(port, events)
         await session.connect()
         event = await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
         )
         assert "reachable" in (event.message or "")
@@ -224,7 +224,7 @@ async def test_connect_failure_reports_error():
     with pytest.raises((ConnectionError, TimeoutError)):
         await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "ERROR",
     )
     await session.disconnect()
@@ -257,13 +257,13 @@ async def test_machine_space_and_single_wcs():
         await session.disconnect()
 
 
-def test_registry_entry():
-    from raydriver.protocols import protocol_info
+def test_driver_info():
+    from raydriver.driver import driver_info
 
-    info = protocol_info("epilog")
-    assert info.label == "Epilog"
+    info = driver_info("EpilogDriver")
+    assert info.name == "EpilogDriver"
     assert info.connection == "network"
-    assert "upload" in info.methods
+    assert hasattr(EpilogDriver, "upload")
     assert info.capabilities["uses_gcode"] is False
 
 

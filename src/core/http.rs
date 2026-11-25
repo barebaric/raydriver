@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use crate::core::session::SessionError;
+use crate::core::driver::DriverError;
 
 /// A parsed HTTP response.
 #[derive(Debug)]
@@ -39,7 +39,7 @@ pub async fn get(
     port: u16,
     path: &str,
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     get_with_headers(host, port, path, &[], timeout).await
 }
 
@@ -50,7 +50,7 @@ pub async fn get_with_headers(
     path: &str,
     extra_headers: &[(&str, &str)],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     request(host, port, "GET", path, None, extra_headers, timeout).await
 }
 
@@ -62,7 +62,7 @@ pub async fn post(
     content_type: &str,
     body: &[u8],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     post_with_headers(host, port, path, content_type, body, &[], timeout).await
 }
 
@@ -76,7 +76,7 @@ pub async fn post_with_headers(
     body: &[u8],
     extra_headers: &[(&str, &str)],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     request(
         host,
         port,
@@ -99,7 +99,7 @@ pub async fn post_multipart(
     filename: &str,
     file: &[u8],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     post_multipart_fields(
         host,
         port,
@@ -128,7 +128,7 @@ pub async fn post_multipart_fields(
     fields: &[(&str, &str)],
     extra_headers: &[(&str, &str)],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     let boundary = multipart_boundary();
     let mut body = Vec::with_capacity(file.len() + 256);
     body.extend_from_slice(
@@ -192,11 +192,11 @@ async fn request(
     body: Option<(&str, &[u8])>,
     extra_headers: &[(&str, &str)],
     timeout: Duration,
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     tokio::time::timeout(timeout, async {
         let stream = crate::core::connector::dial(host, port)
             .await
-            .map_err(|e| SessionError::Connection(e.to_string()))?;
+            .map_err(|e| DriverError::Connection(e.to_string()))?;
         exchange(
             stream,
             &format!("{host}:{port}"),
@@ -206,10 +206,10 @@ async fn request(
             extra_headers,
         )
         .await
-        .map_err(|e| SessionError::Connection(e.to_string()))
+        .map_err(|e| DriverError::Connection(e.to_string()))
     })
     .await
-    .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
+    .map_err(|_| DriverError::Timeout("operation timed out".to_string()))?
 }
 
 /// Run a single HTTP exchange over an existing byte stream.
@@ -225,10 +225,10 @@ pub async fn request_on_stream<S: AsyncRead + AsyncWrite + Unpin>(
     path: &str,
     body: Option<(&str, &[u8])>,
     extra_headers: &[(&str, &str)],
-) -> Result<HttpResponse, SessionError> {
+) -> Result<HttpResponse, DriverError> {
     exchange(stream, host, method, path, body, extra_headers)
         .await
-        .map_err(|e| SessionError::Connection(e.to_string()))
+        .map_err(|e| DriverError::Connection(e.to_string()))
 }
 
 async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(

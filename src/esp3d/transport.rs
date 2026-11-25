@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
+use crate::core::driver::DriverError;
 use crate::core::http;
-use crate::core::session::SessionError;
 use crate::core::transport::{NetworkJobRunner, Transport, TransportError};
 use crate::core::ws::WsClient;
 
@@ -98,10 +98,7 @@ impl Esp3dTransport {
         })
     }
 
-    async fn get(
-        &self,
-        path: &str,
-    ) -> Result<http::HttpResponse, SessionError> {
+    async fn get(&self, path: &str) -> Result<http::HttpResponse, DriverError> {
         http::get(
             &self.config.host,
             self.config.http_port,
@@ -111,10 +108,10 @@ impl Esp3dTransport {
         .await
     }
 
-    async fn require_ok(&self, path: &str) -> Result<(), SessionError> {
+    async fn require_ok(&self, path: &str) -> Result<(), DriverError> {
         let response = self.get(path).await?;
         if !(200..300).contains(&response.status) {
-            return Err(SessionError::Connection(format!(
+            return Err(DriverError::Connection(format!(
                 "unexpected HTTP status {} for {path}",
                 response.status
             )));
@@ -122,7 +119,7 @@ impl Esp3dTransport {
         Ok(())
     }
 
-    async fn handshake(&self) -> Result<(), SessionError> {
+    async fn handshake(&self) -> Result<(), DriverError> {
         match self.config.protocol {
             ProtocolVariant::FluidNc => {
                 self.require_ok("/api/status").await?;
@@ -175,7 +172,7 @@ impl Esp3dTransport {
         (format!("multipart/form-data; boundary={boundary}"), body)
     }
 
-    async fn upload(&self, gcode: &str) -> Result<(), SessionError> {
+    async fn upload(&self, gcode: &str) -> Result<(), DriverError> {
         let (content_type, body) = self.upload_body(gcode);
         let response = http::post(
             &self.config.host,
@@ -187,7 +184,7 @@ impl Esp3dTransport {
         )
         .await?;
         if !(200..300).contains(&response.status) {
-            return Err(SessionError::Connection(format!(
+            return Err(DriverError::Connection(format!(
                 "unexpected HTTP status {} for upload",
                 response.status
             )));

@@ -11,7 +11,7 @@ from . import discovery
 from . import transport
 from . import types
 __all__ = [
-    "SessionEvent",
+    "DriverEvent",
     "bluetooth",
     "discovery",
     "list_serial_ports",
@@ -19,83 +19,83 @@ __all__ = [
     "types",
 ]
 
-class SessionEvent:
+class DriverEvent:
     r"""
     One typed session event, delivered to `event_callback`.
     """
     @typing.final
-    class StateChanged(SessionEvent):
+    class StateChanged(DriverEvent):
         __match_args__ = ("state",)
         @property
         def state(self) -> types.DeviceState: ...
-        def __new__(cls, state: types.DeviceState) -> SessionEvent.StateChanged: ...
+        def __new__(cls, state: types.DeviceState) -> DriverEvent.StateChanged: ...
     
     @typing.final
-    class ConnectionStatusChanged(SessionEvent):
+    class ConnectionStatusChanged(DriverEvent):
         __match_args__ = ("status", "message",)
         @property
         def status(self) -> builtins.str: ...
         @property
         def message(self) -> typing.Optional[builtins.str]: ...
-        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.ConnectionStatusChanged: ...
+        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> DriverEvent.ConnectionStatusChanged: ...
     
     @typing.final
-    class CommandStatusChanged(SessionEvent):
+    class CommandStatusChanged(DriverEvent):
         __match_args__ = ("status", "message",)
         @property
         def status(self) -> builtins.str: ...
         @property
         def message(self) -> typing.Optional[builtins.str]: ...
-        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> SessionEvent.CommandStatusChanged: ...
+        def __new__(cls, status: builtins.str, message: typing.Optional[builtins.str]) -> DriverEvent.CommandStatusChanged: ...
     
     @typing.final
-    class JobFinished(SessionEvent):
+    class JobFinished(DriverEvent):
         __match_args__ = ()
-        def __new__(cls) -> SessionEvent.JobFinished: ...
+        def __new__(cls) -> DriverEvent.JobFinished: ...
     
     @typing.final
-    class JobError(SessionEvent):
+    class JobError(DriverEvent):
         __match_args__ = ("message",)
         @property
         def message(self) -> builtins.str: ...
-        def __new__(cls, message: builtins.str) -> SessionEvent.JobError: ...
+        def __new__(cls, message: builtins.str) -> DriverEvent.JobError: ...
     
     @typing.final
-    class ProbeStatusChanged(SessionEvent):
+    class ProbeStatusChanged(DriverEvent):
         __match_args__ = ("message",)
         @property
         def message(self) -> builtins.str: ...
-        def __new__(cls, message: builtins.str) -> SessionEvent.ProbeStatusChanged: ...
+        def __new__(cls, message: builtins.str) -> DriverEvent.ProbeStatusChanged: ...
     
     @typing.final
-    class WcsUpdated(SessionEvent):
+    class WcsUpdated(DriverEvent):
         __match_args__ = ("offsets",)
         @property
         def offsets(self) -> builtins.dict[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]: ...
-        def __new__(cls, offsets: typing.Mapping[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]) -> SessionEvent.WcsUpdated: ...
+        def __new__(cls, offsets: typing.Mapping[builtins.str, tuple[builtins.float, builtins.float, builtins.float]]) -> DriverEvent.WcsUpdated: ...
     
     @typing.final
-    class ConfigChanged(SessionEvent):
+    class ConfigChanged(DriverEvent):
         __match_args__ = ("key", "value",)
         @property
         def key(self) -> builtins.str: ...
         @property
         def value(self) -> builtins.int: ...
-        def __new__(cls, key: builtins.str, value: builtins.int) -> SessionEvent.ConfigChanged: ...
+        def __new__(cls, key: builtins.str, value: builtins.int) -> DriverEvent.ConfigChanged: ...
     
     @typing.final
-    class RawRx(SessionEvent):
+    class RawRx(DriverEvent):
         __match_args__ = ("line",)
         @property
         def line(self) -> builtins.str: ...
-        def __new__(cls, line: builtins.str) -> SessionEvent.RawRx: ...
+        def __new__(cls, line: builtins.str) -> DriverEvent.RawRx: ...
     
     @typing.final
-    class RawTx(SessionEvent):
+    class RawTx(DriverEvent):
         __match_args__ = ("line",)
         @property
         def line(self) -> builtins.str: ...
-        def __new__(cls, line: builtins.str) -> SessionEvent.RawTx: ...
+        def __new__(cls, line: builtins.str) -> DriverEvent.RawTx: ...
     
     ...
 

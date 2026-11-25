@@ -6,7 +6,7 @@ sidebar_label: raydriver.core
 Shared device primitives: transports, value types and session events. The protocol namespaces
 (raydriver.grbl, raydriver.smoothie, raydriver.marlin) build on these.
 
-## SessionEvent
+## DriverEvent
 
 One typed session event, delivered to `event_callback`.
 

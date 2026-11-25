@@ -299,15 +299,9 @@ The mapping form expected by the session constructors; fields that are None are 
 | --------- | ------ | ----------- |
 | _Returns_ | `dict` |             |
 
-## GrblSerialConfig
+## GrblOptions
 
-GRBL serial session configuration.
-
-### `baudrate`
-
-```python
-baudrate: int
-```
+Timing and flow-control options shared by GRBL drivers.
 
 ### `cached_rx_buffer_size`
 
@@ -361,12 +355,6 @@ poll_response_interval: float
 
 ```python
 poll_status_while_running: bool
-```
-
-### `port`
-
-```python
-port: str
 ```
 
 ### `reconnect_delay`
@@ -435,9 +423,15 @@ The mapping form expected by the session constructors; fields that are None are 
 | --------- | ------ | ----------- |
 | _Returns_ | `dict` |             |
 
-## GrblSessionOptions
+## GrblSerialConfig
 
-Timing and flow-control options shared by GRBL sessions.
+GRBL serial session configuration.
+
+### `baudrate`
+
+```python
+baudrate: int
+```
 
 ### `cached_rx_buffer_size`
 
@@ -491,6 +485,12 @@ poll_response_interval: float
 
 ```python
 poll_status_while_running: bool
+```
+
+### `port`
+
+```python
+port: str
 ```
 
 ### `reconnect_delay`

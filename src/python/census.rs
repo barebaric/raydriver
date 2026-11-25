@@ -82,7 +82,11 @@ pub(crate) fn census_from_json(
     value: &Value,
 ) -> PyResult<DeviceCensus> {
     let any: Py<PyAny> = match protocol {
-        "grbl" | "grbl_simple" | "esp3d" => {
+        "GrblSerialDriver"
+        | "GrblTelnetDriver"
+        | "GrblBluetoothDriver"
+        | "GrblNetworkDriver"
+        | "GrblSerialSimpleDriver" => {
             let census =
                 crate::grbl::probe::GrblCensus::from_json(value.clone())
                     .map_err(|err| {
@@ -90,7 +94,7 @@ pub(crate) fn census_from_json(
                     })?;
             Py::new(py, GrblDeviceInfo { inner: census })?.into_any()
         }
-        "marlin" => {
+        "MarlinSerialDriver" => {
             let census =
                 crate::marlin::probe::MarlinCensus::from_json(value.clone())
                     .map_err(|err| {
@@ -98,7 +102,7 @@ pub(crate) fn census_from_json(
                     })?;
             Py::new(py, MarlinDeviceInfo { inner: census })?.into_any()
         }
-        "smoothie" => {
+        "SmoothieDriver" => {
             let census = crate::smoothie::probe::SmoothieCensus::from_json(
                 value.clone(),
             )
@@ -107,7 +111,7 @@ pub(crate) fn census_from_json(
             })?;
             Py::new(py, SmoothieDeviceInfo { inner: census })?.into_any()
         }
-        "octoprint" => {
+        "OctoPrintDriver" => {
             let census = crate::octoprint::probe::OctoPrintCensus::from_json(
                 value.clone(),
             )
@@ -118,7 +122,7 @@ pub(crate) fn census_from_json(
         }
         other => {
             return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                "unknown protocol {other:?}"
+                "unknown driver {other:?}"
             )));
         }
     };

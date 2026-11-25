@@ -262,7 +262,12 @@ impl Daemon {
         let inner = Arc::new(CoreDaemon::new(
             config.clone(),
             factory,
-            crate::python::protocols::protocol_registry(),
+            crate::core::remote::registry::Registry::new(
+                crate::driver::DriverKind::ALL
+                    .iter()
+                    .map(|kind| kind.info())
+                    .collect(),
+            ),
         ));
         Ok(Self { inner, config })
     }

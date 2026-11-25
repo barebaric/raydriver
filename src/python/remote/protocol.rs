@@ -12,7 +12,7 @@ use serde_json::Value;
 use crate::core::remote::protocol as core;
 use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState as PyDeviceState;
-use crate::python::events::SessionEvent;
+use crate::python::events::DriverEvent;
 use crate::python::pyfuture::{spawn_future, PyAwait};
 use crate::python::remote::bridge::{call_on_loop, py_to_json, running_loop};
 use crate::python::remote::events::{event_to_wire, wire_to_py_event};
@@ -369,7 +369,7 @@ pub(crate) fn decode_state(
 #[pyfunction]
 pub(crate) fn encode_event(
     py: Python<'_>,
-    event: PyRef<'_, SessionEvent>,
+    event: PyRef<'_, DriverEvent>,
 ) -> PyResult<JsonDict> {
     value_to_dict(py, &event_to_wire(&event).to_json())
 }
@@ -377,7 +377,7 @@ pub(crate) fn encode_event(
 /// Decodes an event frame payload; ``None`` when it is not an event.
 #[gen_stub_pyfunction(module = "raydriver.remote.protocol")]
 #[gen_stub(override_return_type(
-    type_repr = "typing.Optional[core.SessionEvent]",
+    type_repr = "typing.Optional[core.DriverEvent]",
     imports = ("typing", "raydriver.core")
 ))]
 #[pyfunction]
@@ -434,7 +434,7 @@ protocol_string!("AUTH", core::AUTH);
 protocol_string!("PING", core::PING);
 protocol_string!("PONG", core::PONG);
 protocol_string!("DEVICE_LIST", core::DEVICE_LIST);
-protocol_string!("PROTOCOL_LIST", core::PROTOCOL_LIST);
+protocol_string!("DRIVER_LIST", core::DRIVER_LIST);
 protocol_string!("SESSION_LIST", core::SESSION_LIST);
 protocol_string!("SESSION_OPEN", core::SESSION_OPEN);
 protocol_string!("SESSION_ATTACH", core::SESSION_ATTACH);
@@ -478,16 +478,6 @@ pyo3_stub_gen::module_variable!(
 );
 pyo3_stub_gen::module_variable!(
     "raydriver.remote.protocol",
-    "PROTOCOLS",
-    Vec<&'static str>
-);
-pyo3_stub_gen::module_variable!(
-    "raydriver.remote.protocol",
-    "SESSION_METHODS",
-    Vec<&'static str>
-);
-pyo3_stub_gen::module_variable!(
-    "raydriver.remote.protocol",
-    "SESSION_PROPERTIES",
+    "DRIVERS",
     Vec<&'static str>
 );

@@ -7,8 +7,8 @@ import asyncio
 import pytest
 from conftest import DEFAULT_DIALECT
 
-from raydriver.core import SessionEvent
-from raydriver.marlin import MarlinSession
+from raydriver.core import DriverEvent
+from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
 from raydriver.marlin.probe import MarlinDeviceInfo, describe
 
@@ -32,7 +32,7 @@ FULL_M503_LINES = [
 
 
 def make_marlin_session(mock, events, config=None):
-    return MarlinSession.with_transport(
+    return MarlinSerialDriver.with_transport(
         mock,
         config={**TIMINGS, **(config or {})},
         dialect=DEFAULT_DIALECT,
@@ -49,7 +49,7 @@ async def marlin_rig(mock, events):
     session = make_marlin_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
@@ -132,8 +132,8 @@ class TestProbeDevice:
         assert info.max_speed is None
         assert info.acceleration is None
 
-    async def test_probe_device_without_boot_lines(self, marlin_rig):
+    async def test_probe_device_uses_captured_boot_lines(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         info = await session.probe_device()
         assert info.name == "Marlin"
-        assert info.firmware_version == "Marlin"
+        assert info.firmware_version == "2.1.2"

@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 use crate::core::discovery::daemon::is_loopback;
+use crate::core::driver::DriverError;
 use crate::core::remote::protocol::{
     self, ProtocolError, WireError, WireEvent,
 };
@@ -26,7 +27,6 @@ use crate::core::remote::registry;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
-use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 
 pub const DEFAULT_PORT: u16 = 8765;
@@ -260,7 +260,7 @@ pub struct StartedServer {
     pub addr: SocketAddr,
 }
 
-/// Session host serving the remote control protocol.
+/// Driver host serving the remote control protocol.
 pub struct Daemon {
     config: Arc<Mutex<DaemonConfig>>,
     factory: Arc<dyn SessionFactory>,
@@ -583,7 +583,7 @@ impl Daemon {
         }
         let result = match type_ {
             protocol::DEVICE_LIST => self.device_list().await,
-            protocol::PROTOCOL_LIST => Ok(self.registry.protocols_payload()),
+            protocol::DRIVER_LIST => Ok(self.registry.drivers_payload()),
             protocol::SESSION_LIST => self.session_list().await,
             protocol::SESSION_OPEN => self.session_open(client, payload).await,
             protocol::SESSION_ATTACH => {
@@ -643,8 +643,8 @@ impl Daemon {
                 }
                 let label = self
                     .registry
-                    .protocol_info(protocol_name)
-                    .map(|info| info.label)
+                    .driver_info(protocol_name)
+                    .map(|info| info.name)
                     .unwrap_or_default();
                 devices.insert(
                     reference.clone(),
@@ -668,8 +668,8 @@ impl Daemon {
             }
             let label = self
                 .registry
-                .protocol_info(&host.protocol)
-                .map(|info| info.label)
+                .driver_info(&host.protocol)
+                .map(|info| info.name)
                 .unwrap_or_default();
             devices.insert(
                 reference.clone(),
@@ -775,7 +775,7 @@ impl Daemon {
             .unwrap_or_else(|| "watch".to_string());
         let metadata = self
             .registry
-            .protocol_info(&host.protocol)
+            .driver_info(&host.protocol)
             .map(|info| info.to_json())
             .unwrap_or(Value::Null);
         Ok(json!({
@@ -818,7 +818,7 @@ impl Daemon {
         let mut snapshot = host.snapshot();
         snapshot["metadata"] = self
             .registry
-            .protocol_info(&host.protocol)
+            .driver_info(&host.protocol)
             .map(|info| info.to_json())
             .unwrap_or(Value::Null);
         Ok(json!({"snapshot": snapshot}))
@@ -857,19 +857,6 @@ impl Daemon {
             .and_then(Value::as_str)
             .unwrap_or_default();
         let args = payload.get("args").cloned().unwrap_or_else(|| json!({}));
-        let info =
-            self.registry.protocol_info(&host.protocol).ok_or_else(|| {
-                ProtocolError::new(
-                    protocol::BAD_REQUEST,
-                    format!("unknown protocol {:?}", host.protocol),
-                )
-            })?;
-        if !info.methods.contains(method) {
-            return Err(ProtocolError::new(
-                protocol::UNKNOWN_METHOD,
-                format!("unknown method {method:?}"),
-            ));
-        }
         if method == "run" {
             return self.start_job(&host, args).await;
         }
@@ -895,19 +882,6 @@ impl Daemon {
             .get("name")
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let info =
-            self.registry.protocol_info(&host.protocol).ok_or_else(|| {
-                ProtocolError::new(
-                    protocol::BAD_REQUEST,
-                    format!("unknown protocol {:?}", host.protocol),
-                )
-            })?;
-        if !info.properties.contains(name) {
-            return Err(ProtocolError::new(
-                protocol::UNKNOWN_PROPERTY,
-                format!("unknown property {name:?}"),
-            ));
-        }
         let value = match name {
             "state" => protocol::encode_state(&host.session.state()),
             "job_running" => json!(host.session.job_running()),
@@ -1027,16 +1001,16 @@ impl Daemon {
         &self,
         reference: &str,
     ) -> Option<(String, Value, Value)> {
-        let candidates: Vec<(&str, &registry::ProbeFingerprint)> = self
-            .registry
-            .protocols()
-            .iter()
-            .filter_map(|info| {
-                info.probe
-                    .as_ref()
-                    .map(|fingerprint| (info.name, fingerprint))
-            })
-            .collect();
+        let candidates: Vec<(&str, &crate::core::driver::ProbeFingerprint)> =
+            self.registry
+                .drivers()
+                .iter()
+                .filter_map(|info| {
+                    info.fingerprint
+                        .as_ref()
+                        .map(|fingerprint| (info.name, fingerprint))
+                })
+                .collect();
         for (name, fingerprint) in candidates {
             let config = json!({
                 "port": reference,
@@ -1459,13 +1433,14 @@ fn tokens_equal(supplied: &str, expected: &str) -> bool {
     difference == 0
 }
 
-fn internal(err: SessionError) -> ProtocolError {
+fn internal(err: DriverError) -> ProtocolError {
     let kind = match err {
-        SessionError::Timeout(_) => "timeout",
-        SessionError::Connection(_) => "connection",
-        SessionError::Device(_) | SessionError::BufferStall(_) => "device",
-        SessionError::Unsupported(_) => "unsupported",
-        SessionError::Other(_) => "internal",
+        DriverError::Timeout(_) => "timeout",
+        DriverError::Connection(_) => "connection",
+        DriverError::Device(_) | DriverError::BufferStall(_) => "device",
+        DriverError::ResourceBusy { .. } => "connection",
+        DriverError::Unsupported(_) => "unsupported",
+        DriverError::Other(_) => "internal",
     };
     ProtocolError::new(protocol::INTERNAL, err.to_string()).with_kind(kind)
 }

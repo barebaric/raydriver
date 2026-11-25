@@ -10,7 +10,7 @@ from raydriver.core.bluetooth import (
     normalize_address,
 )
 from raydriver.core.discovery import device_key
-from raydriver.grbl import GrblSession
+from raydriver.grbl import GrblBluetoothDriver
 
 
 class TestAddress:
@@ -43,24 +43,28 @@ class TestConfig:
         assert "port" not in data
 
     def test_session_resource_uri(self):
-        session = GrblSession(
+        session = GrblBluetoothDriver(
             config=GrblBluetoothConfig(address="aa:bb:cc:dd:ee:ff")
         )
         assert session.resource_uri == "bt://AA:BB:CC:DD:EE:FF"
 
     def test_channel_default_is_one(self):
-        session = GrblSession(config={"address": "AA:BB:CC:DD:EE:FF"})
+        session = GrblBluetoothDriver(config={"address": "AA:BB:CC:DD:EE:FF"})
         assert session.resource_uri == "bt://AA:BB:CC:DD:EE:FF"
 
     def test_invalid_address_rejected(self):
         with pytest.raises(ValueError, match="address"):
-            GrblSession(config={"address": "not-an-address"})
+            GrblBluetoothDriver(config={"address": "not-an-address"})
 
     def test_invalid_channel_rejected(self):
         with pytest.raises(ValueError, match="channel"):
-            GrblSession(config={"address": "AA:BB:CC:DD:EE:FF", "channel": 0})
+            GrblBluetoothDriver(
+                config={"address": "AA:BB:CC:DD:EE:FF", "channel": 0}
+            )
         with pytest.raises(ValueError, match="channel"):
-            GrblSession(config={"address": "AA:BB:CC:DD:EE:FF", "channel": 31})
+            GrblBluetoothDriver(
+                config={"address": "AA:BB:CC:DD:EE:FF", "channel": 31}
+            )
 
 
 class TestEnumeration:
