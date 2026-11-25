@@ -33,6 +33,11 @@
 //! driver's "3D mode", `*b7MLT`), matching how the step's depth mode
 //! presents the image.  Rows are padded to a multiple of eight bytes
 //! with `0x80`.
+//!
+//! Vector output may run at 0 % power.  The pen-down moves then trace
+//! the outline without firing, which is how a beam-off frame is
+//! submitted; the first cut always emits its `YP` value (including
+//! `YP000`), so such a job cannot inherit the machine's panel power.
 
 use std::fmt::Write as _;
 
@@ -68,9 +73,6 @@ const TRAILING_PADDING_BYTES: usize = 4096;
 const PJL_START: &[u8] = b"\x1b%-12345X@PJL JOB NAME=";
 const PJL_ENTER_PCL: &[u8] = b"\x1bE@PJL ENTER LANGUAGE=PCL\r\n";
 const PJL_FOOTER: &[u8] = b"\x1bE\x1b%-12345X@PJL EOJ \r\n";
-
-/// Power percent below which a cutting move would not fire the beam.
-const MIN_BURN_PERCENT: u32 = 1;
 
 /// JSON-serialised job configuration.
 ///
@@ -158,7 +160,9 @@ impl Encoder for EpilogSpec {
 /// Power, speed and frequency last written to the job.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct MachineSettings {
-    power_percent: u32,
+    /// `None` until the first cut sets it, so even a 0 % job emits
+    /// its `YP` value instead of inheriting the panel setting.
+    power_percent: Option<u32>,
     /// `None` until the first cutting feed rate sets it.
     speed_percent: Option<u32>,
     frequency: i32,
@@ -167,7 +171,7 @@ struct MachineSettings {
 impl MachineSettings {
     fn new(frequency: i32) -> Self {
         Self {
-            power_percent: 0,
+            power_percent: None,
             speed_percent: None,
             frequency,
         }
@@ -494,16 +498,8 @@ impl<'a> JobEncoder<'a> {
             ));
         }
 
-        // A cutting move at effectively zero power would travel as a
-        // pen-up move, silently dropping the line the user asked to
-        // cut; refuse it instead, consistent with rejecting a job that
-        // has no powered paths at all.
-        if cut && power < MIN_BURN_PERCENT {
-            return Err(format!(
-                "Epilog cannot cut at {power} % power; the machine's \
-                 smallest step is 1 %"
-            ));
-        }
+        // A 0 % cut is a beam-off outline trace, so the pen-down move
+        // is emitted at `YP000` rather than refused.
         let burning = cut;
         if burning {
             self.has_cut = true;
@@ -523,10 +519,10 @@ impl<'a> JobEncoder<'a> {
     }
 
     fn write_power(&mut self, percent: u32) {
-        if percent == self.settings.power_percent {
+        if self.settings.power_percent == Some(percent) {
             return;
         }
-        self.settings.power_percent = percent;
+        self.settings.power_percent = Some(percent);
         self.emit(format!("YP{percent:03};").as_bytes());
     }
 

@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from raygeo.cnc.execution.specs import ComputePayload, EncodeSpec
 from raygeo.geo import Geometry
+from raygeo.ops import Ops
 from raygeo.ops.assembly import Assembler
 from raygeo.ops.assembly.contour import ContourSpec
 from raygeo.ops.assembly.raster import RasterSpec
@@ -182,9 +183,10 @@ def test_op_map_covers_every_op():
     assert spans[3][1] >= 1
 
 
-def test_zero_power_job_is_rejected():
-    """A cut at 0 % would travel as a pen-up move, silently dropping
-    the line, so it is refused instead."""
+def test_zero_power_job_is_allowed():
+    """A cut at 0 % is a beam-off outline trace.  The job must set the
+    power explicitly before the first pen-down move so it cannot
+    inherit the machine's panel power."""
     clear_cache()
     src = NodeRequest(
         key="src",
@@ -204,8 +206,20 @@ def test_zero_power_job_is_rejected():
         ),
     )
     node = _collect([src, enc])["enc"]
-    assert node.error is not None
-    assert "0 % power" in node.error
+    assert node.error is None
+    assert isinstance(node.output, EncodeOutput)
+    text = _text(node.output)
+    assert "PD" in text
+    assert text.index("YP000;") < text.index("PD")
+
+
+def test_job_without_powered_paths_is_rejected():
+    """Moves alone do not form a job; the machine needs at least one
+    cut or raster row to have something to execute."""
+    ops = Ops()
+    ops.move_to(10.0, 10.0, 0.0)
+    with pytest.raises(Exception, match="no powered paths"):
+        ops.encode(Encoder(EpilogSpec(_ctx())))
 
 
 def test_power_mode_op_is_accepted():
