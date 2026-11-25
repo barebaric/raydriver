@@ -209,19 +209,27 @@ impl OctoPrintDriver {
     }
 
     fn set_status(&self, status: DeviceStatus) {
-        let mut state = self.state.lock().unwrap();
-        if state.status != status {
+        let snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.status == status {
+                return;
+            }
             state.status = status;
-            let state = state.clone();
-            self.events.state_changed(&state);
-        }
+            state.clone()
+        };
+        // Emit outside the lock: event delivery attaches to the
+        // Python GIL and must never run while holding a lock that
+        // Python-side code could take.
+        self.events.state_changed(&snapshot);
     }
 
     fn set_error(&self, error: Option<DeviceError>) {
-        let mut state = self.state.lock().unwrap();
-        state.error = error;
-        let state = state.clone();
-        self.events.state_changed(&state);
+        let snapshot = {
+            let mut state = self.state.lock().unwrap();
+            state.error = error;
+            state.clone()
+        };
+        self.events.state_changed(&snapshot);
     }
 
     // ---------------------------------------------------------------

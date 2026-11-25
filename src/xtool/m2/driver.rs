@@ -258,18 +258,21 @@ impl XtoolM2Driver {
     }
 
     fn apply_coordinate(&self, coordinate: &Value) {
-        let mut state = self.state.lock().unwrap();
-        let values = ["x", "y", "z"]
-            .map(|key| coordinate.get(key).and_then(Value::as_f64))
-            .to_vec();
-        if values.iter().all(Option::is_none) {
-            return;
-        }
-        if state.machine_pos == values {
-            return;
-        }
-        state.machine_pos = values;
-        self.events.state_changed(&state);
+        let snapshot = {
+            let mut state = self.state.lock().unwrap();
+            let values = ["x", "y", "z"]
+                .map(|key| coordinate.get(key).and_then(Value::as_f64))
+                .to_vec();
+            if values.iter().all(Option::is_none) {
+                return;
+            }
+            if state.machine_pos == values {
+                return;
+            }
+            state.machine_pos = values;
+            state.clone()
+        };
+        self.events.state_changed(&snapshot);
     }
 
     async fn current_connection(
@@ -629,17 +632,21 @@ impl M2Connection {
         } else if url == "/v1/platform/device/alarm"
             && payload.as_array().is_some_and(|alarms| !alarms.is_empty())
         {
-            let mut state = self.state.lock().unwrap();
-            if state.status == DeviceStatus::Alarm && state.error.is_some() {
-                return;
-            }
-            state.status = DeviceStatus::Alarm;
-            state.error = Some(DeviceError::new(
-                -1,
-                "M2 alarm",
-                "Check the machine status in xTool Studio.",
-            ));
-            self.events.state_changed(&state);
+            let snapshot = {
+                let mut state = self.state.lock().unwrap();
+                if state.status == DeviceStatus::Alarm && state.error.is_some()
+                {
+                    return;
+                }
+                state.status = DeviceStatus::Alarm;
+                state.error = Some(DeviceError::new(
+                    -1,
+                    "M2 alarm",
+                    "Check the machine status in xTool Studio.",
+                ));
+                state.clone()
+            };
+            self.events.state_changed(&snapshot);
         }
     }
 

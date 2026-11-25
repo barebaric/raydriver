@@ -138,6 +138,21 @@ class TestConnection:
         auth = json.loads(emulator.ws_messages[0])
         assert auth == {"auth": "rayforge:emulator-session-key"}
 
+    async def test_state_getter_stays_responsive_during_pushes(self, rig):
+        # Polling the PyO3 state getter while an event is delivered
+        # must not deadlock on the GIL/state lock pair.
+        session, emulator, _events = rig
+        await wait_until(lambda: emulator.ws_messages)
+        emulator.set_state_text(
+            "Printing",
+            operational=True,
+            printing=True,
+        )
+        await wait_until(
+            lambda: session.state.status.name == "RUN",
+            timeout=2.0,
+        )
+
     async def test_state_updates_from_raw_json_frame(self, rig):
         session, emulator, _events = rig
         await wait_until(lambda: emulator.ws_messages)
