@@ -15,6 +15,7 @@ from raydriver.core.transport import MockTransport
 from raydriver.driver import Driver, driver_info, drivers, get_driver_cls
 from raydriver.epilog import EpilogDriver
 from raydriver.octoprint import OctoPrintDriver
+from raydriver.ruida import RuidaDriver
 from raydriver.simulator import NoDeviceDriver
 from raydriver.xtool import XtoolNetworkDriver
 from raydriver.xtool.m2 import XtoolM2Driver
@@ -25,6 +26,7 @@ NETWORK_DRIVERS = {
     XtoolNetworkDriver,
     XtoolM2Driver,
     EpilogDriver,
+    RuidaDriver,
 }
 
 

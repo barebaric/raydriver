@@ -37,10 +37,7 @@ const END_JOB_BYTES: usize = 5;
 pub enum CodecError {
     UnknownMnemonic(String),
     UnknownMemory(String),
-    BadParam {
-        mnemonic: String,
-        value: String,
-    },
+    BadParam { mnemonic: String, value: String },
     BadScript(String),
 }
 
@@ -234,9 +231,8 @@ fn strip_line_comment(line: &str) -> String {
 
 /// Encodes one command to raw (unswizzled) bytes.
 pub fn encode_command(command: &Command) -> Result<Vec<u8>, CodecError> {
-    let def = lookup(&command.mnemonic).ok_or_else(|| {
-        CodecError::UnknownMnemonic(command.mnemonic.clone())
-    })?;
+    let def = lookup(&command.mnemonic)
+        .ok_or_else(|| CodecError::UnknownMnemonic(command.mnemonic.clone()))?;
     let mut raw = def.header();
     for (param, token) in def.params.iter().zip(&command.params) {
         raw.extend(encode_param(*param, token).ok_or_else(|| {
@@ -305,24 +301,24 @@ fn encode_param(param: Param, token: &str) -> Option<Vec<u8>> {
         }
         Param::Power => {
             let percent = parse_float(strip_suffix(value, "%"))?;
-            from_uint(round_half_even(percent * 16384.0 / 100.0).max(0) as u64, 2)
+            from_uint(
+                round_half_even(percent * 16384.0 / 100.0).max(0) as u64,
+                2,
+            )
         }
         Param::Frequency => {
-            let value = parse_float(strip_suffixes(value, &[
-                "KHz", "khz", "kHz",
-            ]))?;
+            let value =
+                parse_float(strip_suffixes(value, &["KHz", "khz", "kHz"]))?;
             from_int(round_half_even(value * 1000.0), 5)
         }
         Param::Speed => {
-            let value = parse_float(strip_suffixes(value, &[
-                "mm/S", "mm/s", "MM/S",
-            ]))?;
+            let value =
+                parse_float(strip_suffixes(value, &["mm/S", "mm/s", "MM/S"]))?;
             from_int(round_half_even(value * 1000.0), 5)
         }
         Param::Time => {
-            let value = parse_float(strip_suffixes(value, &[
-                "mS", "ms", "MS",
-            ]))?;
+            let value =
+                parse_float(strip_suffixes(value, &["mS", "ms", "MS"]))?;
             from_int(round_half_even(value * 1000.0), 5)
         }
         Param::CString => {
@@ -356,8 +352,7 @@ fn split_value(token: &str) -> &str {
 
 fn strip_label(value: &str) -> &str {
     match value.split_once(':') {
-        Some((label, rest)) if !label.is_empty() =>
-        {
+        Some((label, rest)) if !label.is_empty() => {
             if label.chars().all(|ch| ch.is_ascii_alphabetic()) {
                 return rest.trim_start();
             }
@@ -458,7 +453,7 @@ fn parse_card_id(value: &str) -> Option<u64> {
 
 fn encode_memory(value: &str) -> Option<Vec<u8>> {
     let address = match memory_address(value) {
-        Some(address) => u16::from(address),
+        Some(address) => address,
         None => {
             let number = parse_int(value)?;
             u16::try_from(number).ok()?
@@ -472,12 +467,18 @@ fn encode_string8(value: &str) -> Option<Vec<u8>> {
     let source = value.as_bytes();
     let length = source.len().min(8);
     bytes[..length].copy_from_slice(&source[..length]);
-    let mut out = from_uint(u64::from_be_bytes([
-        0, 0, 0, 0, bytes[0], bytes[1], bytes[2], bytes[3],
-    ]), 5);
-    out.extend(from_uint(u64::from_be_bytes([
-        0, 0, 0, 0, bytes[4], bytes[5], bytes[6], bytes[7],
-    ]), 5));
+    let mut out = from_uint(
+        u64::from_be_bytes([
+            0, 0, 0, 0, bytes[0], bytes[1], bytes[2], bytes[3],
+        ]),
+        5,
+    );
+    out.extend(from_uint(
+        u64::from_be_bytes([
+            0, 0, 0, 0, bytes[4], bytes[5], bytes[6], bytes[7],
+        ]),
+        5,
+    ));
     Some(out)
 }
 
@@ -538,10 +539,24 @@ pub fn to_uint(bytes: &[u8]) -> u64 {
 /// Reads ``n`` 7-bit bytes as a signed integer, including the
 /// LightBurn sign-extension workaround.
 pub fn to_int(bytes: &[u8]) -> i64 {
-    let mut value = to_uint(bytes) as i64;
-    if !bytes.is_empty() && (bytes[0] & 0x40) != 0 {
-        let bits = bytes.len() * 7;
-        value -= 1 << (bits - 1);
+    let Some(first) = bytes.first().copied() else {
+        return 0;
+    };
+    let mut first = first;
+    if bytes.len() == 5 && first & 0x40 == 0 && first & 0x08 != 0 {
+        first |= 0x70;
+    }
+    let mut value = 0i64;
+    for (index, byte) in bytes.iter().enumerate() {
+        let mut data = byte & 0x7F;
+        if index == 0 {
+            data = first & 0x3F;
+        }
+        value = (value << 7) | i64::from(data);
+    }
+    if first & 0x40 != 0 {
+        let mask = (1i64 << (bytes.len() * 7 - 1)) - 1;
+        value = -((!value & mask) + 1);
     }
     value
 }
@@ -572,7 +587,9 @@ pub fn swizzle(data: &[u8], magic: u8) -> Vec<u8> {
 
 /// Unswizzles a byte slice.
 pub fn unswizzle(data: &[u8], magic: u8) -> Vec<u8> {
-    data.iter().map(|byte| unswizzle_byte(*byte, magic)).collect()
+    data.iter()
+        .map(|byte| unswizzle_byte(*byte, magic))
+        .collect()
 }
 
 /// Builds the table that maps a raw single-byte reply to the magic
@@ -594,9 +611,7 @@ pub fn package(payload: &[u8], magic: u8, udp: bool) -> Vec<u8> {
     }
     let checksum: u16 = swizzled
         .iter()
-        .fold(0u16, |sum, byte| {
-            sum.wrapping_add(u16::from(*byte))
-        });
+        .fold(0u16, |sum, byte| sum.wrapping_add(u16::from(*byte)));
     let mut packet = Vec::with_capacity(swizzled.len() + 2);
     packet.push((checksum >> 8) as u8);
     packet.push((checksum & 0xFF) as u8);
@@ -669,178 +684,1210 @@ pub fn set_setting(address: u16, a: u64, b: u64) -> Vec<u8> {
 }
 
 pub(crate) static COMMANDS: &[CommandDef] = &[
-    CommandDef { mnemonic: "ADD_CUT_DELAY", prefix: 0xC6, mid: Some(0x11), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "AIR_ASSIST_OFF", prefix: 0xCA, mid: Some(0x01), inner: Some(0x12), params: &[] },
-    CommandDef { mnemonic: "AIR_ASSIST_ON", prefix: 0xCA, mid: Some(0x01), inner: Some(0x13), params: &[] },
-    CommandDef { mnemonic: "ARRAY_ADD", prefix: 0xE7, mid: Some(0x23), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ARRAY_BOTTOM_LEFT", prefix: 0xE7, mid: Some(0x17), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ARRAY_COPIES", prefix: 0xE7, mid: Some(0x08), inner: None, params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ARRAY_DIRECTION", prefix: 0xE7, mid: Some(0x05), inner: None, params: &[Param::Int7] },
-    CommandDef { mnemonic: "ARRAY_END", prefix: 0xEB, mid: None, inner: None, params: &[] },
-    CommandDef { mnemonic: "ARRAY_EN_MIRROR_CUT", prefix: 0xE7, mid: Some(0x0B), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ARRAY_EVEN_DISTANCE", prefix: 0xE7, mid: Some(0x37), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ARRAY_MIRROR", prefix: 0xE7, mid: Some(0x24), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ARRAY_START", prefix: 0xEA, mid: None, inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ARRAY_TOP_RIGHT", prefix: 0xE7, mid: Some(0x13), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "BLOCK_END", prefix: 0xE7, mid: Some(0x00), inner: None, params: &[] },
-    CommandDef { mnemonic: "BLOCK_X_SIZE", prefix: 0xE7, mid: Some(0x35), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "CALCULATE_DOCUMENT_TIME", prefix: 0xE8, mid: Some(0x04), inner: None, params: &[] },
-    CommandDef { mnemonic: "CUT_FAR_XY", prefix: 0xA8, mid: None, inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "CUT_NEAR_X", prefix: 0xAA, mid: None, inner: None, params: &[Param::Dim14] },
-    CommandDef { mnemonic: "CUT_NEAR_XY", prefix: 0xA9, mid: None, inner: None, params: &[Param::Dim14, Param::Dim14] },
-    CommandDef { mnemonic: "CUT_NEAR_Y", prefix: 0xAB, mid: None, inner: None, params: &[Param::Dim14] },
-    CommandDef { mnemonic: "CUT_PIERCE", prefix: 0xC6, mid: Some(0x10), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "CUT_SPEED_LASER_1", prefix: 0xC9, mid: Some(0x04), inner: None, params: &[Param::Int7, Param::Speed] },
-    CommandDef { mnemonic: "DB_HEAD", prefix: 0xCA, mid: Some(0x01), inner: Some(0x14), params: &[] },
-    CommandDef { mnemonic: "DEFAULT_COLOR", prefix: 0xCA, mid: Some(0x05), inner: None, params: &[Param::Color] },
-    CommandDef { mnemonic: "DELETE_DOCUMENT", prefix: 0xE8, mid: Some(0x00), inner: None, params: &[Param::Uint35, Param::Uint35] },
-    CommandDef { mnemonic: "DISPLAY_OFFSET", prefix: 0xF1, mid: Some(0x03), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "DOCUMENT_BOTTOM_LEFT", prefix: 0xE7, mid: Some(0x51), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "DOCUMENT_FILE_END", prefix: 0xE5, mid: Some(0x02), inner: None, params: &[] },
-    CommandDef { mnemonic: "DOCUMENT_FILE_UPLOAD", prefix: 0xE5, mid: Some(0x00), inner: None, params: &[Param::Uint14, Param::Uint35, Param::Uint35] },
-    CommandDef { mnemonic: "DOCUMENT_NUMBER", prefix: 0xE8, mid: Some(0x01), inner: None, params: &[Param::Uint14] },
-    CommandDef { mnemonic: "DOCUMENT_TOP_RIGHT", prefix: 0xE7, mid: Some(0x50), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ELEMENT_ARRAY_ADD", prefix: 0xF2, mid: Some(0x06), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ELEMENT_ARRAY_BOTTOM_LEFT", prefix: 0xF2, mid: Some(0x04), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ELEMENT_ARRAY_MIRROR", prefix: 0xF2, mid: Some(0x07), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ELEMENT_ARRAY_TOP_RIGHT", prefix: 0xF2, mid: Some(0x03), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ELEMENT_COPIES", prefix: 0xF2, mid: Some(0x05), inner: None, params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "ELEMENT_INDEX", prefix: 0xF2, mid: Some(0x00), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ELEMENT_MAX_INDEX", prefix: 0xF1, mid: Some(0x00), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ELEMENT_NAME", prefix: 0xF2, mid: Some(0x02), inner: None, params: &[Param::String8] },
-    CommandDef { mnemonic: "ELEMENT_NAME_INDEX", prefix: 0xF2, mid: Some(0x01), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ELEMENT_NAME_MAX_INDEX", prefix: 0xF1, mid: Some(0x01), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "ENABLE_BLOCK_CUTTING", prefix: 0xF1, mid: Some(0x02), inner: None, params: &[Param::Bool] },
-    CommandDef { mnemonic: "END_JOB", prefix: 0xE5, mid: Some(0x05), inner: None, params: &[Param::Uint35] },
-    CommandDef { mnemonic: "END_POWER_1", prefix: 0xC8, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "END_POWER_2", prefix: 0xC1, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "END_POWER_3", prefix: 0xC3, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "END_POWER_4", prefix: 0xC5, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "ENQ", prefix: 0xCE, mid: None, inner: None, params: &[] },
-    CommandDef { mnemonic: "EN_EX_IO", prefix: 0xCA, mid: Some(0x10), inner: None, params: &[Param::Int7] },
-    CommandDef { mnemonic: "EN_LASER_2_OFFSET_0", prefix: 0xCA, mid: Some(0x01), inner: Some(0x30), params: &[] },
-    CommandDef { mnemonic: "EN_LASER_2_OFFSET_1", prefix: 0xCA, mid: Some(0x01), inner: Some(0x31), params: &[] },
-    CommandDef { mnemonic: "EN_LASER_TUBE_START", prefix: 0xCA, mid: Some(0x03), inner: None, params: &[Param::Bool] },
-    CommandDef { mnemonic: "EOF", prefix: 0xD7, mid: None, inner: None, params: &[] },
-    CommandDef { mnemonic: "FEED_AUTO_CALC", prefix: 0xF1, mid: Some(0x04), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "FEED_INFO", prefix: 0xE7, mid: Some(0x0A), inner: None, params: &[Param::Int35] },
-    CommandDef { mnemonic: "FEED_LENGTH", prefix: 0xE7, mid: Some(0x09), inner: None, params: &[Param::Int35] },
-    CommandDef { mnemonic: "FEED_REPEAT", prefix: 0xE7, mid: Some(0x06), inner: None, params: &[Param::Uint35, Param::Uint35] },
-    CommandDef { mnemonic: "FILE_TRANSFER", prefix: 0xE8, mid: Some(0x02), inner: None, params: &[] },
-    CommandDef { mnemonic: "FOCUS_Z", prefix: 0xD8, mid: Some(0x2E), inner: None, params: &[] },
-    CommandDef { mnemonic: "FORCE_ENG_SPEED", prefix: 0xC9, mid: Some(0x05), inner: None, params: &[Param::Speed] },
-    CommandDef { mnemonic: "GET_SETTING", prefix: 0xDA, mid: Some(0x00), inner: None, params: &[Param::Memory] },
-    CommandDef { mnemonic: "GET_UNKNOWN", prefix: 0xDA, mid: Some(0x05), inner: None, params: &[Param::Index, Param::Uint35] },
-    CommandDef { mnemonic: "HOME_U", prefix: 0xD8, mid: Some(0x2D), inner: None, params: &[] },
-    CommandDef { mnemonic: "HOME_XY", prefix: 0xD8, mid: Some(0x2A), inner: None, params: &[] },
-    CommandDef { mnemonic: "HOME_Z", prefix: 0xD8, mid: Some(0x2C), inner: None, params: &[] },
-    CommandDef { mnemonic: "IMD_POWER_1", prefix: 0xC7, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "IMD_POWER_2", prefix: 0xC0, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "IMD_POWER_3", prefix: 0xC2, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "IMD_POWER_4", prefix: 0xC4, mid: None, inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "JOB_BOTTOM_LEFT", prefix: 0xE7, mid: Some(0x07), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "JOB_COPIES", prefix: 0xE7, mid: Some(0x04), inner: None, params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "JOB_TOP_RIGHT", prefix: 0xE7, mid: Some(0x03), inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_FEED_AXIS", prefix: 0xD9, mid: Some(0x0F), inner: None, params: &[Param::Rel] },
-    CommandDef { mnemonic: "JOG_U", prefix: 0xD9, mid: Some(0x03), inner: None, params: &[Param::Rel, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_X", prefix: 0xD9, mid: Some(0x00), inner: None, params: &[Param::Rel, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_XY", prefix: 0xD9, mid: Some(0x10), inner: None, params: &[Param::Rel, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_XYU", prefix: 0xD9, mid: Some(0x30), inner: None, params: &[Param::Rel, Param::Dim35, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_Y", prefix: 0xD9, mid: Some(0x01), inner: None, params: &[Param::Rel, Param::Dim35] },
-    CommandDef { mnemonic: "JOG_Z", prefix: 0xD9, mid: Some(0x02), inner: None, params: &[Param::Rel, Param::Dim35] },
-    CommandDef { mnemonic: "KEYDOWN_U_BACKWARDS", prefix: 0xD8, mid: Some(0x27), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_U_FORWARD", prefix: 0xD8, mid: Some(0x26), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_X_LEFT", prefix: 0xD8, mid: Some(0x20), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_X_RIGHT", prefix: 0xD8, mid: Some(0x21), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_Y_BOTTOM", prefix: 0xD8, mid: Some(0x23), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_Y_TOP", prefix: 0xD8, mid: Some(0x22), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_Z_DOWN", prefix: 0xD8, mid: Some(0x25), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYDOWN_Z_UP", prefix: 0xD8, mid: Some(0x24), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_LEFT", prefix: 0xD8, mid: Some(0x30), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_RIGHT", prefix: 0xD8, mid: Some(0x31), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_U_BACKWARDS", prefix: 0xD8, mid: Some(0x37), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_U_FORWARD", prefix: 0xD8, mid: Some(0x36), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_Y_BOTTOM", prefix: 0xD8, mid: Some(0x33), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_Y_TOP", prefix: 0xD8, mid: Some(0x32), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_Z_DOWN", prefix: 0xD8, mid: Some(0x35), inner: None, params: &[] },
-    CommandDef { mnemonic: "KEYUP_Z_UP", prefix: 0xD8, mid: Some(0x34), inner: None, params: &[] },
-    CommandDef { mnemonic: "LASER_DEVICE_0", prefix: 0xCA, mid: Some(0x01), inner: Some(0x10), params: &[] },
-    CommandDef { mnemonic: "LASER_DEVICE_1", prefix: 0xCA, mid: Some(0x01), inner: Some(0x11), params: &[] },
-    CommandDef { mnemonic: "LASER_OFF_DELAY", prefix: 0xC6, mid: Some(0x13), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "LASER_OFF_DELAY2", prefix: 0xC6, mid: Some(0x16), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "LASER_ON_DELAY", prefix: 0xC6, mid: Some(0x12), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "LASER_ON_DELAY2", prefix: 0xC6, mid: Some(0x15), inner: None, params: &[Param::Time] },
-    CommandDef { mnemonic: "LAST_LAYER", prefix: 0xCA, mid: Some(0x22), inner: None, params: &[Param::Int7] },
-    CommandDef { mnemonic: "LAYER_ATTRIBUTES", prefix: 0xCA, mid: Some(0x41), inner: None, params: &[Param::Int7, Param::Uint7] },
-    CommandDef { mnemonic: "LAYER_BOTTOM_LEFT", prefix: 0xE7, mid: Some(0x53), inner: None, params: &[Param::Int7, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "LAYER_COLOR", prefix: 0xCA, mid: Some(0x06), inner: None, params: &[Param::Int7, Param::Color] },
-    CommandDef { mnemonic: "LAYER_EX_BOTTOM_LEFT", prefix: 0xE7, mid: Some(0x62), inner: None, params: &[Param::Int7, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "LAYER_EX_TOP_RIGHT", prefix: 0xE7, mid: Some(0x61), inner: None, params: &[Param::Int7, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "LAYER_FREQUENCY", prefix: 0xC6, mid: Some(0x60), inner: None, params: &[Param::Int7, Param::Int7, Param::Frequency] },
-    CommandDef { mnemonic: "LAYER_MAX_POWER_1", prefix: 0xC6, mid: Some(0x32), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MAX_POWER_2", prefix: 0xC6, mid: Some(0x42), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MAX_POWER_3", prefix: 0xC6, mid: Some(0x36), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MAX_POWER_4", prefix: 0xC6, mid: Some(0x38), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MIN_POWER_1", prefix: 0xC6, mid: Some(0x31), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MIN_POWER_2", prefix: 0xC6, mid: Some(0x41), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MIN_POWER_3", prefix: 0xC6, mid: Some(0x35), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_MIN_POWER_4", prefix: 0xC6, mid: Some(0x37), inner: None, params: &[Param::Int7, Param::Power] },
-    CommandDef { mnemonic: "LAYER_OFFSET_AXIS", prefix: 0xE7, mid: Some(0x55), inner: None, params: &[Param::Axis, Param::Dim35] },
-    CommandDef { mnemonic: "LAYER_TOP_RIGHT", prefix: 0xE7, mid: Some(0x52), inner: None, params: &[Param::Int7, Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "MAX_POWER_1", prefix: 0xC6, mid: Some(0x02), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MAX_POWER_2", prefix: 0xC6, mid: Some(0x22), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MAX_POWER_3", prefix: 0xC6, mid: Some(0x06), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MAX_POWER_4", prefix: 0xC6, mid: Some(0x08), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MIN_POWER_1", prefix: 0xC6, mid: Some(0x01), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MIN_POWER_2", prefix: 0xC6, mid: Some(0x21), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MIN_POWER_3", prefix: 0xC6, mid: Some(0x05), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MIN_POWER_4", prefix: 0xC6, mid: Some(0x07), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "MOVE_FAR_A", prefix: 0xA0, mid: Some(0x00), inner: None, params: &[Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_FAR_U", prefix: 0xA0, mid: Some(0x08), inner: None, params: &[Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_FAR_X", prefix: 0x80, mid: Some(0x00), inner: None, params: &[Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_FAR_XY", prefix: 0x88, mid: None, inner: None, params: &[Param::Dim35, Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_FAR_Y", prefix: 0x80, mid: Some(0x01), inner: None, params: &[Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_FAR_Z", prefix: 0x80, mid: Some(0x03), inner: None, params: &[Param::Dim35] },
-    CommandDef { mnemonic: "MOVE_NEAR_X", prefix: 0x8A, mid: None, inner: None, params: &[Param::Dim14] },
-    CommandDef { mnemonic: "MOVE_NEAR_XY", prefix: 0x89, mid: None, inner: None, params: &[Param::Dim14, Param::Dim14] },
-    CommandDef { mnemonic: "MOVE_NEAR_Y", prefix: 0x8B, mid: None, inner: None, params: &[Param::Dim14] },
-    CommandDef { mnemonic: "OVERSCAN_5", prefix: 0xCA, mid: Some(0x01), inner: Some(0x55), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_DIAGONAL", prefix: 0xCA, mid: Some(0x01), inner: Some(0x05), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_H_BI", prefix: 0xCA, mid: Some(0x01), inner: Some(0x01), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_H_UNI", prefix: 0xCA, mid: Some(0x01), inner: Some(0x02), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_OFF", prefix: 0xCA, mid: Some(0x01), inner: Some(0x00), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_V_BI", prefix: 0xCA, mid: Some(0x01), inner: Some(0x03), params: &[] },
-    CommandDef { mnemonic: "OVERSCAN_V_UNI", prefix: 0xCA, mid: Some(0x01), inner: Some(0x04), params: &[] },
-    CommandDef { mnemonic: "PAUSE_JOB", prefix: 0xD8, mid: Some(0x02), inner: None, params: &[] },
-    CommandDef { mnemonic: "PEN_OFFSET_AXIS", prefix: 0xE7, mid: Some(0x54), inner: None, params: &[Param::Axis, Param::Dim35] },
-    CommandDef { mnemonic: "REF_POINT_CURRENT", prefix: 0xD8, mid: Some(0x12), inner: None, params: &[] },
-    CommandDef { mnemonic: "REF_POINT_MACHINE", prefix: 0xD8, mid: Some(0x10), inner: None, params: &[] },
-    CommandDef { mnemonic: "REF_POINT_ORIGIN", prefix: 0xD8, mid: Some(0x11), inner: None, params: &[] },
-    CommandDef { mnemonic: "REF_POINT_SET", prefix: 0xF0, mid: None, inner: None, params: &[] },
-    CommandDef { mnemonic: "RESUME_JOB", prefix: 0xD8, mid: Some(0x03), inner: None, params: &[] },
-    CommandDef { mnemonic: "SELECT_DOCUMENT", prefix: 0xE8, mid: Some(0x03), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "SELECT_LAYER", prefix: 0xCA, mid: Some(0x02), inner: None, params: &[Param::Int7] },
-    CommandDef { mnemonic: "SET_ABSOLUTE", prefix: 0xE6, mid: Some(0x01), inner: None, params: &[] },
-    CommandDef { mnemonic: "SET_CURRENT_ELEMENT_INDEX", prefix: 0xE7, mid: Some(0x60), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "SET_FEED_AUTO_PAUSE", prefix: 0xE7, mid: Some(0x38), inner: None, params: &[Param::Bool] },
-    CommandDef { mnemonic: "SET_FILE_EMPTY", prefix: 0xE7, mid: Some(0x36), inner: None, params: &[Param::Uint7] },
-    CommandDef { mnemonic: "SET_FILE_NAME", prefix: 0xE7, mid: Some(0x01), inner: None, params: &[Param::CString] },
-    CommandDef { mnemonic: "SET_SETTING", prefix: 0xDA, mid: Some(0x01), inner: None, params: &[Param::Memory, Param::Uint35, Param::Uint35] },
-    CommandDef { mnemonic: "SKIP", prefix: 0xD0, mid: Some(0x29), inner: None, params: &[] },
-    CommandDef { mnemonic: "SPEED_AXIS", prefix: 0xC9, mid: Some(0x03), inner: None, params: &[Param::Speed] },
-    CommandDef { mnemonic: "SPEED_AXIS_MOVE", prefix: 0xC9, mid: Some(0x06), inner: None, params: &[Param::Speed] },
-    CommandDef { mnemonic: "SPEED_LASER_1", prefix: 0xC9, mid: Some(0x02), inner: None, params: &[Param::Speed] },
-    CommandDef { mnemonic: "START_JOB", prefix: 0xD8, mid: Some(0x00), inner: None, params: &[] },
-    CommandDef { mnemonic: "STOP_JOB", prefix: 0xD8, mid: Some(0x01), inner: None, params: &[] },
-    CommandDef { mnemonic: "THROUGH_POWER_1", prefix: 0xC6, mid: Some(0x50), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "THROUGH_POWER_2", prefix: 0xC6, mid: Some(0x51), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "THROUGH_POWER_3", prefix: 0xC6, mid: Some(0x55), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "THROUGH_POWER_4", prefix: 0xC6, mid: Some(0x56), inner: None, params: &[Param::Power] },
-    CommandDef { mnemonic: "UNION_BLOCK_PROPERTY", prefix: 0xE7, mid: Some(0x3A), inner: None, params: &[] },
-    CommandDef { mnemonic: "UNKNOWN_E732", prefix: 0xE7, mid: Some(0x32), inner: None, params: &[Param::Uint35, Param::Uint35] },
-    CommandDef { mnemonic: "U_FILE_ID", prefix: 0xCA, mid: Some(0x30), inner: None, params: &[Param::Uint14] },
-    CommandDef { mnemonic: "X_SIGN_MAP", prefix: 0xCA, mid: Some(0x04), inner: None, params: &[Param::Int7] },
-    CommandDef { mnemonic: "ZU_MAP", prefix: 0xCA, mid: Some(0x40), inner: None, params: &[Param::Int7] },
+    CommandDef {
+        mnemonic: "ADD_CUT_DELAY",
+        prefix: 0xC6,
+        mid: Some(0x11),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "AIR_ASSIST_OFF",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x12),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "AIR_ASSIST_ON",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x13),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_ADD",
+        prefix: 0xE7,
+        mid: Some(0x23),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_BOTTOM_LEFT",
+        prefix: 0xE7,
+        mid: Some(0x17),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_COPIES",
+        prefix: 0xE7,
+        mid: Some(0x08),
+        inner: None,
+        params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_DIRECTION",
+        prefix: 0xE7,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Int7],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_END",
+        prefix: 0xEB,
+        mid: None,
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_EN_MIRROR_CUT",
+        prefix: 0xE7,
+        mid: Some(0x0B),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_EVEN_DISTANCE",
+        prefix: 0xE7,
+        mid: Some(0x37),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_MIRROR",
+        prefix: 0xE7,
+        mid: Some(0x24),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_START",
+        prefix: 0xEA,
+        mid: None,
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ARRAY_TOP_RIGHT",
+        prefix: 0xE7,
+        mid: Some(0x13),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "BLOCK_END",
+        prefix: 0xE7,
+        mid: Some(0x00),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "BLOCK_X_SIZE",
+        prefix: 0xE7,
+        mid: Some(0x35),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "CALCULATE_DOCUMENT_TIME",
+        prefix: 0xE8,
+        mid: Some(0x04),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "CUT_FAR_XY",
+        prefix: 0xA8,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "CUT_NEAR_X",
+        prefix: 0xAA,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "CUT_NEAR_XY",
+        prefix: 0xA9,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14, Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "CUT_NEAR_Y",
+        prefix: 0xAB,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "CUT_PIERCE",
+        prefix: 0xC6,
+        mid: Some(0x10),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "CUT_SPEED_LASER_1",
+        prefix: 0xC9,
+        mid: Some(0x04),
+        inner: None,
+        params: &[Param::Int7, Param::Speed],
+    },
+    CommandDef {
+        mnemonic: "DB_HEAD",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x14),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "DEFAULT_COLOR",
+        prefix: 0xCA,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Color],
+    },
+    CommandDef {
+        mnemonic: "DELETE_DOCUMENT",
+        prefix: 0xE8,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Uint35, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "DISPLAY_OFFSET",
+        prefix: 0xF1,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "DOCUMENT_BOTTOM_LEFT",
+        prefix: 0xE7,
+        mid: Some(0x51),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "DOCUMENT_FILE_END",
+        prefix: 0xE5,
+        mid: Some(0x02),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "DOCUMENT_FILE_UPLOAD",
+        prefix: 0xE5,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Uint14, Param::Uint35, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "DOCUMENT_NUMBER",
+        prefix: 0xE8,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Uint14],
+    },
+    CommandDef {
+        mnemonic: "DOCUMENT_TOP_RIGHT",
+        prefix: 0xE7,
+        mid: Some(0x50),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_ARRAY_ADD",
+        prefix: 0xF2,
+        mid: Some(0x06),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_ARRAY_BOTTOM_LEFT",
+        prefix: 0xF2,
+        mid: Some(0x04),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_ARRAY_MIRROR",
+        prefix: 0xF2,
+        mid: Some(0x07),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_ARRAY_TOP_RIGHT",
+        prefix: 0xF2,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_COPIES",
+        prefix: 0xF2,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_INDEX",
+        prefix: 0xF2,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_MAX_INDEX",
+        prefix: 0xF1,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_NAME",
+        prefix: 0xF2,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::String8],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_NAME_INDEX",
+        prefix: 0xF2,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ELEMENT_NAME_MAX_INDEX",
+        prefix: 0xF1,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "ENABLE_BLOCK_CUTTING",
+        prefix: 0xF1,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Bool],
+    },
+    CommandDef {
+        mnemonic: "END_JOB",
+        prefix: 0xE5,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "END_POWER_1",
+        prefix: 0xC8,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "END_POWER_2",
+        prefix: 0xC1,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "END_POWER_3",
+        prefix: 0xC3,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "END_POWER_4",
+        prefix: 0xC5,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "ENQ",
+        prefix: 0xCE,
+        mid: None,
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "EN_EX_IO",
+        prefix: 0xCA,
+        mid: Some(0x10),
+        inner: None,
+        params: &[Param::Int7],
+    },
+    CommandDef {
+        mnemonic: "EN_LASER_2_OFFSET_0",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x30),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "EN_LASER_2_OFFSET_1",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x31),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "EN_LASER_TUBE_START",
+        prefix: 0xCA,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Bool],
+    },
+    CommandDef {
+        mnemonic: "EOF",
+        prefix: 0xD7,
+        mid: None,
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "FEED_AUTO_CALC",
+        prefix: 0xF1,
+        mid: Some(0x04),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "FEED_INFO",
+        prefix: 0xE7,
+        mid: Some(0x0A),
+        inner: None,
+        params: &[Param::Int35],
+    },
+    CommandDef {
+        mnemonic: "FEED_LENGTH",
+        prefix: 0xE7,
+        mid: Some(0x09),
+        inner: None,
+        params: &[Param::Int35],
+    },
+    CommandDef {
+        mnemonic: "FEED_REPEAT",
+        prefix: 0xE7,
+        mid: Some(0x06),
+        inner: None,
+        params: &[Param::Uint35, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "FILE_TRANSFER",
+        prefix: 0xE8,
+        mid: Some(0x02),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "FOCUS_Z",
+        prefix: 0xD8,
+        mid: Some(0x2E),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "FORCE_ENG_SPEED",
+        prefix: 0xC9,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Speed],
+    },
+    CommandDef {
+        mnemonic: "GET_SETTING",
+        prefix: 0xDA,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Memory],
+    },
+    CommandDef {
+        mnemonic: "GET_UNKNOWN",
+        prefix: 0xDA,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Index, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "HOME_U",
+        prefix: 0xD8,
+        mid: Some(0x2D),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "HOME_XY",
+        prefix: 0xD8,
+        mid: Some(0x2A),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "HOME_Z",
+        prefix: 0xD8,
+        mid: Some(0x2C),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "IMD_POWER_1",
+        prefix: 0xC7,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "IMD_POWER_2",
+        prefix: 0xC0,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "IMD_POWER_3",
+        prefix: 0xC2,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "IMD_POWER_4",
+        prefix: 0xC4,
+        mid: None,
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "JOB_BOTTOM_LEFT",
+        prefix: 0xE7,
+        mid: Some(0x07),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOB_COPIES",
+        prefix: 0xE7,
+        mid: Some(0x04),
+        inner: None,
+        params: &[Param::Uint14, Param::Uint14, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOB_TOP_RIGHT",
+        prefix: 0xE7,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_FEED_AXIS",
+        prefix: 0xD9,
+        mid: Some(0x0F),
+        inner: None,
+        params: &[Param::Rel],
+    },
+    CommandDef {
+        mnemonic: "JOG_U",
+        prefix: 0xD9,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_X",
+        prefix: 0xD9,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_XY",
+        prefix: 0xD9,
+        mid: Some(0x10),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_XYU",
+        prefix: 0xD9,
+        mid: Some(0x30),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_Y",
+        prefix: 0xD9,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "JOG_Z",
+        prefix: 0xD9,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Rel, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_U_BACKWARDS",
+        prefix: 0xD8,
+        mid: Some(0x27),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_U_FORWARD",
+        prefix: 0xD8,
+        mid: Some(0x26),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_X_LEFT",
+        prefix: 0xD8,
+        mid: Some(0x20),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_X_RIGHT",
+        prefix: 0xD8,
+        mid: Some(0x21),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_Y_BOTTOM",
+        prefix: 0xD8,
+        mid: Some(0x23),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_Y_TOP",
+        prefix: 0xD8,
+        mid: Some(0x22),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_Z_DOWN",
+        prefix: 0xD8,
+        mid: Some(0x25),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYDOWN_Z_UP",
+        prefix: 0xD8,
+        mid: Some(0x24),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_LEFT",
+        prefix: 0xD8,
+        mid: Some(0x30),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_RIGHT",
+        prefix: 0xD8,
+        mid: Some(0x31),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_U_BACKWARDS",
+        prefix: 0xD8,
+        mid: Some(0x37),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_U_FORWARD",
+        prefix: 0xD8,
+        mid: Some(0x36),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_Y_BOTTOM",
+        prefix: 0xD8,
+        mid: Some(0x33),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_Y_TOP",
+        prefix: 0xD8,
+        mid: Some(0x32),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_Z_DOWN",
+        prefix: 0xD8,
+        mid: Some(0x35),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "KEYUP_Z_UP",
+        prefix: 0xD8,
+        mid: Some(0x34),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "LASER_DEVICE_0",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x10),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "LASER_DEVICE_1",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x11),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "LASER_OFF_DELAY",
+        prefix: 0xC6,
+        mid: Some(0x13),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "LASER_OFF_DELAY2",
+        prefix: 0xC6,
+        mid: Some(0x16),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "LASER_ON_DELAY",
+        prefix: 0xC6,
+        mid: Some(0x12),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "LASER_ON_DELAY2",
+        prefix: 0xC6,
+        mid: Some(0x15),
+        inner: None,
+        params: &[Param::Time],
+    },
+    CommandDef {
+        mnemonic: "LAST_LAYER",
+        prefix: 0xCA,
+        mid: Some(0x22),
+        inner: None,
+        params: &[Param::Int7],
+    },
+    CommandDef {
+        mnemonic: "LAYER_ATTRIBUTES",
+        prefix: 0xCA,
+        mid: Some(0x41),
+        inner: None,
+        params: &[Param::Int7, Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "LAYER_BOTTOM_LEFT",
+        prefix: 0xE7,
+        mid: Some(0x53),
+        inner: None,
+        params: &[Param::Int7, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "LAYER_COLOR",
+        prefix: 0xCA,
+        mid: Some(0x06),
+        inner: None,
+        params: &[Param::Int7, Param::Color],
+    },
+    CommandDef {
+        mnemonic: "LAYER_EX_BOTTOM_LEFT",
+        prefix: 0xE7,
+        mid: Some(0x62),
+        inner: None,
+        params: &[Param::Int7, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "LAYER_EX_TOP_RIGHT",
+        prefix: 0xE7,
+        mid: Some(0x61),
+        inner: None,
+        params: &[Param::Int7, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "LAYER_FREQUENCY",
+        prefix: 0xC6,
+        mid: Some(0x60),
+        inner: None,
+        params: &[Param::Int7, Param::Int7, Param::Frequency],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MAX_POWER_1",
+        prefix: 0xC6,
+        mid: Some(0x32),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MAX_POWER_2",
+        prefix: 0xC6,
+        mid: Some(0x42),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MAX_POWER_3",
+        prefix: 0xC6,
+        mid: Some(0x36),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MAX_POWER_4",
+        prefix: 0xC6,
+        mid: Some(0x38),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MIN_POWER_1",
+        prefix: 0xC6,
+        mid: Some(0x31),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MIN_POWER_2",
+        prefix: 0xC6,
+        mid: Some(0x41),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MIN_POWER_3",
+        prefix: 0xC6,
+        mid: Some(0x35),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_MIN_POWER_4",
+        prefix: 0xC6,
+        mid: Some(0x37),
+        inner: None,
+        params: &[Param::Int7, Param::Power],
+    },
+    CommandDef {
+        mnemonic: "LAYER_OFFSET_AXIS",
+        prefix: 0xE7,
+        mid: Some(0x55),
+        inner: None,
+        params: &[Param::Axis, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "LAYER_TOP_RIGHT",
+        prefix: 0xE7,
+        mid: Some(0x52),
+        inner: None,
+        params: &[Param::Int7, Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MAX_POWER_1",
+        prefix: 0xC6,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MAX_POWER_2",
+        prefix: 0xC6,
+        mid: Some(0x22),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MAX_POWER_3",
+        prefix: 0xC6,
+        mid: Some(0x06),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MAX_POWER_4",
+        prefix: 0xC6,
+        mid: Some(0x08),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MIN_POWER_1",
+        prefix: 0xC6,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MIN_POWER_2",
+        prefix: 0xC6,
+        mid: Some(0x21),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MIN_POWER_3",
+        prefix: 0xC6,
+        mid: Some(0x05),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MIN_POWER_4",
+        prefix: 0xC6,
+        mid: Some(0x07),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_A",
+        prefix: 0xA0,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_U",
+        prefix: 0xA0,
+        mid: Some(0x08),
+        inner: None,
+        params: &[Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_X",
+        prefix: 0x80,
+        mid: Some(0x00),
+        inner: None,
+        params: &[Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_XY",
+        prefix: 0x88,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim35, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_Y",
+        prefix: 0x80,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_FAR_Z",
+        prefix: 0x80,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "MOVE_NEAR_X",
+        prefix: 0x8A,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "MOVE_NEAR_XY",
+        prefix: 0x89,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14, Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "MOVE_NEAR_Y",
+        prefix: 0x8B,
+        mid: None,
+        inner: None,
+        params: &[Param::Dim14],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_5",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x55),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_DIAGONAL",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x05),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_H_BI",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x01),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_H_UNI",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x02),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_OFF",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x00),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_V_BI",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x03),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "OVERSCAN_V_UNI",
+        prefix: 0xCA,
+        mid: Some(0x01),
+        inner: Some(0x04),
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "PAUSE_JOB",
+        prefix: 0xD8,
+        mid: Some(0x02),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "PEN_OFFSET_AXIS",
+        prefix: 0xE7,
+        mid: Some(0x54),
+        inner: None,
+        params: &[Param::Axis, Param::Dim35],
+    },
+    CommandDef {
+        mnemonic: "REF_POINT_CURRENT",
+        prefix: 0xD8,
+        mid: Some(0x12),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "REF_POINT_MACHINE",
+        prefix: 0xD8,
+        mid: Some(0x10),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "REF_POINT_ORIGIN",
+        prefix: 0xD8,
+        mid: Some(0x11),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "REF_POINT_SET",
+        prefix: 0xF0,
+        mid: None,
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "RESUME_JOB",
+        prefix: 0xD8,
+        mid: Some(0x03),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "SELECT_DOCUMENT",
+        prefix: 0xE8,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "SELECT_LAYER",
+        prefix: 0xCA,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Int7],
+    },
+    CommandDef {
+        mnemonic: "SET_ABSOLUTE",
+        prefix: 0xE6,
+        mid: Some(0x01),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "SET_CURRENT_ELEMENT_INDEX",
+        prefix: 0xE7,
+        mid: Some(0x60),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "SET_FEED_AUTO_PAUSE",
+        prefix: 0xE7,
+        mid: Some(0x38),
+        inner: None,
+        params: &[Param::Bool],
+    },
+    CommandDef {
+        mnemonic: "SET_FILE_EMPTY",
+        prefix: 0xE7,
+        mid: Some(0x36),
+        inner: None,
+        params: &[Param::Uint7],
+    },
+    CommandDef {
+        mnemonic: "SET_FILE_NAME",
+        prefix: 0xE7,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::CString],
+    },
+    CommandDef {
+        mnemonic: "SET_SETTING",
+        prefix: 0xDA,
+        mid: Some(0x01),
+        inner: None,
+        params: &[Param::Memory, Param::Uint35, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "SKIP",
+        prefix: 0xD0,
+        mid: Some(0x29),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "SPEED_AXIS",
+        prefix: 0xC9,
+        mid: Some(0x03),
+        inner: None,
+        params: &[Param::Speed],
+    },
+    CommandDef {
+        mnemonic: "SPEED_AXIS_MOVE",
+        prefix: 0xC9,
+        mid: Some(0x06),
+        inner: None,
+        params: &[Param::Speed],
+    },
+    CommandDef {
+        mnemonic: "SPEED_LASER_1",
+        prefix: 0xC9,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Speed],
+    },
+    CommandDef {
+        mnemonic: "START_JOB",
+        prefix: 0xD8,
+        mid: Some(0x00),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "STOP_JOB",
+        prefix: 0xD8,
+        mid: Some(0x01),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "THROUGH_POWER_1",
+        prefix: 0xC6,
+        mid: Some(0x50),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "THROUGH_POWER_2",
+        prefix: 0xC6,
+        mid: Some(0x51),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "THROUGH_POWER_3",
+        prefix: 0xC6,
+        mid: Some(0x55),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "THROUGH_POWER_4",
+        prefix: 0xC6,
+        mid: Some(0x56),
+        inner: None,
+        params: &[Param::Power],
+    },
+    CommandDef {
+        mnemonic: "UNION_BLOCK_PROPERTY",
+        prefix: 0xE7,
+        mid: Some(0x3A),
+        inner: None,
+        params: &[],
+    },
+    CommandDef {
+        mnemonic: "UNKNOWN_E732",
+        prefix: 0xE7,
+        mid: Some(0x32),
+        inner: None,
+        params: &[Param::Uint35, Param::Uint35],
+    },
+    CommandDef {
+        mnemonic: "U_FILE_ID",
+        prefix: 0xCA,
+        mid: Some(0x30),
+        inner: None,
+        params: &[Param::Uint14],
+    },
+    CommandDef {
+        mnemonic: "X_SIGN_MAP",
+        prefix: 0xCA,
+        mid: Some(0x04),
+        inner: None,
+        params: &[Param::Int7],
+    },
+    CommandDef {
+        mnemonic: "ZU_MAP",
+        prefix: 0xCA,
+        mid: Some(0x40),
+        inner: None,
+        params: &[Param::Int7],
+    },
 ];
 
 pub(crate) static MEMORY: &[(&str, u16)] = &[

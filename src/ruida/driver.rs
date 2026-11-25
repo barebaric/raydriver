@@ -8,17 +8,15 @@ use std::time::Duration;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::core::driver::{
-    CancelMode, Driver, DriverError, DriverEvents, DriverInfo, SetupField,
-    SetupKind, Capabilities, ConnectionKind, DriverMaturity,
+    CancelMode, Capabilities, ConnectionKind, Driver, DriverError,
+    DriverEvents, DriverInfo, DriverMaturity, SetupField, SetupKind,
 };
 use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 use crate::ruida::codec::{self};
 use crate::ruida::status::MachineStatus;
-use crate::ruida::transport::{
-    open_link, RuidaTransport, TransportKind,
-};
+use crate::ruida::transport::{open_link, RuidaTransport, TransportKind};
 
 /// The controller's Ruida network port.
 pub const DEFAULT_PORT: u16 = 50200;
@@ -43,6 +41,8 @@ pub struct RuidaConfig {
     pub timeout: Duration,
     pub query_interval: Duration,
     pub reconnect_delay: Duration,
+    pub ping_retries: u32,
+    pub ping_delay: Duration,
 }
 
 impl Default for RuidaConfig {
@@ -57,6 +57,8 @@ impl Default for RuidaConfig {
             timeout: Duration::from_millis(500),
             query_interval: Duration::from_secs(1),
             reconnect_delay: Duration::from_secs(1),
+            ping_retries: 10,
+            ping_delay: Duration::from_secs(1),
         }
     }
 }
@@ -82,8 +84,7 @@ pub static SETUP: &[SetupField] = &[
     SetupField::new("protocol", SetupKind::Choice)
         .with_default("udp")
         .with_choices(&["udp", "tcp"]),
-    SetupField::new("magic_number", SetupKind::Text)
-        .with_default("0x88"),
+    SetupField::new("magic_number", SetupKind::Text).with_default("0x88"),
     SetupField::new("protect", SetupKind::Bool).with_default("true"),
 ];
 
@@ -103,8 +104,7 @@ pub static INFO: DriverInfo = DriverInfo {
 
 const fn caps() -> Capabilities {
     crate::core::driver::info::caps(
-        false, false, true, true, true, false, true, true, true, false,
-        false,
+        false, false, true, true, true, false, true, true, true, false, false,
     )
 }
 
@@ -124,7 +124,10 @@ pub struct RuidaDriver {
 
 impl RuidaDriver {
     /// Creates a session with an event sink.
-    pub fn new(config: RuidaConfig, events: Arc<dyn DriverEvents>) -> Arc<Self> {
+    pub fn new(
+        config: RuidaConfig,
+        events: Arc<dyn DriverEvents>,
+    ) -> Arc<Self> {
         let protect = AtomicBool::new(config.protect);
         Arc::new(Self {
             config,
@@ -178,11 +181,8 @@ impl RuidaDriver {
         let status = self.status.lock().unwrap().clone();
         let mut state = self.state.lock().unwrap();
         let next = status.device_status();
-        let position = [
-            status.position[0],
-            status.position[1],
-            status.position[2],
-        ];
+        let position =
+            [status.position[0], status.position[1], status.position[2]];
         let changed =
             state.status != next || state.machine_pos.as_slice() != position;
         state.status = next;
@@ -459,8 +459,11 @@ impl RuidaDriver {
             self.config.port,
         )
         .await?;
-        let mut transport =
-            RuidaTransport::new(link, self.config.transport(), self.config.magic);
+        let mut transport = RuidaTransport::new(
+            link,
+            self.config.transport(),
+            self.config.magic,
+        );
         transport.timeout = self.config.timeout;
         self.handshake(&mut transport).await?;
         *self.transport.lock().await = Some(transport);
@@ -482,7 +485,7 @@ impl RuidaDriver {
         &self,
         transport: &mut RuidaTransport,
     ) -> Result<(), DriverError> {
-        for _ in 0..10 {
+        for _ in 0..self.config.ping_retries.max(1) {
             if !self.keep_running.load(Ordering::SeqCst) {
                 return Err(DriverError::Connection(
                     "connection closed".to_string(),
@@ -499,7 +502,7 @@ impl RuidaDriver {
                     return Ok(());
                 }
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(self.config.ping_delay).await;
         }
         Err(DriverError::Timeout(
             "controller did not answer the status ping".to_string(),
@@ -578,8 +581,12 @@ impl Driver for RuidaDriver {
         }
         let host = self.config.host.as_deref()?;
         match self.config.protocol {
-            TransportKind::Udp => Some(format!("udp://{host}:{}", self.config.port)),
-            TransportKind::Tcp => Some(format!("tcp://{host}:{}", self.config.port)),
+            TransportKind::Udp => {
+                Some(format!("udp://{host}:{}", self.config.port))
+            }
+            TransportKind::Tcp => {
+                Some(format!("tcp://{host}:{}", self.config.port))
+            }
             TransportKind::Usb => Some(format!("serial://{host}")),
         }
     }
@@ -615,7 +622,10 @@ impl Driver for RuidaDriver {
         self.run_script(gcode).await
     }
 
-    async fn run_raw(self: Arc<Self>, machine_code: &str) -> Result<(), DriverError> {
+    async fn run_raw(
+        self: Arc<Self>,
+        machine_code: &str,
+    ) -> Result<(), DriverError> {
         self.run_script(machine_code).await
     }
 

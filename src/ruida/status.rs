@@ -33,17 +33,11 @@ impl MachineStatus {
             0x0431 => self.position[1] = decode_position(&reply.data),
             0x0441 => self.position[2] = decode_position(&reply.data),
             0x0451 => self.position[3] = decode_position(&reply.data),
-            0x057E => {
-                self.card_id = Some(codec::to_uint(&reply.data) as u32)
-            }
-            0x057F => {
-                self.mainboard_version = Some(decode_string(&reply.data))
-            }
+            0x057E => self.card_id = Some(codec::to_uint(&reply.data) as u32),
+            0x057F => self.mainboard_version = Some(decode_string(&reply.data)),
             0x0026 => self.bed_size[0] = decode_position(&reply.data),
             0x0036 => self.bed_size[1] = decode_position(&reply.data),
-            0x030F => {
-                self.features = Some(codec::to_uint(&reply.data) as u32)
-            }
+            0x030F => self.features = Some(codec::to_uint(&reply.data) as u32),
             _ => return false,
         }
         *self != before
@@ -66,6 +60,9 @@ fn decode_position(data: &[u8]) -> Option<f64> {
 }
 
 fn decode_string(data: &[u8]) -> String {
-    let end = data.iter().position(|byte| *byte == 0).unwrap_or(data.len());
+    let end = data
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(data.len());
     String::from_utf8_lossy(&data[..end]).into_owned()
 }

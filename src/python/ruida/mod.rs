@@ -24,7 +24,8 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     ruida_mod.setattr("__doc__", MODULE_DOC)?;
     ruida_mod.add("__all__", vec!["RuidaDriver", "encode_script"])?;
     ruida_mod.add_class::<driver::PyRuidaDriver>()?;
-    ruida_mod.add_function(wrap_pyfunction!(encode_script, ruida_mod.clone())?)?;
+    ruida_mod
+        .add_function(wrap_pyfunction!(encode_script, ruida_mod.clone())?)?;
 
     m.add_submodule(&ruida_mod)?;
     // Note: raydriver.ruida is intentionally NOT registered in

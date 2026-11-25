@@ -20,10 +20,10 @@ use crate::grbl::stream::GrblStreamConfig;
 use crate::grbl::telnet::GrblTelnetDriver;
 use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
 use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
-use crate::simulator::{NoDeviceConfig, NoDeviceDriver};
-use crate::smoothie::driver::{SmoothieConfig, SmoothieDriver};
 use crate::ruida::driver::{RuidaConfig, RuidaDriver};
 use crate::ruida::transport::TransportKind as RuidaTransportKind;
+use crate::simulator::{NoDeviceConfig, NoDeviceDriver};
+use crate::smoothie::driver::{SmoothieConfig, SmoothieDriver};
 use crate::xtool::driver::{XtoolConfig, XtoolNetworkDriver};
 
 pub use resources::ResourceGuard;
@@ -118,11 +118,10 @@ impl DriverKind {
             Self::XtoolM2 => require(config, "host"),
             Self::Ruida => {
                 let host = string(config, "host").unwrap_or_default();
-                let device =
-                    string(config, "usb_device").unwrap_or_default();
+                let device = string(config, "usb_device").unwrap_or_default();
                 if host.is_empty() && device.is_empty() {
                     return Err(
-                        "a host or a USB device must be configured".into(),
+                        "a host or a USB device must be configured".into()
                     );
                 }
                 Ok(())
@@ -291,27 +290,43 @@ impl DriverKind {
                 Ok(OctoPrintDriver::new(octoprint, events))
             }
             Self::Ruida => {
-                let mut ruida = RuidaConfig::default();
-                ruida.host =
-                    string(config, "host").filter(|value| !value.is_empty());
-                ruida.usb_device = string(config, "usb_device")
-                    .filter(|value| !value.is_empty());
-                ruida.port = uint(config, "port").unwrap_or(50200) as u16;
-                ruida.protocol =
-                    match string(config, "protocol").as_deref() {
+                let magic = match string(config, "magic_number") {
+                    Some(raw) => parse_magic(&raw)?,
+                    None => crate::ruida::driver::DEFAULT_MAGIC,
+                };
+                let ruida = RuidaConfig {
+                    host: string(config, "host")
+                        .filter(|value| !value.is_empty()),
+                    usb_device: string(config, "usb_device")
+                        .filter(|value| !value.is_empty()),
+                    port: uint(config, "port").unwrap_or(50200) as u16,
+                    protocol: match string(config, "protocol").as_deref() {
                         Some("tcp") => RuidaTransportKind::Tcp,
                         _ => RuidaTransportKind::Udp,
-                    };
-                if let Some(magic) = string(config, "magic_number") {
-                    ruida.magic = parse_magic(&magic)?;
-                }
-                if let Some(protect) = boolean(config, "protect") {
-                    ruida.protect = protect;
-                }
-                if let Some(timeout) = float(config, "timeout") {
-                    ruida.timeout =
-                        std::time::Duration::from_millis((timeout * 1000.0) as u64);
-                }
+                    },
+                    magic,
+                    protect: boolean(config, "protect").unwrap_or(true),
+                    timeout: float(config, "timeout")
+                        .map(|value| {
+                            std::time::Duration::from_millis(
+                                (value * 1000.0) as u64,
+                            )
+                        })
+                        .unwrap_or_default(),
+                    query_interval: float(config, "query_interval")
+                        .map(|value| {
+                            std::time::Duration::from_secs_f64(value.max(0.05))
+                        })
+                        .unwrap_or_default(),
+                    ping_retries: uint(config, "ping_retries").unwrap_or(10)
+                        as u32,
+                    ping_delay: float(config, "ping_delay")
+                        .map(|value| {
+                            std::time::Duration::from_secs_f64(value.max(0.0))
+                        })
+                        .unwrap_or_default(),
+                    ..RuidaConfig::default()
+                };
                 Ok(RuidaDriver::new(ruida, events))
             }
             Self::NoDevice => Ok(NoDeviceDriver::new(
@@ -416,9 +431,8 @@ fn grbl_stream_config(config: &Value) -> GrblStreamConfig {
 
 fn parse_magic(raw: &str) -> Result<u8, DriverError> {
     let raw = raw.trim();
-    let value = if let Some(hex) = raw
-        .strip_prefix("0x")
-        .or_else(|| raw.strip_prefix("0X"))
+    let value = if let Some(hex) =
+        raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X"))
     {
         u8::from_str_radix(hex, 16).ok()
     } else {

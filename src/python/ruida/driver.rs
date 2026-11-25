@@ -32,11 +32,9 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
             config.usb_device = Some(v);
         }
     }
-    if let Ok(value) = dict.get_item("port") {
-        if let Some(value) = value {
-            if let Ok(port) = value.extract::<u64>() {
-                config.port = port as u16;
-            }
+    if let Ok(Some(value)) = dict.get_item("port") {
+        if let Ok(port) = value.extract::<u64>() {
+            config.port = port as u16;
         }
     }
     if let Some(v) = get_str(dict, "protocol").ok().flatten() {
@@ -49,11 +47,9 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
     if let Some(v) = get_str(dict, "magic_number").ok().flatten() {
         config.magic = parse_magic(&v)?;
     }
-    if let Ok(value) = dict.get_item("protect") {
-        if let Some(value) = value {
-            if let Ok(flag) = value.extract::<bool>() {
-                config.protect = flag;
-            }
+    if let Ok(Some(value)) = dict.get_item("protect") {
+        if let Ok(flag) = value.extract::<bool>() {
+            config.protect = flag;
         }
     }
     if let Some(v) = get_f64(dict, "timeout")? {
@@ -62,14 +58,21 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
     if let Some(v) = get_f64(dict, "query_interval")? {
         config.query_interval = Duration::from_secs_f64(v.max(0.05));
     }
+    if let Ok(Some(value)) = dict.get_item("ping_retries") {
+        if let Ok(retries) = value.extract::<u32>() {
+            config.ping_retries = retries;
+        }
+    }
+    if let Some(v) = get_f64(dict, "ping_delay")? {
+        config.ping_delay = Duration::from_secs_f64(v.max(0.0));
+    }
     Ok(config)
 }
 
 fn parse_magic(raw: &str) -> PyResult<u8> {
     let raw = raw.trim();
-    let value = if let Some(hex) = raw
-        .strip_prefix("0x")
-        .or_else(|| raw.strip_prefix("0X"))
+    let value = if let Some(hex) =
+        raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X"))
     {
         u8::from_str_radix(hex, 16).ok()
     } else {
@@ -105,7 +108,6 @@ impl PyRuidaDriver {
             crate::python::driver::PyDriver::new(core.clone(), events.clone());
         Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
-
 }
 
 #[gen_stub_pymethods]
@@ -137,6 +139,16 @@ impl PyRuidaDriver {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let config = build_config(config.as_ref())?;
         Self::initializer(config, event_callback)
+    }
+
+    /// Move the XY axes to the current origin.
+    fn home_xy<'py>(&self, py: Python<'py>) -> PyAwait<'py, ()> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            core.home_xy().await?;
+            Ok(())
+        })
+        .expect("home_xy future")
     }
 
     /// Home the Z axis through the controller's homing routine.
@@ -277,11 +289,7 @@ impl PyRuidaDriver {
     }
 
     /// Send one raw rpascript line.
-    fn execute<'py>(
-        &self,
-        py: Python<'py>,
-        line: String,
-    ) -> PyAwait<'py, ()> {
+    fn execute<'py>(&self, py: Python<'py>, line: String) -> PyAwait<'py, ()> {
         let core = self.core.clone();
         spawn_future(py, async move {
             core.execute(&line).await?;
@@ -342,10 +350,7 @@ impl PyRuidaDriver {
 
     /// The last decoded controller status.
     #[getter]
-    fn machine_status<'py>(
-        &self,
-        py: Python<'py>,
-    ) -> PyResult<Py<PyDict>> {
+    fn machine_status<'py>(&self, py: Python<'py>) -> PyResult<Py<PyDict>> {
         let status = self.core.machine_status();
         let dict = PyDict::new(py);
         dict.set_item("running", status.running)?;

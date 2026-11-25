@@ -76,9 +76,7 @@ class RuidaEmulator:
         self._clients: set = set()
 
     async def start(self) -> None:
-        self._server = await asyncio.start_server(
-            self._handle, "127.0.0.1", 0
-        )
+        self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self._server.sockets[0].getsockname()[1]
 
     async def stop(self) -> None:
@@ -125,9 +123,7 @@ class RuidaEmulator:
         return bytes(swizzle_byte(byte, self.magic) for byte in data)
 
     def _unswizzle(self, data: bytes) -> bytes:
-        return bytes(
-            unswizzle_byte(byte, self.magic) for byte in data
-        )
+        return bytes(unswizzle_byte(byte, self.magic) for byte in data)
 
     def _value_for(self, address: int) -> bytes:
         if address == CARD_ID_ADDRESS:
@@ -204,9 +200,7 @@ class RuidaEmulator:
         while index + 3 < len(raw):
             if raw[index] == 0xDA and raw[index + 1] == 0x00:
                 address = (raw[index + 2] << 8) | raw[index + 3]
-                replies.extend(
-                    self._reply(address, self._value_for(address))
-                )
+                replies.extend(self._reply(address, self._value_for(address)))
                 index += 4
             else:
                 index += 1

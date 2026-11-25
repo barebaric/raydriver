@@ -94,7 +94,10 @@ impl RuidaTransport {
     }
 
     /// Sends one raw command as a single packet.
-    pub async fn send_command(&mut self, raw: &[u8]) -> Result<(), DriverError> {
+    pub async fn send_command(
+        &mut self,
+        raw: &[u8],
+    ) -> Result<(), DriverError> {
         let packet = codec::package(raw, self.magic, self.kind.is_udp());
         self.send_packet(&packet).await
     }
@@ -139,14 +142,14 @@ impl RuidaTransport {
     fn has_get_setting(&self, packet: &[u8]) -> bool {
         let offset = usize::from(self.kind.is_udp()) * 2;
         let marker = codec::swizzle_byte(0xDA, self.magic);
-        packet[offset..].iter().any(|byte| *byte == marker)
+        packet[offset..].contains(&marker)
     }
 
     /// Reads replies until no more data arrives within the
     /// inter-packet gap.
     async fn collect_replies(&mut self) -> Result<(), DriverError> {
         let Some(mut data) = self.read_unit(self.timeout).await? else {
-            return Err(timed_out());
+            return Ok(());
         };
         loop {
             match self.link.read(self.inter_packet_timeout).await {
@@ -199,14 +202,12 @@ mod net {
 
     impl UdpLink {
         /// Binds the host's Ruida port and connects to the controller.
-        pub async fn connect(host: &str, port: u16) -> Result<Self, DriverError> {
-            let probe = UdpSocket::bind("0.0.0.0:0")
-                .await
-                .map_err(io_error)?;
-            probe
-                .connect((host, port))
-                .await
-                .map_err(io_error)?;
+        pub async fn connect(
+            host: &str,
+            port: u16,
+        ) -> Result<Self, DriverError> {
+            let probe = UdpSocket::bind("0.0.0.0:0").await.map_err(io_error)?;
+            probe.connect((host, port)).await.map_err(io_error)?;
             let local = probe.local_addr().map_err(io_error)?;
             let socket = UdpSocket::bind((local.ip(), 40200))
                 .await
@@ -230,8 +231,11 @@ mod net {
             &mut self,
             timeout: Duration,
         ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(timeout, self.socket.recv(&mut self.buffer))
-                .await
+            match tokio::time::timeout(
+                timeout,
+                self.socket.recv(&mut self.buffer),
+            )
+            .await
             {
                 Ok(Ok(length)) => Ok(Some(self.buffer[..length].to_vec())),
                 Ok(Err(error)) => {
@@ -260,7 +264,10 @@ mod net {
 
     impl TcpLink {
         /// Connects to the controller's Ruida port.
-        pub async fn connect(host: &str, port: u16) -> Result<Self, DriverError> {
+        pub async fn connect(
+            host: &str,
+            port: u16,
+        ) -> Result<Self, DriverError> {
             let stream = tokio::time::timeout(
                 Duration::from_secs(3),
                 TcpStream::connect((host, port)),
@@ -286,8 +293,11 @@ mod net {
             &mut self,
             timeout: Duration,
         ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(timeout, self.stream.read(&mut self.buffer))
-                .await
+            match tokio::time::timeout(
+                timeout,
+                self.stream.read(&mut self.buffer),
+            )
+            .await
             {
                 Ok(Ok(0)) => Err(DriverError::Connection(
                     "controller closed the connection".to_string(),
@@ -325,12 +335,9 @@ mod serial {
     impl SerialLink {
         /// Opens a USB serial link at the Ruida baud rate.
         pub fn open(device: &str) -> Result<Self, DriverError> {
-            let port: SerialStream =
-                tokio_serial::new(device, 115_200)
-                    .open_native_async()
-                    .map_err(|error| {
-                        DriverError::Connection(error.to_string())
-                    })?;
+            let port: SerialStream = tokio_serial::new(device, 115_200)
+                .open_native_async()
+                .map_err(|error| DriverError::Connection(error.to_string()))?;
             Ok(Self {
                 port,
                 buffer: vec![0; 4096],
@@ -348,8 +355,11 @@ mod serial {
             &mut self,
             timeout: Duration,
         ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(timeout, self.port.read(&mut self.buffer))
-                .await
+            match tokio::time::timeout(
+                timeout,
+                self.port.read(&mut self.buffer),
+            )
+            .await
             {
                 Ok(Ok(0)) => Ok(None),
                 Ok(Ok(length)) => Ok(Some(self.buffer[..length].to_vec())),
@@ -372,6 +382,7 @@ pub async fn open_link(
     device: Option<&str>,
     port: u16,
 ) -> Result<Box<dyn Link>, DriverError> {
+    let _ = (host, device, port);
     match kind {
         #[cfg(feature = "serial")]
         TransportKind::Usb => {
