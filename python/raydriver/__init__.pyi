@@ -5,6 +5,7 @@ import builtins
 import typing
 from . import config
 from . import core
+from . import encode
 from . import epilog
 from . import grbl
 from . import marlin
@@ -16,6 +17,7 @@ from . import xtool
 __all__ = [
     "config",
     "core",
+    "encode",
     "epilog",
     "grbl",
     "init_logging",

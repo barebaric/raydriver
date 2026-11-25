@@ -58,6 +58,7 @@ at any time).
 The crate is split into layers that depend only downward:
 
 ```
+encode (machine-code encoders; raygeo core only)
 core (transports, value types, dialects, session primitives)
   →  grbl | smoothie | marlin | esp3d | octoprint | xtool  (protocol sessions)
   →  python (PyO3 bindings)
@@ -70,6 +71,14 @@ core (transports, value types, dialects, session primitives)
   and the transport-level discovery scanners. Protocol knowledge
   does not live here: the remote daemon's protocol table and device
   fingerprints are supplied by the embedder (`core::remote::registry::Registry`).
+- `src/encode/` holds the machine-code encoders (the G-code dialect
+  encoder and the Epilog print-job encoder). They implement
+  `raygeo::ops::convert::Encoder`, depend on raygeo's pure-Rust core
+  only, and must stay free of PyO3. The `python` feature exposes each
+  spec through the `__raygeo_encoder__()` capsule handoff, so a
+  raygeo pipeline can run an encoder raygeo does not define. The
+  capsule name embeds the raygeo version the encoder was built
+  against; raygeo rejects a mismatch instead of misreading it.
 - `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
   `src/octoprint/`, `src/xtool/` (with `m2`) hold the protocol
   sessions; they must not depend on PyO3 or any Python types. They
@@ -216,4 +225,6 @@ Rules:
   `unsupported` fallback (see `transport/bluetooth/` for the
   pattern: platform-gated backends + `is_supported()`).
 - New host-only code goes behind one of the features above;
-  everything else compiles everywhere.
+  everything else compiles everywhere. The `encode` module is in that
+  "everywhere" set: raygeo's core is wasm-clean and is an
+  unconditional dependency.
