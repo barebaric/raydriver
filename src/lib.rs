@@ -7,6 +7,10 @@
 //!   types, dialect command-template formatting, the session
 //!   event/error primitives, and the transport-level discovery
 //!   scanners (serial capture, mDNS browse, subnet TCP scan).
+//! - [`encode`]: machine-code encoders (G-code dialects, device print
+//!   jobs) built on raygeo's `Encoder` trait. Pure Rust and wasm-clean;
+//!   the Python bindings join raygeo's pipeline through a capsule
+//!   handoff.
 //! - [`epilog`]: the Epilog laser print-job session (LPD).
 //! - [`esp3d`]: the ESP3D / FluidNC transport for GRBL over HTTP and
 //!   WebSocket.
@@ -43,6 +47,7 @@ compile_error!(
 );
 
 pub mod core;
+pub mod encode;
 pub mod epilog;
 pub mod esp3d;
 pub mod grbl;
