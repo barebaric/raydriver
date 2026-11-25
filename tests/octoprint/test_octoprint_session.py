@@ -315,6 +315,27 @@ class TestCommands:
             "y": -5.0,
         }
 
+    async def test_move_to_absolute_omits_unspecified_speed(self, rig):
+        session, emulator, events = rig
+        await session.move_to_absolute(10.0, 5.0)
+        assert emulator.commands[-1] == {
+            "command": "jog",
+            "x": 10.0,
+            "y": 5.0,
+            "absolute": True,
+        }
+
+    async def test_move_to_absolute_with_speed(self, rig):
+        session, emulator, events = rig
+        await session.move_to_absolute(10.0, 5.0, None, 6000.0)
+        assert emulator.commands[-1] == {
+            "command": "jog",
+            "x": 10.0,
+            "y": 5.0,
+            "absolute": True,
+            "speed": 6000.0,
+        }
+
     async def test_select_tool_sends_t_command(self, rig):
         session, emulator, events = rig
         await session.select_tool(2)

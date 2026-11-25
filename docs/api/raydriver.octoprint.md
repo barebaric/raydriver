@@ -17,6 +17,28 @@ All async methods return asyncio futures; a typed `DriverEvent` is delivered to
 `event_callback(event)` on the event loop thread. Operations the OctoPrint API cannot perform (e.g.
 writing firmware settings) raise `NotImplementedError`.
 
+### `move_to_absolute()`
+
+```python
+move_to_absolute(
+    x: float,
+    y: float,
+    z: Optional[float] = None,
+    speed: Optional[float] = None,
+) -> Awaitable[None]
+```
+
+Move to an absolute position through the printhead jog API. Without a speed the server uses its
+configured default.
+
+| Parameter | Type                     | Description |
+| --------- | ------------------------ | ----------- |
+| `x`       | `float`                  |             |
+| `y`       | `float`                  |             |
+| `z`       | `Optional[float] = None` |             |
+| `speed`   | `Optional[float] = None` |             |
+| _Returns_ | `Awaitable[None]`        |             |
+
 ### `probe_device()`
 
 ```python

@@ -28,6 +28,11 @@ class OctoPrintDriver(driver.Driver):
     firmware settings) raise `NotImplementedError`.
     """
     def __new__(cls, config: typing.Optional[typing.Union[dict, config.OctoPrintConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> OctoPrintDriver: ...
+    def move_to_absolute(self, x: builtins.float, y: builtins.float, z: typing.Optional[builtins.float] = None, speed: typing.Optional[builtins.float] = None) -> collections.abc.Awaitable[None]:
+        r"""
+        Move to an absolute position through the printhead jog API.
+        Without a speed the server uses its configured default.
+        """
     def probe_info(self) -> collections.abc.Awaitable[builtins.list[dict[builtins.str, builtins.object]]]:
         r"""
         Fetch the census payloads (the parsed ``/api/version`` and

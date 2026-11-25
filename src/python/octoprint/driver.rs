@@ -108,6 +108,24 @@ impl PyOctoPrintDriver {
         Self::initializer(config, event_callback)
     }
 
+    /// Move to an absolute position through the printhead jog API.
+    /// Without a speed the server uses its configured default.
+    #[pyo3(signature = (x, y, z=None, speed=None))]
+    fn move_to_absolute<'py>(
+        &self,
+        py: Python<'py>,
+        x: f64,
+        y: f64,
+        z: Option<f64>,
+        speed: Option<f64>,
+    ) -> PyResult<PyAwait<'py, ()>> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            core.jog_absolute(x, y, z, speed).await?;
+            Ok(())
+        })
+    }
+
     /// Fetch the census payloads (the parsed ``/api/version`` and
     /// ``/api/printer`` responses) over the session, so local and
     /// remote probing use the same code path.
