@@ -35,11 +35,14 @@ jobs:
       - name: Validate stubs in wheel
         run: |
           cat > /tmp/test_stubs.py << 'EOF'
-          from raydriver.grbl import GrblSession
+          from raydriver.driver import Driver, driver_info
+          from raydriver.grbl import GrblSerialDriver
           from raydriver.grbl.parser import parse_state
           from raydriver.grbl.types import DeviceState
 
-          session: GrblSession
+          session: GrblSerialDriver
+          base: Driver = session
+          info = driver_info("GrblSerialDriver")
           state: DeviceState
           parsed = parse_state("<Idle|MPos:0,0,0>", None, False)
           EOF
