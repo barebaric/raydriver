@@ -40,7 +40,7 @@ jobs:
           from raydriver.grbl.parser import parse_state
           from raydriver.grbl.types import DeviceState
 
-          session: GrblSerialDriver
+          session = GrblSerialDriver(config={"port": "/dev/null"})
           base: Driver = session
           info = driver_info("GrblSerialDriver")
           state: DeviceState
