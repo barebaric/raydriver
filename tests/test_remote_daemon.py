@@ -129,7 +129,7 @@ class DaemonClient:
     async def open_session(self, role="control", force=False):
         reply = await self.request(
             protocol.SESSION_OPEN,
-            {"protocol": "grbl", "role": role, "force": force},
+            {"protocol": "GrblSerialDriver", "role": role, "force": force},
         )
         assert reply["ok"], reply
         return reply["payload"]["session_id"]
@@ -200,7 +200,7 @@ async def rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        assert protocol_name == "grbl"
+        assert protocol_name == "GrblSerialDriver"
         return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
@@ -484,7 +484,7 @@ async def test_unknown_type_method_session_property(rig):
         protocol.SESSION_COMMAND,
         {"session_id": sid, "method": "bogus"},
     )
-    assert reply["error"]["code"] == protocol.UNKNOWN_METHOD
+    assert reply["error"]["kind"] == "unsupported"
     reply = await client.request(
         protocol.SESSION_PROPERTY,
         {"session_id": sid, "name": "bogus"},
@@ -507,7 +507,7 @@ async def test_auto_open_sessions():
         )
 
     daemon = Daemon(
-        DaemonConfig(port=0, sessions=[{"protocol": "grbl"}]),
+        DaemonConfig(port=0, sessions=[{"protocol": "GrblSerialDriver"}]),
         session_factory=factory,
     )
     server = await daemon.start()

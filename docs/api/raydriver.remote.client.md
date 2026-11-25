@@ -406,8 +406,8 @@ create_session(
     protocol_name: str,
     config: Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config],
     dialect: Optional[dict[str, object]],
-    event_callback: Optional[Callable[[core.SessionEvent], object]],
-) -> Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]
+    event_callback: Optional[Callable[[core.DriverEvent], object]],
+) -> Union[RemoteSession, grbl.GrblSerialDriver, simple.GrblSerialSimpleDriver, smoothie.SmoothieDriver, octoprint.OctoPrintDriver, marlin.MarlinSerialDriver]
 ```
 
 | Parameter        | Type                                                                                                                                                                                                                                                           | Description |
@@ -415,8 +415,8 @@ create_session(
 | `protocol_name`  | `str`                                                                                                                                                                                                                                                          |             |
 | `config`         | `Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]` |             |
 | `dialect`        | `Optional[dict[str, object]]`                                                                                                                                                                                                                                  |             |
-| `event_callback` | `Optional[Callable[[core.SessionEvent], object]]`                                                                                                                                                                                                              |             |
-| _Returns_        | `Union[RemoteSession, grbl.GrblSession, simple.GrblSimpleSession, smoothie.SmoothieSession, octoprint.OctoPrintSession, marlin.MarlinSession]`                                                                                                                 |             |
+| `event_callback` | `Optional[Callable[[core.DriverEvent], object]]`                                                                                                                                                                                                               |             |
+| _Returns_        | `Union[RemoteSession, grbl.GrblSerialDriver, simple.GrblSerialSimpleDriver, smoothie.SmoothieDriver, octoprint.OctoPrintDriver, marlin.MarlinSerialDriver]`                                                                                                    |             |
 
 ### `list_devices()`
 
@@ -431,10 +431,10 @@ list_devices(
 | `endpoint` | `Union[dict[str, object], str]`      |             |
 | _Returns_  | `Awaitable[list[dict[str, object]]]` |             |
 
-### `list_protocols()`
+### `list_drivers()`
 
 ```python
-list_protocols(
+list_drivers(
     endpoint: Union[dict[str, object], str],
 ) -> Awaitable[list[dict[str, object]]]
 ```
@@ -453,7 +453,7 @@ open_session(
     session_id: Optional[str] = None,
     config: Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None,
     dialect: Optional[dict[str, object]] = None,
-    event_callback: Optional[Callable[[core.SessionEvent], object]] = None,
+    event_callback: Optional[Callable[[core.DriverEvent], object]] = None,
 ) -> RemoteSession
 ```
 
@@ -464,5 +464,5 @@ open_session(
 | `session_id`     | `Optional[str] = None`                                                                                                                                                                                                                                                          |             |
 | `config`         | `Optional[Union[dict[str, object], config.GrblSerialConfig, config.GrblSimpleConfig, config.GrblTelnetConfig, config.GrblBluetoothConfig, config.Esp3dConfig, config.SmoothieConfig, config.MarlinConfig, config.XtoolConfig, config.OctoPrintConfig, config.M2Config]] = None` |             |
 | `dialect`        | `Optional[dict[str, object]] = None`                                                                                                                                                                                                                                            |             |
-| `event_callback` | `Optional[Callable[[core.SessionEvent], object]] = None`                                                                                                                                                                                                                        |             |
+| `event_callback` | `Optional[Callable[[core.DriverEvent], object]] = None`                                                                                                                                                                                                                         |             |
 | _Returns_        | `RemoteSession`                                                                                                                                                                                                                                                                 |             |

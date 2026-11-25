@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::python::driver::PyDriver;
 use pyo3::exceptions::{
     PyConnectionError, PyNotImplementedError, PyRuntimeError, PyTimeoutError,
     PyValueError,
@@ -39,6 +40,11 @@ impl From<DriverError> for PyErr {
             }
             DriverError::Unsupported(msg) => {
                 PyNotImplementedError::new_err(msg)
+            }
+            DriverError::ResourceBusy { resource, owner } => {
+                PyConnectionError::new_err(format!(
+                    "{resource} is already in use by {owner}"
+                ))
             }
             DriverError::Other(msg) => PyRuntimeError::new_err(msg),
         }
@@ -266,7 +272,7 @@ macro_rules! grbl_driver {
     ) => {
         #[doc = $doc]
         #[gen_stub_pyclass]
-        #[pyclass(name = $py_name, module = "raydriver.grbl", extends = crate::python::driver::PyDriver)]
+        #[pyclass(name = $py_name, module = "raydriver.grbl", extends = PyDriver)]
         pub struct $cls {
             core: Arc<$driver_ty>,
         }

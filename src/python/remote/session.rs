@@ -31,7 +31,9 @@ type BoxFuture = Pin<Box<dyn Future<Output = PyResult<Py<PyAny>>> + Send>>;
 fn classify(py: Python<'_>, err: &PyErr) -> DriverError {
     if err.is_instance_of::<PyTimeoutError>(py) {
         DriverError::Timeout(err.to_string())
-    } else if err.is_instance_of::<PyNotImplementedError>(py) {
+    } else if err.is_instance_of::<PyNotImplementedError>(py)
+        || err.is_instance_of::<pyo3::exceptions::PyAttributeError>(py)
+    {
         DriverError::Unsupported(err.to_string())
     } else if err.is_instance_of::<PyConnectionError>(py) {
         DriverError::Connection(err.to_string())
@@ -290,22 +292,8 @@ impl PySessionFactory {
         dialect: Py<PyAny>,
         callback: Py<PyAny>,
     ) -> PyResult<Py<PyAny>> {
-        let (module, class) = match protocol {
-            "grbl" => ("raydriver.grbl", "GrblSerialDriver"),
-            "grbl_simple" => {
-                ("raydriver.grbl.simple", "GrblSerialSimpleDriver")
-            }
-            "esp3d" => ("raydriver.grbl", "GrblNetworkDriver"),
-            "smoothie" => ("raydriver.smoothie", "SmoothieDriver"),
-            "octoprint" => ("raydriver.octoprint", "OctoPrintDriver"),
-            "marlin" => ("raydriver.marlin", "MarlinSerialDriver"),
-            _ => {
-                return Err(pyo3::exceptions::PyValueError::new_err(format!(
-                    "unknown protocol {protocol:?}"
-                )))
-            }
-        };
-        let cls = py.import(module)?.getattr(class)?;
+        let driver_mod = py.import("raydriver.driver")?;
+        let cls = driver_mod.call_method1("get_driver_cls", (protocol,))?;
         let kwargs = PyDict::new(py);
         kwargs.set_item("config", config)?;
         kwargs.set_item("dialect", dialect)?;

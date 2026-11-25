@@ -58,9 +58,13 @@ class TestConfig:
 
     def test_invalid_channel_rejected(self):
         with pytest.raises(ValueError, match="channel"):
-            GrblBluetoothDriver(config={"address": "AA:BB:CC:DD:EE:FF", "channel": 0})
+            GrblBluetoothDriver(
+                config={"address": "AA:BB:CC:DD:EE:FF", "channel": 0}
+            )
         with pytest.raises(ValueError, match="channel"):
-            GrblBluetoothDriver(config={"address": "AA:BB:CC:DD:EE:FF", "channel": 31})
+            GrblBluetoothDriver(
+                config={"address": "AA:BB:CC:DD:EE:FF", "channel": 31}
+            )
 
 
 class TestEnumeration:

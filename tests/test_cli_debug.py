@@ -20,7 +20,7 @@ def ns(**kwargs):
 async def daemon_fixture(tmp_path):
     sessions = [
         {
-            "protocol": "grbl",
+            "protocol": "GrblSerialDriver",
             "config": {"port": "/dev/ttyUSB0", "baudrate": 115200},
         }
     ]
@@ -49,7 +49,7 @@ async def test_info_daemon(daemon_fixture, capsys):
     assert await debug.cmd_info(ns(target=f"127.0.0.1:{port}")) == 0
     data = json.loads(capsys.readouterr().out)
     assert len(data["sessions"]) == 1
-    assert data["sessions"][0]["protocol"] == "grbl"
+    assert data["sessions"][0]["protocol"] == "GrblSerialDriver"
     assert data["welcome"]["protocol"] == 1
 
 
@@ -121,7 +121,10 @@ async def test_list_daemon_stopped(tmp_path, capsys):
                 "host": "127.0.0.1",
                 "port": 1,
                 "sessions": [
-                    {"protocol": "grbl", "config": {"port": "/dev/ttyUSB0"}}
+                    {
+                        "protocol": "GrblSerialDriver",
+                        "config": {"port": "/dev/ttyUSB0"},
+                    }
                 ],
             }
         )

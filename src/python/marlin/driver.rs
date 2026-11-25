@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::python::driver::PyDriver;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -59,7 +60,7 @@ fn build_marlin_config(
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "MarlinSerialDriver", module = "raydriver.marlin", extends = crate::python::driver::PyDriver)]
+#[pyclass(name = "MarlinSerialDriver", module = "raydriver.marlin", extends = PyDriver)]
 pub struct PyMarlinSerialDriver {
     core: Arc<MarlinSerialDriver>,
 }

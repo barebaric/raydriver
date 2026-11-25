@@ -1019,10 +1019,10 @@ pub async fn list_devices(
 }
 
 /// The daemon's protocol metadata.
-pub async fn list_protocols(
+pub async fn list_drivers(
     endpoint: &RemoteEndpoint,
 ) -> Result<Vec<Value>, RemoteError> {
-    let requests = [(protocol::PROTOCOL_LIST, json!({}))];
+    let requests = [(protocol::DRIVER_LIST, json!({}))];
     let (_, replies) = inspect::daemon_rpc(
         &endpoint.host,
         endpoint.port,
@@ -1035,11 +1035,11 @@ pub async fn list_protocols(
     .map_err(|err| err.to_string())?;
     let reply = &replies[0];
     if !reply.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-        return Err("protocol/list failed".to_string().into());
+        return Err("driver/list failed".to_string().into());
     }
     Ok(reply
         .get("payload")
-        .and_then(|payload| payload.get("protocols"))
+        .and_then(|payload| payload.get("drivers"))
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default())

@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use crate::python::driver::PyDriver;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -48,7 +49,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(name = "XtoolM2Driver", module = "raydriver.xtool.m2", extends = crate::python::driver::PyDriver)]
+#[pyclass(name = "XtoolM2Driver", module = "raydriver.xtool.m2", extends = PyDriver)]
 pub struct PyXtoolM2Driver {
     core: Arc<XtoolM2Driver>,
 }
@@ -70,7 +71,7 @@ impl PyXtoolM2Driver {
 impl PyXtoolM2Driver {
     #[new]
     #[gen_stub(override_return_type(type_repr = "XtoolM2Driver"))]
-    #[pyo3(signature = (config, event_callback=None))]
+    #[pyo3(signature = (config, dialect=None, event_callback=None))]
     /// Create an M2 session for the configured host.
     fn new(
         #[gen_stub(override_type(
@@ -79,12 +80,14 @@ impl PyXtoolM2Driver {
         ))]
         config: Option<Bound<'_, PyAny>>,
 
+        dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
     ) -> PyResult<PyClassInitializer<Self>> {
+        let _ = dialect;
         let config = crate::python::config::config_dict(config.as_ref())?;
         Self::initializer(build_config(config.as_ref())?, event_callback)
     }

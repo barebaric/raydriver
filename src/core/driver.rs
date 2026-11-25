@@ -151,6 +151,9 @@ pub enum DriverError {
     Device(String),
     #[error("buffer stall: {0}")]
     BufferStall(String),
+    /// The physical resource is already held by another driver.
+    #[error("resource {resource} is already in use by {owner}")]
+    ResourceBusy { resource: String, owner: String },
     /// The session cannot perform the operation at all (as opposed
     /// to failing at it): the protocol has no such capability, and
     /// the uniform session surface still exposes the method.

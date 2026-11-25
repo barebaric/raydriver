@@ -6,11 +6,11 @@ import time
 
 import pytest
 
+from raydriver.config import Esp3dConfig
 from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
-from raydriver.config import Esp3dConfig
-from raydriver.grbl import GrblNetworkDriver
 from raydriver.esp3d.emulator import Esp3dEmulator
+from raydriver.grbl import GrblNetworkDriver
 
 FAST_CONFIG = {
     "host": "127.0.0.1",

@@ -257,13 +257,13 @@ async def test_machine_space_and_single_wcs():
         await session.disconnect()
 
 
-def test_registry_entry():
-    from raydriver.protocols import protocol_info
+def test_driver_info():
+    from raydriver.driver import driver_info
 
-    info = protocol_info("epilog")
-    assert info.label == "Epilog"
+    info = driver_info("EpilogDriver")
+    assert info.name == "EpilogDriver"
     assert info.connection == "network"
-    assert "upload" in info.methods
+    assert hasattr(EpilogDriver, "upload")
     assert info.capabilities["uses_gcode"] is False
 
 

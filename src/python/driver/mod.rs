@@ -8,13 +8,28 @@
 //! concrete `Arc` for their extras.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock, Mutex};
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
+use pyo3_stub_gen::derive::{
+    gen_stub_pyclass, gen_stub_pyfunction, gen_stub_pymethods,
+};
 
 use crate::core::driver::{CancelMode, Driver, DriverInfo};
+
+use crate::python::epilog::driver::PyEpilogDriver;
+use crate::python::grbl::driver::{
+    PyGrblBluetoothDriver, PyGrblNetworkDriver, PyGrblSerialDriver,
+    PyGrblTelnetDriver,
+};
+use crate::python::grbl::simple::PyGrblSerialSimpleDriver;
+use crate::python::marlin::driver::PyMarlinSerialDriver;
+use crate::python::octoprint::driver::PyOctoPrintDriver;
+use crate::python::smoothie::driver::PySmoothieDriver;
+use crate::python::xtool::driver::PyXtoolNetworkDriver;
+#[cfg(feature = "m2")]
+use crate::python::xtool::m2::driver::PyXtoolM2Driver;
 
 pub(crate) mod info;
 use crate::python::core::types::DeviceState;
@@ -34,13 +49,18 @@ use crate::python::pyfuture::{
 pub struct PyDriver {
     pub(crate) core: Arc<dyn Driver>,
     pub(crate) events: Arc<PyEvents>,
+    resource: Arc<Mutex<Option<crate::driver::ResourceGuard>>>,
 }
 
 impl PyDriver {
     /// Build the base layer for a concrete driver.
     #[allow(dead_code)]
     pub(crate) fn new(core: Arc<dyn Driver>, events: Arc<PyEvents>) -> Self {
-        Self { core, events }
+        Self {
+            core,
+            events,
+            resource: Arc::new(Mutex::new(None)),
+        }
     }
 }
 
@@ -50,10 +70,25 @@ impl PyDriver {
     /// Open the connection and keep it up until `disconnect`.
     fn connect<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
         self.events.capture_loop(py)?;
+        {
+            let mut slot = self.resource.lock().unwrap();
+            if slot.is_none() {
+                *slot = Some(crate::driver::ResourceGuard::acquire(
+                    self.core.resource_uri().as_deref(),
+                    None,
+                )?);
+            }
+        }
         let core = self.core.clone();
+        let resource = self.resource.clone();
         spawn_future(py, async move {
-            Driver::connect(core).await?;
-            Ok(())
+            match Driver::connect(core).await {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    resource.lock().unwrap().take();
+                    Err(err.into())
+                }
+            }
         })
     }
 
@@ -453,6 +488,82 @@ pub(crate) fn info_of(driver: &dyn Driver) -> DriverInfo {
     driver.info().clone()
 }
 
+/// Look up a built-in driver's typed metadata by class name.
+#[gen_stub_pyfunction(module = "raydriver.driver")]
+#[pyfunction]
+fn driver_info(name: &str) -> PyResult<info::DriverInfo> {
+    let kind = crate::driver::DriverKind::from_name(name).ok_or_else(|| {
+        pyo3::exceptions::PyKeyError::new_err(name.to_string())
+    })?;
+    Ok(info::DriverInfo::new(kind.info().clone()))
+}
+
+static DRIVERS: LazyLock<Mutex<Option<Py<PyAny>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+fn builtin_drivers(py: Python<'_>) -> Vec<Py<PyAny>> {
+    vec![
+        py.get_type::<PyGrblSerialDriver>().into_any().unbind(),
+        py.get_type::<PyGrblTelnetDriver>().into_any().unbind(),
+        py.get_type::<PyGrblBluetoothDriver>().into_any().unbind(),
+        py.get_type::<PyGrblNetworkDriver>().into_any().unbind(),
+        py.get_type::<PyGrblSerialSimpleDriver>()
+            .into_any()
+            .unbind(),
+        py.get_type::<PyMarlinSerialDriver>().into_any().unbind(),
+        py.get_type::<PySmoothieDriver>().into_any().unbind(),
+        #[cfg(feature = "m2")]
+        py.get_type::<PyXtoolM2Driver>().into_any().unbind(),
+        py.get_type::<PyXtoolNetworkDriver>().into_any().unbind(),
+        py.get_type::<PyOctoPrintDriver>().into_any().unbind(),
+        py.get_type::<PyEpilogDriver>().into_any().unbind(),
+    ]
+}
+
+/// Resolve a persisted driver name.
+#[gen_stub_pyfunction(module = "raydriver.driver")]
+#[gen_stub(override_return_type(type_repr = "type[Driver]"))]
+#[pyfunction]
+#[pyo3(signature = (name, default=None))]
+fn get_driver_cls(
+    py: Python<'_>,
+    name: &str,
+    default: Option<Py<PyAny>>,
+) -> PyResult<Py<PyAny>> {
+    let drivers = DRIVERS.lock().unwrap().clone().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err(
+            "the driver list is not initialized",
+        )
+    })?;
+    for driver in drivers.bind(py).try_iter()? {
+        let driver = driver?;
+        let class_name: String = driver.getattr("__name__")?.extract()?;
+        if class_name == name {
+            return Ok(driver.unbind());
+        }
+    }
+    match default {
+        Some(default) => Ok(default),
+        None => Err(pyo3::exceptions::PyKeyError::new_err(name.to_string())),
+    }
+}
+
+/// Register an addon driver class.
+#[gen_stub_pyfunction(module = "raydriver.driver")]
+#[pyfunction]
+fn register_driver(
+    py: Python<'_>,
+    #[gen_stub(override_type(type_repr = "type[Driver]"))] driver: Py<PyAny>,
+) -> PyResult<()> {
+    let drivers = DRIVERS.lock().unwrap().clone().ok_or_else(|| {
+        pyo3::exceptions::PyRuntimeError::new_err(
+            "the driver list is not initialized",
+        )
+    })?;
+    drivers.bind(py).call_method1("append", (driver,))?;
+    Ok(())
+}
+
 pub(crate) const MODULE_DOC: &str = "\
 The common driver base class and its typed metadata.
 
@@ -469,13 +580,39 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     let module = PyModule::new(py, "driver")?;
     module.setattr("__doc__", MODULE_DOC)?;
-    module.add("__all__", vec!["Driver", "DriverInfo"])?;
+    module.setattr("__name__", "raydriver.raydriver.driver")?;
+    module.setattr("__package__", "raydriver.raydriver")?;
+    module.add("__all__", vec!["Driver", "DriverInfo", "driver_info"])?;
     module.add_class::<PyDriver>()?;
     module.add_class::<info::DriverInfo>()?;
-    crate::python::core::discovery::helpers::attach_submodule(
-        m,
-        &module,
-        "raydriver.driver",
-    )?;
+    module.add_function(wrap_pyfunction!(driver_info, &module)?)?;
+    let drivers = pyo3::types::PyList::new(py, builtin_drivers(py))?;
+    module.add("drivers", &drivers)?;
+    *DRIVERS.lock().unwrap() = Some(drivers.into_any().unbind());
+    module.add_function(wrap_pyfunction!(get_driver_cls, &module)?)?;
+    module.add_function(wrap_pyfunction!(register_driver, &module)?)?;
+    // Mounted as raydriver.raydriver.driver: the public
+    // raydriver.driver package on disk forwards attribute access
+    // here, so this module must not take over the public name in
+    // sys.modules.
+    m.add_submodule(&module)?;
     Ok(())
 }
+
+/// Stub type of the `drivers` module list: classes, not instances.
+struct DriverClassList;
+
+impl pyo3_stub_gen::PyStubType for DriverClassList {
+    fn type_output() -> pyo3_stub_gen::TypeInfo {
+        let mut import = std::collections::HashSet::new();
+        import.insert("builtins".into());
+        pyo3_stub_gen::TypeInfo {
+            name: "builtins.list[type[Driver]]".to_string(),
+            source_module: None,
+            import,
+            type_refs: Default::default(),
+        }
+    }
+}
+
+pyo3_stub_gen::module_variable!("raydriver.driver", "drivers", DriverClassList);

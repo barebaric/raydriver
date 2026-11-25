@@ -12,8 +12,6 @@ pub(crate) mod session;
 use pyo3::prelude::*;
 use pyo3::types::PySet;
 
-use crate::python::protocols::protocol_registry;
-
 pub(crate) const MODULE_DOC: &str = "\
 Remote sessions: a device-host daemon, a client proxy and the \
 versioned wire codec that connects them.
@@ -112,7 +110,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     client.add_function(wrap_pyfunction!(client::create_session, &client)?)?;
     client.add_function(wrap_pyfunction!(client::open_session, &client)?)?;
     client.add_function(wrap_pyfunction!(client::list_devices, &client)?)?;
-    client.add_function(wrap_pyfunction!(client::list_protocols, &client)?)?;
+    client.add_function(wrap_pyfunction!(client::list_drivers, &client)?)?;
     remote.add_submodule(&client)?;
 
     let mdns = PyModule::new(py, "mdns")?;
@@ -165,7 +163,7 @@ fn add_protocol_constants(protocol: &Bound<'_, PyModule>) -> PyResult<()> {
         ("PING", core::PING),
         ("PONG", core::PONG),
         ("DEVICE_LIST", core::DEVICE_LIST),
-        ("PROTOCOL_LIST", core::PROTOCOL_LIST),
+        ("DRIVER_LIST", core::DRIVER_LIST),
         ("SESSION_LIST", core::SESSION_LIST),
         ("SESSION_OPEN", core::SESSION_OPEN),
         ("SESSION_ATTACH", core::SESSION_ATTACH),
@@ -201,7 +199,7 @@ fn add_protocol_constants(protocol: &Bound<'_, PyModule>) -> PyResult<()> {
         core::PING,
         core::PONG,
         core::DEVICE_LIST,
-        core::PROTOCOL_LIST,
+        core::DRIVER_LIST,
         core::SESSION_LIST,
         core::SESSION_OPEN,
         core::SESSION_ATTACH,
@@ -214,21 +212,10 @@ fn add_protocol_constants(protocol: &Bound<'_, PyModule>) -> PyResult<()> {
         request_types.add(name)?;
     }
     protocol.add("REQUEST_TYPES", request_types)?;
-    let registry = protocol_registry();
-    let names: Vec<&str> =
-        registry.protocols().iter().map(|info| info.name).collect();
-    protocol.add("PROTOCOLS", names)?;
-    let mut methods: Vec<&str> = Vec::new();
-    let mut properties: Vec<&str> = Vec::new();
-    for info in registry.protocols() {
-        methods.extend(info.methods.iter().copied());
-        properties.extend(info.properties.iter().copied());
-    }
-    methods.sort_unstable();
-    methods.dedup();
-    properties.sort_unstable();
-    properties.dedup();
-    protocol.add("SESSION_METHODS", methods)?;
-    protocol.add("SESSION_PROPERTIES", properties)?;
+    let drivers: Vec<&str> = crate::driver::DriverKind::ALL
+        .iter()
+        .map(|kind| kind.name())
+        .collect();
+    protocol.add("DRIVERS", drivers)?;
     Ok(())
 }

@@ -66,7 +66,10 @@ def test_config_from_dict_overrides():
                 }
             ],
             "sessions": [
-                {"protocol": "grbl", "config": {"port": "/dev/ttyUSB0"}}
+                {
+                    "protocol": "GrblSerialDriver",
+                    "config": {"port": "/dev/ttyUSB0"},
+                }
             ],
             "mdns": True,
         }
@@ -80,7 +83,7 @@ def test_config_from_dict_overrides():
     assert config.lease_grace == 2.5
     assert config.ring_size == 50
     assert config.cameras[0]["name"] == "cam"
-    assert config.sessions[0]["protocol"] == "grbl"
+    assert config.sessions[0]["protocol"] == "GrblSerialDriver"
     assert config.mdns is True
 
 
@@ -92,15 +95,15 @@ def test_load_config(tmp_path):
 
 def test_add_device_creates_config(tmp_path):
     path = tmp_path / "sub" / "daemon.json"
-    message = add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    message = add_device(path, "/dev/ttyUSB0", "GrblSerialDriver", 115200)
     assert "token:" in message
-    assert "added grbl /dev/ttyUSB0" in message
+    assert "added GrblSerialDriver /dev/ttyUSB0" in message
     data = json.loads(path.read_text())
     assert data["token"]
     assert data["host"] == "127.0.0.1"
     assert data["sessions"] == [
         {
-            "protocol": "grbl",
+            "protocol": "GrblSerialDriver",
             "config": {"port": "/dev/ttyUSB0", "baudrate": 115200},
         }
     ]
@@ -118,7 +121,7 @@ def test_add_device_preserves_config_and_upserts(tmp_path):
                 "token": "t",
                 "sessions": [
                     {
-                        "protocol": "grbl",
+                        "protocol": "GrblSerialDriver",
                         "config": {
                             "port": "/dev/ttyUSB0",
                             "baudrate": 9600,
@@ -128,27 +131,27 @@ def test_add_device_preserves_config_and_upserts(tmp_path):
             }
         )
     )
-    message = add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    message = add_device(path, "/dev/ttyUSB0", "GrblSerialDriver", 115200)
     assert "updated" in message
     data = json.loads(path.read_text())
     assert data["port"] == 9000
     assert data["token"] == "t"
     assert len(data["sessions"]) == 1
     assert data["sessions"][0]["config"]["baudrate"] == 115200
-    add_device(path, "/dev/ttyACM0", "marlin", 250000)
+    add_device(path, "/dev/ttyACM0", "MarlinSerialDriver", 250000)
     data = json.loads(path.read_text())
     assert len(data["sessions"]) == 2
-    assert data["sessions"][1]["protocol"] == "marlin"
+    assert data["sessions"][1]["protocol"] == "MarlinSerialDriver"
 
 
 def test_add_device_unknown_protocol(tmp_path):
-    with pytest.raises(ValueError, match="unknown protocol"):
+    with pytest.raises(ValueError, match="unknown driver"):
         add_device(tmp_path / "daemon.json", "/dev/ttyUSB0", "nope", 115200)
 
 
 def test_remove_device(tmp_path):
     path = tmp_path / "daemon.json"
-    add_device(path, "/dev/ttyUSB0", "grbl", 115200)
+    add_device(path, "/dev/ttyUSB0", "GrblSerialDriver", 115200)
     assert "removed /dev/ttyUSB0" in remove_device(path, "/dev/ttyUSB0")
     assert json.loads(path.read_text())["sessions"] == []
     with pytest.raises(ValueError, match="no configured device"):
@@ -167,7 +170,7 @@ async def test_amain_daemon_add_remove(tmp_path, capsys):
     )
     assert result == 0
     out = capsys.readouterr().out
-    assert "added grbl /dev/ttyUSB0" in out
+    assert "added GrblSerialDriver /dev/ttyUSB0" in out
     assert "token:" in out
     result = await amain(
         ["daemon", "remove", "/dev/ttyUSB0", "--config", str(config)]
@@ -198,7 +201,7 @@ async def test_amain_daemon_status_without_service(
     # Foreground users have no service: status must still show the
     # token and probe the daemon instead of erroring out.
     config = tmp_path / "daemon.json"
-    add_device(config, "/dev/ttyUSB0", "grbl", 115200)
+    add_device(config, "/dev/ttyUSB0", "GrblSerialDriver", 115200)
     data = json.loads(config.read_text())
     data["port"] = 1
     config.write_text(json.dumps(data))

@@ -7,10 +7,10 @@ import pytest
 from conftest import EventRecorder
 
 from raydriver.core import DriverEvent
+from raydriver.driver import driver_info
 from raydriver.octoprint import OctoPrintDriver
 from raydriver.octoprint.emulator import OctoPrintEmulator
 from raydriver.octoprint.probe import OctoPrintDeviceInfo, describe
-from raydriver.protocols import protocol_info
 
 FAST_CONFIG = {
     "request_timeout": 2.0,
@@ -77,15 +77,15 @@ class TestProbe:
         assert info.name == "OctoPrint"
         assert info.max_travel is None
 
-    def test_registry_capabilities(self):
-        info = protocol_info("octoprint")
-        assert info.label == "OctoPrint"
+    def test_driver_info(self):
+        info = driver_info("OctoPrintDriver")
+        assert info.name == "OctoPrintDriver"
         capabilities = info.capabilities
         assert capabilities["uses_gcode"] is True
         assert capabilities["supports_settings"] is False
         assert capabilities["supports_unit_detection"] is False
         assert capabilities["supports_hold"] is True
-        assert "probe_info" in info.methods
+        assert hasattr(OctoPrintDriver, "probe_info")
 
 
 class TestConnection:

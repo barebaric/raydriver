@@ -3,6 +3,7 @@
 
 use std::sync::Arc;
 
+use crate::python::driver::PyDriver;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
@@ -59,7 +60,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "XtoolNetworkDriver", module = "raydriver.xtool", extends = crate::python::driver::PyDriver)]
+#[pyclass(name = "XtoolNetworkDriver", module = "raydriver.xtool", extends = PyDriver)]
 pub struct PyXtoolNetworkDriver {
     core: Arc<XtoolNetworkDriver>,
 }

@@ -38,7 +38,7 @@ async def open_daemon():
             port=0,
             sessions=[
                 {
-                    "protocol": "grbl",
+                    "protocol": "GrblSerialDriver",
                     "config": {
                         "port": "/dev/ttyUSB0",
                         "baudrate": 115200,
@@ -79,7 +79,7 @@ async def test_enumerates_devices(open_daemon, monkeypatch):
     assert device.params["remote_host"] == "127.0.0.1"
     assert device.params["remote_port"] == open_daemon
     assert device.params["device"] == "/dev/ttyUSB0"
-    assert device.params["_raydriver_protocol"] == "grbl"
+    assert device.params["_raydriver_protocol"] == "GrblSerialDriver"
     assert "raydriver://" in device.key
 
 
@@ -90,7 +90,7 @@ async def test_telnet_device_uses_generic_driver(monkeypatch):
             port=0,
             sessions=[
                 {
-                    "protocol": "grbl",
+                    "protocol": "GrblSerialDriver",
                     "config": {"host": "device.local", "tcp_port": 23},
                 }
             ],

@@ -15,6 +15,8 @@ __all__ = [
     "DEFAULT_KEEPALIVE_INTERVAL",
     "DEFAULT_KEEPALIVE_MISSES",
     "DEVICE_LIST",
+    "DRIVERS",
+    "DRIVER_LIST",
     "EVENT",
     "FRAME_TOO_LARGE",
     "INTERNAL",
@@ -29,8 +31,6 @@ __all__ = [
     "MAX_FRAME_BYTES",
     "PING",
     "PONG",
-    "PROTOCOLS",
-    "PROTOCOL_LIST",
     "PROTOCOL_VERSION",
     "ProtocolError",
     "REQUEST_TYPES",
@@ -39,9 +39,7 @@ __all__ = [
     "SESSION_COMMAND",
     "SESSION_DETACH",
     "SESSION_LIST",
-    "SESSION_METHODS",
     "SESSION_OPEN",
-    "SESSION_PROPERTIES",
     "SESSION_PROPERTY",
     "UNKNOWN_DEVICE",
     "UNKNOWN_METHOD",
@@ -72,6 +70,8 @@ CLIENT_LIST: builtins.str = 'client/list'
 DEFAULT_KEEPALIVE_INTERVAL: builtins.float = 2.0
 DEFAULT_KEEPALIVE_MISSES: builtins.int = 3
 DEVICE_LIST: builtins.str = 'device/list'
+DRIVERS: builtins.list[builtins.str]
+DRIVER_LIST: builtins.str = 'driver/list'
 EVENT: builtins.str = 'event'
 FRAME_TOO_LARGE: builtins.str = 'frame_too_large'
 INTERNAL: builtins.str = 'internal'
@@ -85,8 +85,6 @@ LENGTH_PREFIX: LengthPrefix
 MAX_FRAME_BYTES: builtins.int = 16777216
 PING: builtins.str = 'ping'
 PONG: builtins.str = 'pong'
-PROTOCOLS: builtins.list[builtins.str]
-PROTOCOL_LIST: builtins.str = 'protocol/list'
 PROTOCOL_VERSION: builtins.int = 1
 ProtocolError: type
 REQUEST_TYPES: builtins.list[builtins.str]
@@ -95,9 +93,7 @@ SESSION_CLOSE: builtins.str = 'session/close'
 SESSION_COMMAND: builtins.str = 'session/command'
 SESSION_DETACH: builtins.str = 'session/detach'
 SESSION_LIST: builtins.str = 'session/list'
-SESSION_METHODS: builtins.list[builtins.str]
 SESSION_OPEN: builtins.str = 'session/open'
-SESSION_PROPERTIES: builtins.list[builtins.str]
 SESSION_PROPERTY: builtins.str = 'session/property'
 UNKNOWN_DEVICE: builtins.str = 'unknown_device'
 UNKNOWN_METHOD: builtins.str = 'unknown_method'
@@ -111,7 +107,7 @@ class LengthPrefix:
     def size(self) -> builtins.int: ...
     def pack(self, value: builtins.int) -> bytes: ...
 
-def decode_event(payload: dict[builtins.str, builtins.object]) -> typing.Optional[core.SessionEvent]:
+def decode_event(payload: dict[builtins.str, builtins.object]) -> typing.Optional[core.DriverEvent]:
     r"""
     Decodes an event frame payload; ``None`` when it is not an event.
     """
@@ -120,7 +116,7 @@ def decode_frame(payload: typing.Sequence[builtins.int], max_bytes: typing.Optio
 
 def decode_state(payload: dict[builtins.str, builtins.object]) -> types.DeviceState: ...
 
-def encode_event(event: core.SessionEvent) -> dict[builtins.str, builtins.object]: ...
+def encode_event(event: core.DriverEvent) -> dict[builtins.str, builtins.object]: ...
 
 def encode_frame(message: dict[builtins.str, builtins.object], max_bytes: typing.Optional[builtins.int] = None) -> bytes: ...
 

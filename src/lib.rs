@@ -4,21 +4,21 @@
 //! modules built on top of it:
 //!
 //! - [`core`]: shared primitives — byte transports, device value
-//!   types, dialect command-template formatting, the session
+//!   types, dialect command-template formatting, the driver
 //!   event/error primitives, and the transport-level discovery
 //!   scanners (serial capture, mDNS browse, subnet TCP scan).
 //! - [`encode`]: machine-code encoders (G-code dialects, device print
 //!   jobs) built on raygeo's `Encoder` trait. Pure Rust and wasm-clean;
 //!   the Python bindings join raygeo's pipeline through a capsule
 //!   handoff.
-//! - [`epilog`]: the Epilog laser print-job session (LPD).
+//! - [`epilog`]: the Epilog laser print-job driver (LPD).
 //! - [`esp3d`]: the ESP3D / FluidNC transport for GRBL over HTTP and
 //!   WebSocket.
 //! - [`grbl`]: the GRBL protocol stack (parsing, flow control, the
-//!   full session and the minimal ping-pong session).
-//! - [`smoothie`]: the Smoothieware session.
-//! - [`xtool`]: the xTool proprietary WiFi-API session.
-//! - [`marlin`]: the Marlin session.
+//!   full streaming driver and the minimal ping-pong driver).
+//! - [`smoothie`]: the Smoothieware driver.
+//! - [`xtool`]: the xTool proprietary WiFi-API drivers.
+//! - [`marlin`]: the Marlin driver.
 //!
 //! The crate is layered: `core` and the protocol modules are pure
 //! Rust and must not depend on PyO3; the optional `python` feature
@@ -26,10 +26,10 @@
 //!
 //! Build features slice out what a wasm host physically cannot do
 //! (`mdns`, the remote daemon listener, the remote client, OS serial
-//! ports, the tungstenite-based M2 session); everything else —
-//! including the HTTP/WS device sessions — compiles and runs on
+//! ports, the tungstenite-based M2 driver); everything else —
+//! including the HTTP/WS device drivers — compiles and runs on
 //! wasm against embedder-provided streams (see docs/wasm.md).  The
-//! M2 session's TLS roots are chosen by `tls-native-roots` (default)
+//! M2 driver's TLS roots are chosen by `tls-native-roots` (default)
 //! or `tls-webpki-roots`.
 
 // The M2 WebSocket client needs a rustls trust store, selected at
@@ -47,6 +47,7 @@ compile_error!(
 );
 
 pub mod core;
+pub mod driver;
 pub mod encode;
 pub mod epilog;
 pub mod esp3d;

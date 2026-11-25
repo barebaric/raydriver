@@ -232,9 +232,7 @@ class TestEvents:
     async def test_raw_lines_are_forwarded(self, rig):
         session, emulator, events = rig
         emulator.broadcast("ok:IDLE")
-        await events.wait_for(
-            DriverEvent.RawRx, lambda e: e.line == "ok:IDLE"
-        )
+        await events.wait_for(DriverEvent.RawRx, lambda e: e.line == "ok:IDLE")
 
     async def test_job_states_drive_the_device_state(self, rig):
         session, emulator, _ = rig

@@ -1,10 +1,9 @@
 """The remote RPC surface must match every hosted session class.
 
-The daemon validates method names from the protocol registry, then
-calls the Python session method with the client's arguments.  A
-signature mismatch therefore fails inside the daemon, not at the
-client.  These tests pin the uniform argument names and exercise two
-representative protocols end to end.
+The daemon calls the Python driver method with the client's
+arguments.  A signature mismatch therefore fails inside the daemon,
+not at the client.  These tests pin the uniform argument names and
+exercise two representative drivers end to end.
 """
 
 import asyncio
@@ -17,24 +16,23 @@ from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
 from raydriver.epilog import EpilogDriver
-from raydriver.grbl import GrblSerialDriver
+from raydriver.grbl import GrblNetworkDriver, GrblSerialDriver
 from raydriver.grbl.simple import GrblSerialSimpleDriver
 from raydriver.marlin import MarlinSerialDriver
 from raydriver.octoprint import OctoPrintDriver
-from raydriver.protocols import PROTOCOLS
 from raydriver.remote.client import RemoteSession, create_session
 from raydriver.remote.daemon import Daemon, DaemonConfig
 from raydriver.smoothie import SmoothieDriver
 from raydriver.smoothie.emulator import SmoothieEmulator
 
 SESSIONS = {
-    "grbl": GrblSerialDriver,
-    "grbl_simple": GrblSerialSimpleDriver,
-    "esp3d": GrblSerialDriver,
-    "smoothie": SmoothieDriver,
-    "marlin": MarlinSerialDriver,
-    "octoprint": OctoPrintDriver,
-    "epilog": EpilogDriver,
+    "GrblSerialDriver": GrblSerialDriver,
+    "GrblSerialSimpleDriver": GrblSerialSimpleDriver,
+    "GrblNetworkDriver": GrblNetworkDriver,
+    "SmoothieDriver": SmoothieDriver,
+    "MarlinSerialDriver": MarlinSerialDriver,
+    "OctoPrintDriver": OctoPrintDriver,
+    "EpilogDriver": EpilogDriver,
 }
 
 REMOTE_TIMINGS = {
@@ -46,7 +44,7 @@ REMOTE_TIMINGS = {
 }
 
 
-@pytest.mark.parametrize("protocol", sorted(PROTOCOLS))
+@pytest.mark.parametrize("protocol", sorted(SESSIONS))
 def test_hosted_sessions_accept_remote_arguments(protocol):
     """Every hostable session accepts the arguments the proxy sends."""
     cls = SESSIONS[protocol]
@@ -76,7 +74,7 @@ async def test_remote_home_smoothie():
         DaemonConfig(
             port=0,
             sessions=[
-                {"protocol": "smoothie", "config": {"port": "/dev/null"}}
+                {"protocol": "SmoothieDriver", "config": {"port": "/dev/null"}}
             ],
         ),
         session_factory=factory,
@@ -85,7 +83,7 @@ async def test_remote_home_smoothie():
     port = server.sockets[0].getsockname()[1]
     events = EventRecorder()
     session = create_session(
-        "smoothie",
+        "SmoothieDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         events.callback,
@@ -146,7 +144,7 @@ async def test_remote_run_reports_job_errors():
     port = server.sockets[0].getsockname()[1]
     events = EventRecorder()
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         events.callback,
@@ -196,7 +194,7 @@ async def test_daemon_reports_synchronous_session_errors():
     server = await daemon.start()
     port = server.sockets[0].getsockname()[1]
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         None,
@@ -241,7 +239,7 @@ async def test_daemon_preserves_timeout_error_kind():
     server = await daemon.start()
     port = server.sockets[0].getsockname()[1]
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         {"remote_host": "127.0.0.1", "remote_port": port},
         DEFAULT_DIALECT,
         None,

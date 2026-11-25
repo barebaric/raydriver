@@ -866,8 +866,8 @@ const REMOTE_KEYS: [&str; 6] = [
 
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[gen_stub(override_return_type(
-    type_repr = "typing.Union[RemoteSession, grbl.GrblSession, \
-                simple.GrblSimpleSession, smoothie.SmoothieDriver, \
+    type_repr = "typing.Union[RemoteSession, grbl.GrblSerialDriver, \
+                simple.GrblSerialSimpleDriver, smoothie.SmoothieDriver, \
                 octoprint.OctoPrintDriver, marlin.MarlinSerialDriver]",
     imports = (
         "typing",
@@ -1027,7 +1027,7 @@ pub(crate) fn list_devices<'py>(
 
 #[gen_stub_pyfunction(module = "raydriver.remote.client")]
 #[pyfunction]
-pub(crate) fn list_protocols<'py>(
+pub(crate) fn list_drivers<'py>(
     py: Python<'py>,
     #[gen_stub(override_type(
         type_repr = "typing.Union[dict[builtins.str, builtins.object], builtins.str]",
@@ -1038,7 +1038,7 @@ pub(crate) fn list_protocols<'py>(
     let endpoint = parse_endpoint(py, &endpoint)?;
     spawn_future(py, async move {
         let protocols =
-            core::list_protocols(&endpoint).await.map_err(connection)?;
+            core::list_drivers(&endpoint).await.map_err(connection)?;
         Python::attach(|py| {
             protocols
                 .iter()

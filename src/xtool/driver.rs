@@ -108,7 +108,7 @@ pub static INFO: DriverInfo = DriverInfo {
     connection: ConnectionKind::Network,
     maturity: DriverMaturity::Experimental,
     caps: caps(
-        false, true, true, true, false, false, true, false, false, true, false,
+        false, true, false, true, false, false, true, false, false, true, false,
     ),
     uses_gcode: true,
     machine_space_wcs: "G53",

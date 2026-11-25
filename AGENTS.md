@@ -34,7 +34,7 @@ All tests are Python-based, under `tests/`, and run against
 15-block planner with deferred acknowledgements, realtime command
 interception, modal G-code state, feed-rate-timed motion, alarms,
 homing, probing and the `$` system commands.  Device-side code
-consumes session writes via `MockTransport.take_new_sent()` (a
+consumes driver writes via `MockTransport.take_new_sent()` (a
 monotonic cursor — never index into `sent()`, which tests may clear
 at any time).
 
@@ -59,18 +59,20 @@ The crate is split into layers that depend only downward:
 
 ```
 encode (machine-code encoders; raygeo core only)
-core (transports, value types, dialects, session primitives)
-  →  grbl | smoothie | marlin | esp3d | octoprint | xtool  (protocol sessions)
+core (transports, value types, dialects, driver primitives)
+  →  grbl | smoothie | marlin | esp3d | octoprint | xtool | epilog  (drivers)
+  →  driver (the typed built-in driver list and resource lock)
   →  python (PyO3 bindings)
 ```
 
 - `src/core/` is protocol-neutral and pure Rust: byte transports,
   device value types, dialect command-template formatting, the
-  `SessionEvents`/`SessionError`/`AsyncEvent` session primitives,
-  the shared ping-pong line-session skeleton (`core::line_session`),
-  and the transport-level discovery scanners. Protocol knowledge
-  does not live here: the remote daemon's protocol table and device
-  fingerprints are supplied by the embedder (`core::remote::registry::Registry`).
+  `DriverEvents`/`DriverError`/`AsyncEvent` driver primitives, the
+  shared ping-pong line-driver skeleton (`core::line_driver`), the
+  typed `DriverInfo`, and the transport-level discovery scanners.
+  Protocol knowledge does not live here: the remote daemon's driver
+  table and fingerprints are supplied by the embedder
+  (`core::remote::registry::Registry`).
 - `src/encode/` holds the machine-code encoders (the G-code dialect
   encoder and the Epilog print-job encoder). They implement
   `raygeo::ops::convert::Encoder`, depend on raygeo's pure-Rust core
@@ -80,14 +82,16 @@ core (transports, value types, dialects, session primitives)
   capsule name embeds the raygeo version the encoder was built
   against; raygeo rejects a mismatch instead of misreading it.
 - `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
-  `src/octoprint/`, `src/xtool/` (with `m2`) hold the protocol
-  sessions; they must not depend on PyO3 or any Python types. They
-  may use `src/core/` freely. Cross-protocol imports between
+  `src/octoprint/`, `src/xtool/` (with `m2`) and `src/epilog/` hold
+  the drivers; they must not depend on PyO3 or any Python types.
+  They may use `src/core/` freely. Cross-protocol imports between
   protocol modules need an explicit justification in the importing
-  module's `mod.rs` docs (e.g. the Smoothie session reuses the GRBL
-  parser and error tables because Smoothie emits Grbl-style
-  reports; esp3d is a transport that the Python binding wires to the
-  GRBL session).
+  module's `mod.rs` docs (e.g. Smoothie reuses the GRBL parser and
+  error tables because Smoothie emits Grbl-style reports; esp3d is a
+  transport used by `GrblNetworkDriver`).
+- `src/driver/` sits above the protocol modules: it holds the typed
+  `DriverKind` list of built-ins, their construction from a JSON-style
+  config, and the process-wide resource lock. It must not use PyO3.
 - `src/python/` contains all PyO3 bindings and may use `src/core/`
   and the protocol modules freely, never the other way around.
 
@@ -112,44 +116,51 @@ def __getattr__(name):
     return getattr(_raydriver.grbl, name)
 ```
 
-Sanctioned exceptions: `python/raydriver/esp3d/__init__.py` re-exports
-the GRBL session as `Esp3dSession` (ESP3D is a transport, not a
-separate protocol), and `python/raydriver/remote/__init__.py` binds
-its submodule attributes eagerly.
+Sanctioned exceptions: `python/raydriver/esp3d/__init__.py` exposes
+only the ESP3D connection params (`Esp3dConfig`; the driver is
+`raydriver.grbl.GrblNetworkDriver`), `python/raydriver/driver/__init__.py`
+adds the common base accessor, and `python/raydriver/remote/__init__.py`
+binds its submodule attributes eagerly.
 
 Rust *parent* modules (`grbl`, `core`, ...) are intentionally NOT
 registered in `sys.modules` — the Python `__init__.py` of the same
 name is the package. Rust *leaf* submodules (`grbl.probe`,
-`protocols`, `core.discovery.*`, ...) ARE registered via
-`attach_submodule`, so imports like
+`core.discovery.*`, ...) ARE registered via `attach_submodule`, so
+imports like
 `from raydriver.grbl.probe import describe` resolve to the compiled
 module and must not be shadowed by a same-named Python file.
 
 The `probe` modules are native (`grbl`, `marlin`, `smoothie`,
 `octoprint`). Each exports the protocol's census class, `describe()`
-and a `probe_device(session)` compatibility wrapper that forwards to
-the session's native `probe_device()` method. Do not add a Python
+and a `probe_device(driver)` compatibility wrapper that forwards to
+the driver's native `probe_device()` method. Do not add a Python
 `probe.py` next to them: it would shadow the compiled module.
 
-## The Uniform Session API
+## The Driver Hierarchy
 
-The Python session surface is **exactly** the `SessionLike` protocol
-in Rayforge's `machine/driver/session_driver.py`: one method set with
-one signature per method, implemented once (`python::session_api::
-uniform_session_api!`) and invoked by every session class. Rayforge's
-`SessionDriverBase` relies on this directly — there is no per-driver
-adaptation layer.
+Every protocol driver is one Rust struct implementing the `Driver`
+trait (`core::driver`) and one Python subclass of the single
+`raydriver.driver.Driver` base class, declared with PyO3 `extends`.
 
 Rules:
 
-- Never add or change a session method on one class only. The macro
-  is the single definition; per-class bindings keep only the
-  constructor, protocol-specific extras (`probe_info`,
-  `execute_block`, `start`) and properties.
-- Protocol differences live in the Rust `Session` trait impls: an
-  operation a protocol cannot perform returns
-  `SessionError::Unsupported`, which the bindings surface as
-  `NotImplementedError`. The method is always present.
+- The uniform surface is declared exactly once, on `PyDriver`. Never
+  redeclare a base method on a subclass; subclass bindings keep only
+  the constructor, protocol-specific extras (`probe_device`,
+  `probe_info`, `execute_block`, `start`, `upload`) and `__repr__`.
+- No inheritance between protocol drivers: the GRBL variants are
+  sibling structs sharing `grbl::stream` through composition.
+- Driver differences live in the Rust `Driver` impls. An operation a
+  protocol cannot perform returns `DriverError::Unsupported`, which
+  the bindings surface as `NotImplementedError`; the method is always
+  present.
+- Identity, capabilities, WCS set, config keys and the auto-detection
+  fingerprint live in each driver's typed `DriverInfo`
+  (`pub static INFO`). `src/driver::DriverKind` is the only list of
+  built-ins. There is no protocol registry and no method-name table.
+- Class names are the persisted driver names (`GrblSerialDriver`,
+  `MarlinSerialDriver`, ...). Do not rename or alias them without a
+  migration path for saved machines.
 - Signatures: `run(gcode, op_line_map=None, op_estimates=None,
   progress_callback=None)`, `home(axes=None, active_wcs=None)`,
   `move_to(speed, x, y, z=None)`, `jog(speed, deltas=None)`,
@@ -164,13 +175,13 @@ Rules:
 - Async Rust methods return asyncio futures that are completed from
   the tokio side via `call_soon_threadsafe` on the caller's event
   loop. Never block the loop inside a binding.
-- Events emitted by the session are delivered to the Python
-  `event_callback(SessionEvent)` on the event loop thread. Core
-  sessions build one `core::session::SessionEvent`; the bindings
-  convert it to the Python enum and the remote wire event. Bindings
-  must not call the callback from a foreign thread directly.
+- Events emitted by the driver are delivered to the Python
+  `event_callback(DriverEvent)` on the event loop thread. The drivers
+  build one `core::driver::DriverEvent`; the bindings convert it to
+  the Python enum and the remote wire event. Bindings must not call
+  the callback from a foreign thread directly.
 - Cancelling the asyncio future returned by `run()`/`run_raw()`
-  aborts the Rust future and invokes the session cancel path; it is
+  aborts the Rust future and invokes the driver cancel path; it is
   not equivalent to merely dropping the Python task.
 
 ## Dialects
@@ -183,9 +194,9 @@ subset used for interactive commands. Formatting supports the Python
 ## Build Features and WASM
 
 The crate compiles for hosts *and* for `wasm32-unknown-unknown` —
-and wasm keeps everything a browser can plausibly drive: session
+and wasm keeps everything a browser can plausibly drive: driver
 logic, the HTTP/WS clients, the telnet transport and the
-esp3d/octoprint/xtool sessions all run there, with dialing going
+esp3d/octoprint/xtool drivers all run there, with dialing going
 through the injectable `core::connector` seam (see docs/wasm.md).
 Cargo features exist only for what a browser physically cannot do;
 verify with `make check-wasm`.
@@ -212,7 +223,7 @@ Rules:
   `--no-default-features --features m2` build without either fails at
   compile time with an explanatory error.
 - Device-facing network code (HTTP/WS clients, telnet transport,
-  esp3d/octoprint/xtool sessions) dials through
+  esp3d/octoprint/xtool drivers) dials through
   `core::connector::dial` and must compile unconditionally; on hosts
   without TCP sockets the embedder installs a `StreamConnector`.
   Never reintroduce `tokio::net::TcpStream` there.

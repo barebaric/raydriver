@@ -434,7 +434,7 @@ protocol_string!("AUTH", core::AUTH);
 protocol_string!("PING", core::PING);
 protocol_string!("PONG", core::PONG);
 protocol_string!("DEVICE_LIST", core::DEVICE_LIST);
-protocol_string!("PROTOCOL_LIST", core::PROTOCOL_LIST);
+protocol_string!("DRIVER_LIST", core::DRIVER_LIST);
 protocol_string!("SESSION_LIST", core::SESSION_LIST);
 protocol_string!("SESSION_OPEN", core::SESSION_OPEN);
 protocol_string!("SESSION_ATTACH", core::SESSION_ATTACH);
@@ -478,16 +478,6 @@ pyo3_stub_gen::module_variable!(
 );
 pyo3_stub_gen::module_variable!(
     "raydriver.remote.protocol",
-    "PROTOCOLS",
-    Vec<&'static str>
-);
-pyo3_stub_gen::module_variable!(
-    "raydriver.remote.protocol",
-    "SESSION_METHODS",
-    Vec<&'static str>
-);
-pyo3_stub_gen::module_variable!(
-    "raydriver.remote.protocol",
-    "SESSION_PROPERTIES",
+    "DRIVERS",
     Vec<&'static str>
 );

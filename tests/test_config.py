@@ -79,7 +79,7 @@ def test_session_accepts_typed_config():
 
 def test_factory_accepts_typed_config():
     session = create_session(
-        "grbl",
+        "GrblSerialDriver",
         GrblSerialConfig(port="/dev/null"),
         {},
         None,

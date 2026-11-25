@@ -148,7 +148,7 @@ async def remote_rig():
     device_task = asyncio.ensure_future(emulator.run())
 
     def factory(protocol_name, config, dialect, event_callback):
-        assert protocol_name == "grbl"
+        assert protocol_name == "GrblSerialDriver"
         return GrblSerialDriver.with_transport(
             mock,
             config={**FAST_TIMINGS, **(config or {})},
@@ -177,7 +177,7 @@ class TestProbeDeviceRemote:
         port = remote_rig
         events = EventRecorder()
         session = create_session(
-            "grbl",
+            "GrblSerialDriver",
             {"remote_host": "127.0.0.1", "remote_port": port},
             None,
             events.callback,
