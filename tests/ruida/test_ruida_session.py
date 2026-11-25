@@ -218,7 +218,6 @@ class TestLiveCommands:
         assert any("d82c" in command for command in emulator.commands)
         assert any("d82e" in command for command in emulator.commands)
 
-
     async def test_jog_z_and_u_axes(self, rig):
         session, emulator, _events = rig
         await session.jog(600.0, [("z", 1.0), ("u", 2.0)])
