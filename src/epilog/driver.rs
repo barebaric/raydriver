@@ -28,9 +28,11 @@ pub const DEFAULT_PORT: u16 = 515;
 
 /// Default print queue name.
 ///
-/// RFC 1179 makes this the operand of the receive-job command, and
-/// Epilog's own setup instructions name the queue "Laser".
-pub const DEFAULT_QUEUE: &str = "Laser";
+/// Empty by default: the reference driver submits the receive-job
+/// command without a queue operand (`\x02\n`), which the Epilog print
+/// servers accept. Set a name only for a print server that requires
+/// one.
+pub const DEFAULT_QUEUE: &str = "";
 
 /// Name of the machine submitting the job (RFC 1179's `H` line).
 ///
@@ -83,20 +85,15 @@ impl EpilogConfig {
     /// The queue operand, reduced to something a daemon accepts.
     ///
     /// The name travels as a command operand terminated by LF, so
-    /// only printable characters without whitespace survive; an empty
-    /// name falls back to the default queue.
+    /// only printable characters without whitespace survive. An empty
+    /// configured queue stays empty: the receive-job command is then
+    /// `\\x02\\n`, which is what the reference driver sends.
     fn queue_operand(&self) -> String {
-        let cleaned: String = self
-            .queue
+        self.queue
             .chars()
             .filter(|c| c.is_ascii_graphic())
             .take(31)
-            .collect();
-        if cleaned.is_empty() {
-            DEFAULT_QUEUE.to_string()
-        } else {
-            cleaned
-        }
+            .collect()
     }
 }
 

@@ -32,10 +32,11 @@
 //! <- \x00
 //! ```
 //!
-//! The queue name defaults to `Laser`, which is what Epilog's own
-//! setup instructions name the queue. The control file's `H` and `P`
-//! lines carry the configured submitting host and user, and `J`/`N`
-//! carry the job title so the machine can show it in its job list.
+//! The queue operand is empty by default: the reference driver sends
+//! the receive-job command as `\x02\n`, and the Epilog print servers
+//! accept it. The control file's `H` and `P` lines carry the configured
+//! submitting host and user, and `J`/`N` carry the job title so the
+//! machine can show it in its job list.
 //!
 //! Every stage must be acknowledged with a single `\x00` byte. A
 //! non-zero reply is a rejection; a short read is a disconnect. A
