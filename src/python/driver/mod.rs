@@ -151,6 +151,7 @@ impl PyDriver {
         ))]
         progress_callback: Option<Py<PyAny>>,
     ) -> PyResult<PyAwait<'py, ()>> {
+        self.events.capture_loop(py)?;
         let core = self.core.clone();
         let events = self.events.clone();
         let op_map = op_line_map.unwrap_or_default();
@@ -178,6 +179,7 @@ impl PyDriver {
         py: Python<'py>,
         machine_code: String,
     ) -> PyResult<PyAwait<'py, ()>> {
+        self.events.capture_loop(py)?;
         let core = self.core.clone();
         let cancel_core = core.clone();
         spawn_future_with_cancel(
