@@ -26,6 +26,7 @@ use crate::python::grbl::driver::{
 use crate::python::grbl::simple::PyGrblSerialSimpleDriver;
 use crate::python::marlin::driver::PyMarlinSerialDriver;
 use crate::python::octoprint::driver::PyOctoPrintDriver;
+use crate::python::ruida::driver::PyRuidaDriver;
 use crate::python::simulator::PyNoDeviceDriver;
 use crate::python::smoothie::driver::PySmoothieDriver;
 use crate::python::xtool::driver::PyXtoolNetworkDriver;
@@ -520,6 +521,7 @@ fn builtin_drivers(py: Python<'_>) -> Vec<Py<PyAny>> {
         py.get_type::<PyXtoolNetworkDriver>().into_any().unbind(),
         py.get_type::<PyOctoPrintDriver>().into_any().unbind(),
         py.get_type::<PyEpilogDriver>().into_any().unbind(),
+        py.get_type::<PyRuidaDriver>().into_any().unbind(),
         py.get_type::<PyNoDeviceDriver>().into_any().unbind(),
     ]
 }

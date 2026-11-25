@@ -12,6 +12,7 @@ pub(crate) mod marlin;
 pub(crate) mod octoprint;
 pub(crate) mod pyfuture;
 pub(crate) mod remote;
+pub(crate) mod ruida;
 pub(crate) mod runtime;
 pub(crate) mod simulator;
 pub(crate) mod smoothie;
@@ -174,6 +175,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     epilog::register(m)?;
     xtool::register(m)?;
     remote::register(m)?;
+    ruida::register(m)?;
     register_atexit_hook(m)?;
     Ok(())
 }

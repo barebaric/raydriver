@@ -10,3 +10,6 @@
 //! The protocol layers here are pure Rust and do not depend on PyO3.
 
 pub mod codec;
+pub mod driver;
+pub mod status;
+pub mod transport;

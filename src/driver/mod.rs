@@ -22,6 +22,8 @@ use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
 use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
 use crate::simulator::{NoDeviceConfig, NoDeviceDriver};
 use crate::smoothie::driver::{SmoothieConfig, SmoothieDriver};
+use crate::ruida::driver::{RuidaConfig, RuidaDriver};
+use crate::ruida::transport::TransportKind as RuidaTransportKind;
 use crate::xtool::driver::{XtoolConfig, XtoolNetworkDriver};
 
 pub use resources::ResourceGuard;
@@ -44,6 +46,7 @@ pub enum DriverKind {
     XtoolNetwork,
     OctoPrint,
     Epilog,
+    Ruida,
     NoDevice,
 }
 
@@ -62,6 +65,7 @@ impl DriverKind {
         DriverKind::XtoolNetwork,
         DriverKind::OctoPrint,
         DriverKind::Epilog,
+        DriverKind::Ruida,
         DriverKind::NoDevice,
     ];
 
@@ -93,6 +97,7 @@ impl DriverKind {
             Self::XtoolNetwork => &crate::xtool::driver::INFO,
             Self::OctoPrint => &crate::octoprint::driver::INFO,
             Self::Epilog => &crate::epilog::driver::INFO,
+            Self::Ruida => &crate::ruida::driver::INFO,
             Self::NoDevice => &crate::simulator::INFO,
         }
     }
@@ -111,6 +116,17 @@ impl DriverKind {
             | Self::Epilog => require(config, "host"),
             #[cfg(feature = "m2")]
             Self::XtoolM2 => require(config, "host"),
+            Self::Ruida => {
+                let host = string(config, "host").unwrap_or_default();
+                let device =
+                    string(config, "usb_device").unwrap_or_default();
+                if host.is_empty() && device.is_empty() {
+                    return Err(
+                        "a host or a USB device must be configured".into(),
+                    );
+                }
+                Ok(())
+            }
             Self::NoDevice => Ok(()),
             Self::GrblBluetooth => {
                 let address = string(config, "address").unwrap_or_default();
@@ -274,6 +290,30 @@ impl DriverKind {
                 }
                 Ok(OctoPrintDriver::new(octoprint, events))
             }
+            Self::Ruida => {
+                let mut ruida = RuidaConfig::default();
+                ruida.host =
+                    string(config, "host").filter(|value| !value.is_empty());
+                ruida.usb_device = string(config, "usb_device")
+                    .filter(|value| !value.is_empty());
+                ruida.port = uint(config, "port").unwrap_or(50200) as u16;
+                ruida.protocol =
+                    match string(config, "protocol").as_deref() {
+                        Some("tcp") => RuidaTransportKind::Tcp,
+                        _ => RuidaTransportKind::Udp,
+                    };
+                if let Some(magic) = string(config, "magic_number") {
+                    ruida.magic = parse_magic(&magic)?;
+                }
+                if let Some(protect) = boolean(config, "protect") {
+                    ruida.protect = protect;
+                }
+                if let Some(timeout) = float(config, "timeout") {
+                    ruida.timeout =
+                        std::time::Duration::from_millis((timeout * 1000.0) as u64);
+                }
+                Ok(RuidaDriver::new(ruida, events))
+            }
             Self::NoDevice => Ok(NoDeviceDriver::new(
                 NoDeviceConfig::from_value(config),
                 events,
@@ -372,4 +412,21 @@ fn grbl_stream_config(config: &Value) -> GrblStreamConfig {
         tuning.homing_timeout = v;
     }
     tuning
+}
+
+fn parse_magic(raw: &str) -> Result<u8, DriverError> {
+    let raw = raw.trim();
+    let value = if let Some(hex) = raw
+        .strip_prefix("0x")
+        .or_else(|| raw.strip_prefix("0X"))
+    {
+        u8::from_str_radix(hex, 16).ok()
+    } else {
+        raw.parse::<u8>().ok()
+    };
+    value.ok_or_else(|| {
+        DriverError::Device(format!(
+            "magic number must be between 0x00 and 0xFF: {raw:?}"
+        ))
+    })
 }
