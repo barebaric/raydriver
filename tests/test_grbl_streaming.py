@@ -12,7 +12,7 @@ from conftest import (
     wait_until,
 )
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
 from raydriver.grbl.emulator import WELCOME
 
@@ -31,7 +31,7 @@ class TestRunBasics:
     async def test_simple_job_completes_and_moves(self, rig):
         session, mock, emulator, events = rig
         await session.run("G1 X10 F1000\nG1 Y5 F1000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert session.buffer_count == 0
         assert session.pending_commands == []
@@ -51,7 +51,7 @@ class TestRunBasics:
         await session.run(
             "G1 X1 F1000 ; comment\n\n(comment only)\nG1 X2 F1000\n"
         )
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         sent = sent_bytes(mock)
         assert b"comment" not in sent
         assert b"G1 X1 F1000\n" in sent
@@ -62,12 +62,12 @@ class TestRunBasics:
         emulator.speed_factor = 50  # ~0.5 s of motion
         job = asyncio.ensure_future(session.run(gcode(30)))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         emulator.speed_factor = 100000
         await asyncio.wait_for(job, timeout=10)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
 
     async def test_long_job_never_overflows_rx_buffer(self, rig):
         session, mock, emulator, events = rig
@@ -76,7 +76,7 @@ class TestRunBasics:
         # must never see an RX overflow from the character-counting
         # sender.
         await asyncio.wait_for(session.run(gcode(60)), timeout=30)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert emulator.rx_overrun is False
         assert session.buffer_count == 0
@@ -90,7 +90,7 @@ class TestErrorsDuringJob:
         lines[5] = "G999"
         job = asyncio.ensure_future(session.run("\n".join(lines)))
         await asyncio.wait_for(job, timeout=10)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         sent = sent_bytes(mock)
         assert sent.count(b"G1 X") < 40
@@ -101,7 +101,7 @@ class TestErrorsDuringJob:
         states = [
             e.state
             for e in events.events
-            if isinstance(e, SessionEvent.StateChanged)
+            if isinstance(e, DriverEvent.StateChanged)
         ]
         assert any(s.error is not None and s.error.code == 20 for s in states)
         # run() resolves normally even on failure, so the terminal
@@ -124,7 +124,7 @@ class TestErrorsDuringJob:
         # A subsequent job start clears the error again.
         job = asyncio.ensure_future(session.run(gcode(5)))
         await asyncio.wait_for(job, timeout=10)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert session.state.error is None
 
     async def test_soft_limit_alarm_halts_stream(self, rig):
@@ -136,13 +136,13 @@ class TestErrorsDuringJob:
         lines[3] = "G1 X10000 F1000"
         job = asyncio.ensure_future(session.run("\n".join(lines)))
         await asyncio.wait_for(job, timeout=10)
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await asyncio.sleep(0.1)
         assert sent_bytes(mock).count(b"G1 X") < 40
         states = [
             e.state
             for e in events.events
-            if isinstance(e, SessionEvent.StateChanged)
+            if isinstance(e, DriverEvent.StateChanged)
         ]
         assert any(
             s.error is not None and s.error.title == "Soft Limit"
@@ -157,7 +157,7 @@ class TestStallBehavior:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             mock.clear_sent()
@@ -172,7 +172,7 @@ class TestStallBehavior:
             # Speed the machine up: the job drains and completes.
             emulator.speed_factor = 100000
             await asyncio.wait_for(job, timeout=30)
-            await events.wait_for(SessionEvent.JobFinished)
+            await events.wait_for(DriverEvent.JobFinished)
             assert emulator.rx_overrun is False
         finally:
             await session.disconnect()
@@ -184,13 +184,13 @@ class TestStallBehavior:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             mock.clear_sent()
             emulator.silent = True  # the cable is gone
             await asyncio.wait_for(session.run(slow_gcode(40)), timeout=40)
-            await events.wait_for(SessionEvent.JobFinished)
+            await events.wait_for(DriverEvent.JobFinished)
             assert sent_bytes(mock).count(b"G1 X") < 40
             # No protocol error was seen, so run() must surface the
             # job-level failure ("device stopped responding") through
@@ -223,7 +223,7 @@ class TestCancel:
         # Soft reset mid-motion reboots Grbl into the alarm lock.
         assert emulator.tx_log.count(WELCOME) >= 1
         finished = [
-            e for e in events.events if isinstance(e, SessionEvent.JobFinished)
+            e for e in events.events if isinstance(e, DriverEvent.JobFinished)
         ]
         assert len(finished) == 1
 
@@ -250,7 +250,7 @@ class TestCancel:
         emulator.speed_factor = 2
         job = asyncio.ensure_future(session.run(slow_gcode(200)))
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status.name == "RUN",
         )
         await asyncio.sleep(0.2)
@@ -305,7 +305,7 @@ class TestRunRaw:
         session, mock, emulator, events = rig
         mock.clear_sent()
         await session.run_raw("G1 X1 F1000\n!\nG1 X2 F1000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         sent = sent_bytes(mock)
         assert b"G1 X1 F1000\n" in sent
         assert b"!" in sent

@@ -17,7 +17,7 @@ from conftest import DEFAULT_DIALECT, FAST_TIMINGS, EventRecorder
 
 from raydriver.analyzer.capture import Recorder
 from raydriver.analyzer.golden import assert_capture_matches_golden
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -46,7 +46,7 @@ SMOOTHIE_MARLIN_TIMINGS = {
 
 async def _await_connected(events):
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
 

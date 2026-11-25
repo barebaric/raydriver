@@ -13,7 +13,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::{CancelMode, Session, SessionError};
+use crate::core::driver::{CancelMode, Driver, DriverError};
 use crate::core::transport::TransportKind;
 
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport, ProtocolVariant};
@@ -25,19 +25,19 @@ use crate::python::events::PyEvents;
 use crate::python::grbl::probe::GrblDeviceInfo;
 use crate::python::pyfuture::{spawn_future, PyAwait};
 
-impl From<SessionError> for PyErr {
-    fn from(err: SessionError) -> Self {
+impl From<DriverError> for PyErr {
+    fn from(err: DriverError) -> Self {
         match err {
-            SessionError::Connection(msg) => PyConnectionError::new_err(msg),
-            SessionError::Timeout(message) => PyTimeoutError::new_err(message),
-            SessionError::Device(msg) => PyRuntimeError::new_err(msg),
-            SessionError::BufferStall(msg) => {
+            DriverError::Connection(msg) => PyConnectionError::new_err(msg),
+            DriverError::Timeout(message) => PyTimeoutError::new_err(message),
+            DriverError::Device(msg) => PyRuntimeError::new_err(msg),
+            DriverError::BufferStall(msg) => {
                 PyConnectionError::new_err(format!("buffer stall: {msg}"))
             }
-            SessionError::Unsupported(msg) => {
+            DriverError::Unsupported(msg) => {
                 PyNotImplementedError::new_err(msg)
             }
-            SessionError::Other(msg) => PyRuntimeError::new_err(msg),
+            DriverError::Other(msg) => PyRuntimeError::new_err(msg),
         }
     }
 }
@@ -230,7 +230,7 @@ pub(crate) fn parse_dialect(
 /// A GRBL device session: connection lifecycle, streaming and
 /// interactive commands, entirely in Rust.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
 #[pyclass(name = "GrblSession", module = "raydriver.grbl")]
@@ -253,7 +253,7 @@ impl PyGrblSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -277,7 +277,7 @@ impl PyGrblSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

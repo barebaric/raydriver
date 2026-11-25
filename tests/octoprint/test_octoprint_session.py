@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from conftest import EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.octoprint import OctoPrintSession
 from raydriver.octoprint.emulator import OctoPrintEmulator
 from raydriver.octoprint.probe import OctoPrintDeviceInfo, describe
@@ -51,7 +51,7 @@ async def rig(emulator, events):
     session = make_session(events, emulator)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     try:
@@ -93,7 +93,7 @@ class TestConnection:
         session = make_session(events, emulator, api_key="wrong-key")
         await session.connect()
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "ERROR",
         )
         await session.disconnect()
@@ -105,7 +105,7 @@ class TestConnection:
             session = make_session(events, emu, api_key="")
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             await session.disconnect()
@@ -116,13 +116,13 @@ class TestConnection:
         session, emulator, events = rig
         emulator.start_print(duration_s=0.2)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda event: event.state.status.name == "RUN",
         )
         # The job was started outside the session, so the terminal
         # event only resets the state; no session-side JobFinished.
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda event: event.state.status.name == "IDLE",
         )
 
@@ -137,7 +137,7 @@ class TestJobs:
             "G1 X1 F1000",
             "G1 X2 F1000",
         ]
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
 
     async def test_run_reports_ops_upfront(self, rig):
         session, emulator, events = rig
@@ -155,7 +155,7 @@ class TestJobs:
     async def test_run_raw_sends_commands(self, rig):
         session, emulator, events = rig
         await session.run_raw("M3 S500\nG1 X1 F1000\n")
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         assert {"command": "M3 S500"} in emulator.commands
         assert {"command": "G1 X1 F1000"} in emulator.commands
 
@@ -164,7 +164,7 @@ class TestJobs:
         run_task = asyncio.ensure_future(session.run(GCODE, {0: 0}, []))
         await asyncio.sleep(0.05)
         await session.cancel()
-        await events.wait_for(SessionEvent.JobFinished)
+        await events.wait_for(DriverEvent.JobFinished)
         await run_task
         assert {"command": "cancel"} in emulator.commands
 
@@ -172,7 +172,7 @@ class TestJobs:
         session = make_session(events, emulator)
         await session.connect()
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
         )
         emulator.fail_next_upload = True

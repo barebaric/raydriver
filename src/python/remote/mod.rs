@@ -68,7 +68,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     remote.add_submodule(&protocol)?;
 
     let daemon = PyModule::new(py, "daemon")?;
-    daemon.setattr("__doc__", "Session host and its configuration.")?;
+    daemon.setattr("__doc__", "Driver host and its configuration.")?;
     daemon.add("DEFAULT_PORT", crate::core::remote::daemon::DEFAULT_PORT)?;
     daemon.add(
         "DEFAULT_RING_SIZE",

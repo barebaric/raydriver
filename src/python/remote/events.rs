@@ -4,108 +4,102 @@ use pyo3::prelude::*;
 
 use crate::core::remote::protocol::WireEvent;
 use crate::python::core::types::DeviceState as PyDeviceState;
-use crate::python::events::SessionEvent;
+use crate::python::events::DriverEvent;
 
-pub(crate) fn event_to_wire(event: &SessionEvent) -> WireEvent {
+pub(crate) fn event_to_wire(event: &DriverEvent) -> WireEvent {
     match event {
-        SessionEvent::StateChanged { state } => {
+        DriverEvent::StateChanged { state } => {
             WireEvent::State(state.inner.clone())
         }
-        SessionEvent::ConnectionStatusChanged { status, message } => {
+        DriverEvent::ConnectionStatusChanged { status, message } => {
             WireEvent::ConnectionStatus {
                 status: status.clone(),
                 message: message.clone(),
             }
         }
-        SessionEvent::CommandStatusChanged { status, message } => {
+        DriverEvent::CommandStatusChanged { status, message } => {
             WireEvent::CommandStatus {
                 status: status.clone(),
                 message: message.clone(),
             }
         }
-        SessionEvent::JobFinished {} => WireEvent::JobFinished,
-        SessionEvent::JobError { message } => WireEvent::JobError {
+        DriverEvent::JobFinished {} => WireEvent::JobFinished,
+        DriverEvent::JobError { message } => WireEvent::JobError {
             message: message.clone(),
         },
-        SessionEvent::ProbeStatusChanged { message } => {
-            WireEvent::ProbeStatus {
-                message: message.clone(),
-            }
-        }
-        SessionEvent::WcsUpdated { offsets } => WireEvent::WcsUpdated {
+        DriverEvent::ProbeStatusChanged { message } => WireEvent::ProbeStatus {
+            message: message.clone(),
+        },
+        DriverEvent::WcsUpdated { offsets } => WireEvent::WcsUpdated {
             offsets: offsets.clone(),
         },
-        SessionEvent::ConfigChanged { key, value } => {
-            WireEvent::ConfigChanged {
-                key: key.clone(),
-                value: *value,
-            }
-        }
-        SessionEvent::RawRx { line } => WireEvent::RawRx { line: line.clone() },
-        SessionEvent::RawTx { line } => WireEvent::RawTx { line: line.clone() },
+        DriverEvent::ConfigChanged { key, value } => WireEvent::ConfigChanged {
+            key: key.clone(),
+            value: *value,
+        },
+        DriverEvent::RawRx { line } => WireEvent::RawRx { line: line.clone() },
+        DriverEvent::RawTx { line } => WireEvent::RawTx { line: line.clone() },
     }
 }
 
-/// Extract a Python `SessionEvent` from a callback argument.
+/// Extract a Python `DriverEvent` from a callback argument.
 pub(crate) fn extract_event(
     py: Python<'_>,
     value: &Py<PyAny>,
-) -> Option<SessionEvent> {
+) -> Option<DriverEvent> {
     value
         .bind(py)
-        .extract::<PyRef<SessionEvent>>()
+        .extract::<PyRef<DriverEvent>>()
         .ok()
         .map(|event| match &*event {
-            SessionEvent::StateChanged { state } => {
-                SessionEvent::StateChanged {
-                    state: state.clone(),
-                }
-            }
-            SessionEvent::ConnectionStatusChanged { status, message } => {
-                SessionEvent::ConnectionStatusChanged {
+            DriverEvent::StateChanged { state } => DriverEvent::StateChanged {
+                state: state.clone(),
+            },
+            DriverEvent::ConnectionStatusChanged { status, message } => {
+                DriverEvent::ConnectionStatusChanged {
                     status: status.clone(),
                     message: message.clone(),
                 }
             }
-            SessionEvent::CommandStatusChanged { status, message } => {
-                SessionEvent::CommandStatusChanged {
+            DriverEvent::CommandStatusChanged { status, message } => {
+                DriverEvent::CommandStatusChanged {
                     status: status.clone(),
                     message: message.clone(),
                 }
             }
-            SessionEvent::JobFinished {} => SessionEvent::JobFinished {},
-            SessionEvent::JobError { message } => SessionEvent::JobError {
+            DriverEvent::JobFinished {} => DriverEvent::JobFinished {},
+            DriverEvent::JobError { message } => DriverEvent::JobError {
                 message: message.clone(),
             },
-            SessionEvent::ProbeStatusChanged { message } => {
-                SessionEvent::ProbeStatusChanged {
+            DriverEvent::ProbeStatusChanged { message } => {
+                DriverEvent::ProbeStatusChanged {
                     message: message.clone(),
                 }
             }
-            SessionEvent::WcsUpdated { offsets } => SessionEvent::WcsUpdated {
+            DriverEvent::WcsUpdated { offsets } => DriverEvent::WcsUpdated {
                 offsets: offsets.clone(),
             },
-            SessionEvent::ConfigChanged { key, value } => {
-                SessionEvent::ConfigChanged {
+            DriverEvent::ConfigChanged { key, value } => {
+                DriverEvent::ConfigChanged {
                     key: key.clone(),
                     value: *value,
                 }
             }
-            SessionEvent::RawRx { line } => {
-                SessionEvent::RawRx { line: line.clone() }
+            DriverEvent::RawRx { line } => {
+                DriverEvent::RawRx { line: line.clone() }
             }
-            SessionEvent::RawTx { line } => {
-                SessionEvent::RawTx { line: line.clone() }
+            DriverEvent::RawTx { line } => {
+                DriverEvent::RawTx { line: line.clone() }
             }
         })
 }
 
-/// Builds the Python `SessionEvent` variant object for *event*.
+/// Builds the Python `DriverEvent` variant object for *event*.
 pub(crate) fn wire_to_py_event(
     py: Python<'_>,
     event: &WireEvent,
 ) -> PyResult<Option<Py<PyAny>>> {
-    let base = py.import("raydriver.core")?.getattr("SessionEvent")?;
+    let base = py.import("raydriver.core")?.getattr("DriverEvent")?;
     match event {
         WireEvent::State(state) => {
             let cls = base.getattr("StateChanged")?;

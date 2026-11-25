@@ -4,7 +4,7 @@
 //!
 //! This is a faithful port of Rayforge's `GrblSerialDriver` against
 //! an async byte [`Transport`].  All Python-facing notifications go
-//! through the [`SessionEvents`] trait so the core stays pyo3-free.
+//! through the [`DriverEvents`] trait so the core stays pyo3-free.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -15,8 +15,8 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::session::{
-    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::driver::{
+    AsyncEvent, CancelMode, Driver, DriverError, DriverEvents,
 };
 use crate::core::transport::{Transport, TransportKind};
 use crate::core::types::{
@@ -35,7 +35,7 @@ tokio::task_local! {
     static IN_STREAM_TASK: bool;
 }
 
-/// Session configuration with the Python driver's default timings.
+/// Driver configuration with the Python driver's default timings.
 #[derive(Clone)]
 pub struct SessionConfig {
     pub transport: TransportKind,
@@ -189,7 +189,7 @@ impl StreamHandle {
 pub struct GrblSession {
     config: SessionConfig,
     dialect: RwLock<Dialect>,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     transport: Arc<dyn Transport>,
     flow: FlowControl,
     state: Mutex<DeviceState>,
@@ -200,7 +200,7 @@ pub struct GrblSession {
     raw_grbl_status: Mutex<DeviceStatus>,
     device_response_count: AtomicU64,
     consecutive_unanswered_polls: AtomicU32,
-    job_exception: Mutex<Option<SessionError>>,
+    job_exception: Mutex<Option<DriverError>>,
     current_request: Mutex<Option<Arc<RequestShared>>>,
     interactive_request: Mutex<Option<Arc<RequestShared>>>,
     queued_requests: Mutex<Vec<std::sync::Weak<RequestShared>>>,
@@ -220,7 +220,7 @@ impl GrblSession {
     pub fn new(
         config: SessionConfig,
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         let transport: Arc<dyn Transport> = config.transport.build();
         let (cmd_tx, _) = mpsc::unbounded_channel();
@@ -273,9 +273,9 @@ impl GrblSession {
         self.is_holding.load(Ordering::SeqCst)
     }
 
-    fn transport_open(&self) -> Result<Arc<dyn Transport>, SessionError> {
+    fn transport_open(&self) -> Result<Arc<dyn Transport>, DriverError> {
         if !self.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
@@ -323,7 +323,7 @@ impl GrblSession {
         }
     }
 
-    async fn await_handshake(&self) -> Result<bool, SessionError> {
+    async fn await_handshake(&self) -> Result<bool, DriverError> {
         let deadline = tokio::time::Instant::now()
             + SessionConfig::secs(self.config.handshake_timeout);
         loop {
@@ -587,7 +587,7 @@ impl GrblSession {
                 .command_status(TransportStatus::Error, Some(text));
             log::error!("GRBL error during job: {text}. Halting stream.");
             *self.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("GRBL error: {text}")));
+                Some(DriverError::Device(format!("GRBL error: {text}")));
             self.flow.signal_space_available();
         }
     }
@@ -643,7 +643,7 @@ impl GrblSession {
             if self.job_running.load(Ordering::SeqCst) {
                 log::error!("GRBL ALARM during job: {line}. Halting stream.");
                 *self.job_exception.lock().unwrap() =
-                    Some(SessionError::Device(format!("GRBL ALARM: {line}")));
+                    Some(DriverError::Device(format!("GRBL ALARM: {line}")));
                 self.flow.signal_space_available();
             }
         } else if line.starts_with("[VER:") {
@@ -798,7 +798,7 @@ impl GrblSession {
             let result = {
                 let _guard = self.cmd_lock.lock().await;
                 if !self.transport.is_open() {
-                    Err(SessionError::Connection(
+                    Err(DriverError::Connection(
                         "Serial transport disconnected during command."
                             .to_string(),
                     ))
@@ -830,7 +830,7 @@ impl GrblSession {
     async fn send_command_bytes(
         &self,
         payload: &[u8],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let _ = self
             .flow
             .wait_for_space(payload.len(), Duration::from_secs(1))
@@ -847,7 +847,7 @@ impl GrblSession {
         &self,
         command: &str,
         add_newline: bool,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let transport = self.transport_open()?;
         let mut payload = command.to_string();
         if add_newline {
@@ -914,7 +914,7 @@ impl GrblSession {
         }
     }
 
-    async fn run_streaming_job<F>(&self, fut: F) -> Result<(), SessionError>
+    async fn run_streaming_job<F>(&self, fut: F) -> Result<(), DriverError>
     where
         F: std::future::Future<Output = ()> + Send + 'static,
     {
@@ -932,7 +932,7 @@ impl GrblSession {
         let result = match task.await {
             Ok(()) => Ok(()),
             Err(err) if err.is_cancelled() => Ok(()),
-            Err(err) => Err(SessionError::Other(err.to_string())),
+            Err(err) => Err(DriverError::Other(err.to_string())),
         };
         let mut slot = self.stream_task.lock().unwrap();
         if slot.as_ref().is_some_and(|h| Arc::ptr_eq(&h.done, &done)) {
@@ -1086,7 +1086,7 @@ impl GrblSession {
         op_map: Option<&HashMap<usize, i64>>,
         command_times: Option<&[f64]>,
         sent_count: &mut usize,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         for (line_idx, raw_line) in gcode_lines.iter().enumerate() {
             if self.is_cancelled()
                 || self.job_exception.lock().unwrap().is_some()
@@ -1100,7 +1100,7 @@ impl GrblSession {
                     self.state.lock().unwrap().status == DeviceStatus::Alarm;
                 let mut exception = self.job_exception.lock().unwrap();
                 if status_is_alarm && exception.is_none() {
-                    *exception = Some(SessionError::Device(
+                    *exception = Some(DriverError::Device(
                         "Machine entered ALARM state during job.".to_string(),
                     ));
                 }
@@ -1135,10 +1135,10 @@ impl GrblSession {
                 .await
             {
                 Ok(()) => {}
-                Err(SessionError::BufferStall(msg)) => {
+                Err(DriverError::BufferStall(msg)) => {
                     let mut exception = self.job_exception.lock().unwrap();
                     if exception.is_none() {
-                        *exception = Some(SessionError::Device(format!(
+                        *exception = Some(DriverError::Device(format!(
                             "Deadlock recovery failed: {msg}"
                         )));
                     }
@@ -1182,10 +1182,10 @@ impl GrblSession {
         command_bytes: &[u8],
         op_index: Option<i64>,
         timeout: Duration,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let _guard = self.cmd_lock.lock().await;
         if !self.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport disconnected during job.".to_string(),
             ));
         }
@@ -1200,7 +1200,7 @@ impl GrblSession {
         data: &[u8],
         op_index: Option<i64>,
         timeout: Duration,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let command_len = data.len();
         loop {
             let waited = self.flow.wait_for_space(command_len, timeout).await;
@@ -1219,7 +1219,7 @@ impl GrblSession {
                         log::info!("Recovery successful, retrying send.");
                         continue;
                     }
-                    return Err(SessionError::BufferStall(format!(
+                    return Err(DriverError::BufferStall(format!(
                         "cannot get {command_len} bytes of space"
                     )));
                 }
@@ -1242,7 +1242,7 @@ impl GrblSession {
     async fn on_buffer_stall(
         &self,
         command_len: usize,
-    ) -> Result<bool, SessionError> {
+    ) -> Result<bool, DriverError> {
         if self.is_cancelled() {
             return Ok(false);
         }
@@ -1257,7 +1257,7 @@ impl GrblSession {
         if self.state.lock().unwrap().status == DeviceStatus::Alarm {
             let mut exception = self.job_exception.lock().unwrap();
             if exception.is_none() {
-                *exception = Some(SessionError::Device(
+                *exception = Some(DriverError::Device(
                     "Machine entered ALARM state during job.".to_string(),
                 ));
             }
@@ -1315,7 +1315,7 @@ impl GrblSession {
         let send = async {
             self.events.raw_tx("?");
             let transport = self.transport_open()?;
-            transport.write(b"?").await.map_err(SessionError::from)
+            transport.write(b"?").await.map_err(DriverError::from)
         };
         let result = if hold_lock {
             let _guard = self.cmd_lock.lock().await;
@@ -1383,7 +1383,7 @@ impl GrblSession {
              device stopped responding.",
             self.consecutive_unanswered_polls.load(Ordering::SeqCst)
         );
-        *self.job_exception.lock().unwrap() = Some(SessionError::Device(
+        *self.job_exception.lock().unwrap() = Some(DriverError::Device(
             "Device stopped responding during job (no reply to status \
              polls)."
                 .to_string(),
@@ -1430,14 +1430,14 @@ impl GrblSession {
 
     /// Best-effort gcode send used by safety shutdown and deadlock
     /// recovery (no stall callback).
-    async fn send_gcode_simple(&self, data: &[u8]) -> Result<(), SessionError> {
+    async fn send_gcode_simple(&self, data: &[u8]) -> Result<(), DriverError> {
         if self
             .flow
             .wait_for_space(data.len(), Duration::from_secs(10))
             .await
             .is_err()
         {
-            return Err(SessionError::BufferStall(
+            return Err(DriverError::BufferStall(
                 "timed out waiting for buffer space".to_string(),
             ));
         }
@@ -1543,7 +1543,7 @@ impl GrblSession {
         &self,
         command: &str,
         timeout: Duration,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let command = command.to_string();
         // Only clear the cancellation flag once the cancelled job's
         // sender has fully terminated (issue #428).
@@ -1570,24 +1570,22 @@ impl GrblSession {
                 shared: request.clone(),
             })
             .map_err(|_| {
-                SessionError::Connection(
-                    "command queue unavailable".to_string(),
-                )
+                DriverError::Connection("command queue unavailable".to_string())
             })?;
         match tokio::time::timeout(timeout, request.finished.wait()).await {
             Ok(()) => Ok(request.lines()),
             Err(_) => {
                 request.finish();
-                Err(SessionError::Timeout("operation timed out".to_string()))
+                Err(DriverError::Timeout("operation timed out".to_string()))
             }
         }
     }
 }
 
-/// The session's [`Session`] impl: the single, real implementation
+/// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for GrblSession {
+impl Driver for GrblSession {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
@@ -1624,7 +1622,7 @@ impl Session for GrblSession {
         self.abort_background_tasks().await;
         self.update_connection_status(TransportStatus::Disconnected, None);
     }
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         self.is_holding.store(hold, Ordering::SeqCst);
         // Do not un-cancel a job that is still winding down (issue
         // #428).
@@ -1667,7 +1665,7 @@ impl Session for GrblSession {
         &self,
         axes: Option<Vec<String>>,
         active_wcs: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let timeout =
             SessionConfig::secs(if self.config.homing_timeout > 0.0 {
@@ -1686,7 +1684,7 @@ impl Session for GrblSession {
                         &dialect.home_axis,
                         &[("axis_letter", Arg::Str(axis))],
                     )
-                    .map_err(SessionError::Other)?;
+                    .map_err(DriverError::Other)?;
                     self.execute_command_with_timeout(&cmd, timeout).await?;
                 }
             }
@@ -1713,11 +1711,11 @@ impl Session for GrblSession {
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let head =
             format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-                .map_err(SessionError::Other)?;
+                .map_err(DriverError::Other)?;
         let mut cmd_parts = vec![head];
         for (axis_name, distance) in deltas {
             cmd_parts.push(format!(
@@ -1733,22 +1731,22 @@ impl Session for GrblSession {
         self.execute_command(&cmd).await?;
         Ok(())
     }
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let cmd = format_template(
             &dialect.tool_change,
             &[("tool_number", Arg::Int(tool_number))],
         )
-        .map_err(SessionError::Other)?;
+        .map_err(DriverError::Other)?;
         self.execute_command(&cmd).await?;
         Ok(())
     }
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let cmd = match power {
             Some(p) if p > 0.0 => {
                 format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                    .map_err(SessionError::Other)?
+                    .map_err(DriverError::Other)?
             }
             _ => dialect.laser_off.clone(),
         };
@@ -1758,14 +1756,14 @@ impl Session for GrblSession {
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let cmd = match power {
             Some(p) if p > 0.0 => format_template(
                 &dialect.focus_laser_on,
                 &[("power", Arg::Length(p))],
             )
-            .map_err(SessionError::Other)?,
+            .map_err(DriverError::Other)?,
             _ => {
                 self.wait_for_idle().await;
                 dialect.laser_off.clone()
@@ -1776,7 +1774,7 @@ impl Session for GrblSession {
     }
     async fn read_settings(
         &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
+    ) -> Result<Vec<(String, String)>, DriverError> {
         let lines = self.execute_interactive_command("$$").await?;
         self.report_in_inches
             .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
@@ -1786,7 +1784,7 @@ impl Session for GrblSession {
         &self,
         key: &str,
         value: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.execute_command(&format!("${key}={value}")).await?;
         Ok(())
     }
@@ -1796,20 +1794,20 @@ impl Session for GrblSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+            DriverError::Other(format!("Invalid WCS slot: {wcs_slot}"))
         })?;
         let dialect = self.dialect();
         let cmd = dialect
             .format_wcs_offset(p_num, x, y, z)
-            .map_err(SessionError::Other)?;
+            .map_err(DriverError::Other)?;
         self.execute_command(&cmd).await?;
         Ok(())
     }
     async fn read_wcs_offsets(
         &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+    ) -> Result<HashMap<String, (f64, f64, f64)>, DriverError> {
         let lines = self.execute_interactive_command("$#").await?;
         let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
         let mut offsets = HashMap::new();
@@ -1830,7 +1828,7 @@ impl Session for GrblSession {
         self.events.wcs_updated(&offsets);
         Ok(offsets)
     }
-    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+    async fn read_parser_state(&self) -> Result<Option<String>, DriverError> {
         let lines = self.execute_interactive_command("$G").await?;
         Ok(parser::parse_grbl_parser_state(&lines))
     }
@@ -1839,7 +1837,7 @@ impl Session for GrblSession {
         axis_letter: &str,
         max_travel: f64,
         feed_rate: f64,
-    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+    ) -> Result<Option<(f64, f64, f64)>, DriverError> {
         let axis_letter = axis_letter.to_uppercase();
         let dialect = self.dialect();
         let cmd = format_template(
@@ -1850,7 +1848,7 @@ impl Session for GrblSession {
                 ("feed_rate", Arg::Speed(feed_rate)),
             ],
         )
-        .map_err(SessionError::Other)?;
+        .map_err(DriverError::Other)?;
 
         self.events
             .probe_status(&format!("Probing {axis_letter}..."));
@@ -1887,7 +1885,7 @@ impl Session for GrblSession {
     }
     async fn detect_unit_system(
         &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
+    ) -> Result<Option<UnitSystem>, DriverError> {
         let lines = match self.execute_interactive_command("$$").await {
             Ok(lines) => lines,
             Err(err) => {
@@ -1899,7 +1897,7 @@ impl Session for GrblSession {
             .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
         Ok(parser::detect_unit_system_from_settings(&lines))
     }
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.abort_background_tasks().await;
 
         self.keep_running.store(true, Ordering::SeqCst);
@@ -1930,7 +1928,7 @@ impl Session for GrblSession {
         gcode: &str,
         op_map: &HashMap<usize, i64>,
         op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.start_job().await;
         if self.transport.network_job_runner().is_some() {
             self.run_network_job(gcode, Some(op_map)).await;
@@ -1948,7 +1946,7 @@ impl Session for GrblSession {
             .await
         {
             match err {
-                SessionError::Device(msg) => log::warn!(
+                DriverError::Device(msg) => log::warn!(
                     "Job terminated due to device error: {msg}. \
                      Connection remains active."
                 ),
@@ -1966,7 +1964,7 @@ impl Session for GrblSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         if machine_code.trim().is_empty() {
             return Ok(());
         }
@@ -2004,7 +2002,7 @@ impl Session for GrblSession {
         Ok(())
     }
 
-    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+    async fn cancel(&self, mode: CancelMode) -> Result<(), DriverError> {
         let emergency = mode == CancelMode::Immediate;
         log::debug!("Cancel command initiated.");
         let job_was_running = self.job_running.load(Ordering::SeqCst);
@@ -2054,7 +2052,7 @@ impl Session for GrblSession {
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let command = command.to_string();
         self.transport_open()?;
         let request = Arc::new(RequestShared::new(&command));
@@ -2072,7 +2070,7 @@ impl Session for GrblSession {
                 .await
                 {
                     Ok(()) => Ok(()),
-                    Err(_) => Err(SessionError::Timeout(
+                    Err(_) => Err(DriverError::Timeout(
                         "operation timed out".to_string(),
                     )),
                 }
@@ -2090,7 +2088,7 @@ impl Session for GrblSession {
         pos_x: f64,
         pos_y: f64,
         _z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let cmd = format_template(
             &dialect.move_to,
@@ -2100,7 +2098,7 @@ impl Session for GrblSession {
                 ("y", Arg::Length(pos_y)),
             ],
         )
-        .map_err(SessionError::Other)?;
+        .map_err(DriverError::Other)?;
         self.execute_command(&cmd).await?;
         Ok(())
     }
@@ -2108,7 +2106,7 @@ impl Session for GrblSession {
     async fn execute_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let timeout = SessionConfig::secs(self.config.command_timeout);
         self.execute_command_with_timeout(command, timeout).await
     }

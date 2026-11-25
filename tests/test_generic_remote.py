@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from conftest import EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -37,7 +37,7 @@ async def connect_and_wait(session, events, timeout=10.0):
     """
     await asyncio.wait_for(session.connect(), timeout=timeout)
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
         timeout=timeout,
     )
@@ -187,14 +187,14 @@ async def test_disconnect_releases_control_lease(rig):
 async def test_remote_jog_accepts_deltas(rig):
     # Jog deltas cross the wire as JSON lists; the daemon must restore
     # the tuples the Rust session expects.
-    from raydriver.core import SessionEvent
+    from raydriver.core import DriverEvent
 
     _, port = rig
     ready = asyncio.Event()
 
     def on_event(event):
         if (
-            isinstance(event, SessionEvent.ConnectionStatusChanged)
+            isinstance(event, DriverEvent.ConnectionStatusChanged)
             and event.status == "CONNECTED"
         ):
             ready.set()

@@ -19,6 +19,7 @@ use tokio::task::JoinHandle;
 use tokio_rustls::TlsAcceptor;
 
 use crate::core::discovery::daemon::is_loopback;
+use crate::core::driver::DriverError;
 use crate::core::remote::protocol::{
     self, ProtocolError, WireError, WireEvent,
 };
@@ -26,7 +27,6 @@ use crate::core::remote::registry;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
-use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 
 pub const DEFAULT_PORT: u16 = 8765;
@@ -260,7 +260,7 @@ pub struct StartedServer {
     pub addr: SocketAddr,
 }
 
-/// Session host serving the remote control protocol.
+/// Driver host serving the remote control protocol.
 pub struct Daemon {
     config: Arc<Mutex<DaemonConfig>>,
     factory: Arc<dyn SessionFactory>,
@@ -1459,13 +1459,13 @@ fn tokens_equal(supplied: &str, expected: &str) -> bool {
     difference == 0
 }
 
-fn internal(err: SessionError) -> ProtocolError {
+fn internal(err: DriverError) -> ProtocolError {
     let kind = match err {
-        SessionError::Timeout(_) => "timeout",
-        SessionError::Connection(_) => "connection",
-        SessionError::Device(_) | SessionError::BufferStall(_) => "device",
-        SessionError::Unsupported(_) => "unsupported",
-        SessionError::Other(_) => "internal",
+        DriverError::Timeout(_) => "timeout",
+        DriverError::Connection(_) => "connection",
+        DriverError::Device(_) | DriverError::BufferStall(_) => "device",
+        DriverError::Unsupported(_) => "unsupported",
+        DriverError::Other(_) => "internal",
     };
     ProtocolError::new(protocol::INTERNAL, err.to_string()).with_kind(kind)
 }

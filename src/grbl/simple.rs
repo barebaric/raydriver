@@ -9,9 +9,9 @@
 //!
 //! It shares the ping-pong mechanics (pending acknowledgements,
 //! connection loop, job streaming, cancel, safety shutdown) with the
-//! other line sessions via [`core::line_session`], and the leaf
+//! other line sessions via [`core::line_driver`], and the leaf
 //! building blocks with the full session: transports, the parser,
-//! the dialect templates, the value types and the [`SessionEvents`]
+//! the dialect templates, the value types and the [`DriverEvents`]
 //! notification trait.  Behavioural contract difference: interactive
 //! commands return an `error:` line as their last response line
 //! instead of raising (the raydriver contract), while an error
@@ -28,11 +28,11 @@ use async_trait::async_trait;
 
 use super::parser;
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::line_session::{
-    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+use crate::core::driver::{
+    secs, CancelMode, Driver, DriverError, DriverEvents,
 };
-use crate::core::session::{
-    secs, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::line_driver::{
+    self, LineDriverBase, PendingStore, PingPongDriver, StopCommand,
 };
 use crate::core::transport::TransportKind;
 use crate::core::types::{
@@ -80,7 +80,7 @@ impl SimpleConfig {
 /// The simple session: connection lifecycle, status polling and
 /// ping-pong command exchange, all in one small state machine.
 pub struct GrblSimpleSession {
-    base: LineSessionBase,
+    base: LineDriverBase,
     config: SimpleConfig,
     report_in_inches: AtomicBool,
 }
@@ -89,11 +89,11 @@ impl GrblSimpleSession {
     pub fn new(
         config: SimpleConfig,
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         let transport = config.transport.build();
         Arc::new(Self {
-            base: LineSessionBase::new(
+            base: LineDriverBase::new(
                 dialect,
                 events,
                 transport,
@@ -188,7 +188,7 @@ impl GrblSimpleSession {
         if self.base.is_job_running() {
             log::error!("GRBL error during job: {line}. Halting stream.");
             *self.base.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("GRBL error: {line}")));
+                Some(DriverError::Device(format!("GRBL error: {line}")));
         }
     }
 
@@ -210,7 +210,7 @@ impl GrblSimpleSession {
         if self.base.is_job_running() {
             log::error!("GRBL ALARM during job: {line}. Halting stream.");
             *self.base.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("GRBL ALARM: {line}")));
+                Some(DriverError::Device(format!("GRBL ALARM: {line}")));
         }
     }
 
@@ -220,9 +220,9 @@ impl GrblSimpleSession {
 
     /// Send a realtime command (?, ~, !) directly: the firmware
     /// executes these on receipt and never acknowledges them.
-    async fn send_realtime(&self, command: &str) -> Result<(), SessionError> {
+    async fn send_realtime(&self, command: &str) -> Result<(), DriverError> {
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport disconnected".to_string(),
             ));
         }
@@ -233,8 +233,8 @@ impl GrblSimpleSession {
 }
 
 #[async_trait]
-impl PingPongSession for GrblSimpleSession {
-    fn base(&self) -> &LineSessionBase {
+impl PingPongDriver for GrblSimpleSession {
+    fn base(&self) -> &LineDriverBase {
         &self.base
     }
 
@@ -292,7 +292,7 @@ impl PingPongSession for GrblSimpleSession {
     async fn ping_pong(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let timeout = secs(self.config.command_timeout);
         self.ping_pong_with_timeout(command, timeout).await
     }
@@ -305,10 +305,10 @@ impl PingPongSession for GrblSimpleSession {
         &self,
         command: &str,
         timeout: Duration,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let _guard = self.base.cmd_lock.lock().await;
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
@@ -355,11 +355,11 @@ impl PingPongSession for GrblSimpleSession {
     }
 }
 
-/// The simple session's [`Session`]: the shared ping-pong
+/// The simple session's [`Driver`]: the shared ping-pong
 /// operations call the skeleton's free functions; the GRBL-specific
 /// operations carry their real bodies here.
 #[async_trait]
-impl Session for GrblSimpleSession {
+impl Driver for GrblSimpleSession {
     fn state(&self) -> DeviceState {
         self.base.state()
     }
@@ -380,8 +380,8 @@ impl Session for GrblSimpleSession {
         self.base.abort_background_tasks_now();
     }
 
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        line_session::connect(&self).await;
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
+        line_driver::connect(&self).await;
         Ok(())
     }
 
@@ -394,8 +394,8 @@ impl Session for GrblSimpleSession {
         gcode: &str,
         op_map: &HashMap<usize, i64>,
         op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
-        line_session::stream_job(self.as_ref(), gcode, op_map, op_estimates)
+    ) -> Result<(), DriverError> {
+        line_driver::stream_job(self.as_ref(), gcode, op_map, op_estimates)
             .await;
         Ok(())
     }
@@ -403,7 +403,7 @@ impl Session for GrblSimpleSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let lines: Vec<String> = machine_code
             .lines()
             .map(|l| l.trim().to_string())
@@ -419,7 +419,7 @@ impl Session for GrblSimpleSession {
         if gcode.is_empty() {
             return Ok(());
         }
-        line_session::stream_job(
+        line_driver::stream_job(
             self.as_ref(),
             &gcode.join("\n"),
             &HashMap::new(),
@@ -429,22 +429,22 @@ impl Session for GrblSimpleSession {
         Ok(())
     }
 
-    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        line_session::cancel(self, mode == CancelMode::Immediate).await
+    async fn cancel(&self, mode: CancelMode) -> Result<(), DriverError> {
+        line_driver::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
-        line_session::execute_command(self, command).await
+    ) -> Result<Vec<String>, DriverError> {
+        line_driver::execute_command(self, command).await
     }
 
     async fn home(
         &self,
         axes: Option<Vec<String>>,
         active_wcs: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.base.dialect();
         let timeout = secs(if self.config.homing_timeout > 0.0 {
             self.config.homing_timeout
@@ -453,7 +453,7 @@ impl Session for GrblSimpleSession {
         });
         match axes {
             None => {
-                line_session::execute_command_with_timeout(
+                line_driver::execute_command_with_timeout(
                     self,
                     &dialect.home_all,
                     timeout,
@@ -466,8 +466,8 @@ impl Session for GrblSimpleSession {
                         &dialect.home_axis,
                         &[("axis_letter", Arg::Str(axis))],
                     )
-                    .map_err(SessionError::Other)?;
-                    line_session::execute_command_with_timeout(
+                    .map_err(DriverError::Other)?;
+                    line_driver::execute_command_with_timeout(
                         self, &cmd, timeout,
                     )
                     .await?;
@@ -478,9 +478,9 @@ impl Session for GrblSimpleSession {
         // Some Grbl versions forget the G54 offset after homing;
         // toggling to another WCS and back re-activates it.
         let temp_wcs = if active_wcs == "G54" { "G55" } else { "G54" };
-        line_session::execute_command(self, "G4 P0.01").await?;
-        line_session::execute_command(self, temp_wcs).await?;
-        line_session::execute_command(self, active_wcs).await?;
+        line_driver::execute_command(self, "G4 P0.01").await?;
+        line_driver::execute_command(self, temp_wcs).await?;
+        line_driver::execute_command(self, active_wcs).await?;
         self.base.clear_device_error();
         Ok(())
     }
@@ -491,34 +491,34 @@ impl Session for GrblSimpleSession {
         x: f64,
         y: f64,
         _z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::move_to(self, speed, x, y).await
+    ) -> Result<(), DriverError> {
+        line_driver::move_to(self, speed, x, y).await
     }
 
     async fn jog(
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        line_session::jog(self, speed, deltas).await
+    ) -> Result<(), DriverError> {
+        line_driver::jog(self, speed, deltas).await
     }
 
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        line_session::select_tool(self, tool_number).await
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
+        line_driver::select_tool(self, tool_number).await
     }
 
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        line_session::set_power(self, power).await
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
+        line_driver::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::set_focus_power(self, power).await
+    ) -> Result<(), DriverError> {
+        line_driver::set_focus_power(self, power).await
     }
 
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         self.base.is_holding.store(hold, Ordering::SeqCst);
         if !self.base.is_job_running() {
             self.base.is_cancelled.store(false, Ordering::SeqCst);
@@ -552,22 +552,22 @@ impl Session for GrblSimpleSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+            DriverError::Other(format!("Invalid WCS slot: {wcs_slot}"))
         })?;
         let dialect = self.base.dialect();
         let cmd = dialect
             .format_wcs_offset(p_num, x, y, z)
-            .map_err(SessionError::Other)?;
-        line_session::execute_command(self, &cmd).await?;
+            .map_err(DriverError::Other)?;
+        line_driver::execute_command(self, &cmd).await?;
         Ok(())
     }
 
     async fn read_settings(
         &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
-        let lines = line_session::execute_command(self, "$$").await?;
+    ) -> Result<Vec<(String, String)>, DriverError> {
+        let lines = line_driver::execute_command(self, "$$").await?;
         self.report_in_inches
             .store(parser::is_report_in_inches(&lines), Ordering::SeqCst);
         Ok(parser::parse_setting_pairs(&lines))
@@ -577,15 +577,15 @@ impl Session for GrblSimpleSession {
         &self,
         key: &str,
         value: &str,
-    ) -> Result<(), SessionError> {
-        line_session::execute_command(self, &format!("${key}={value}")).await?;
+    ) -> Result<(), DriverError> {
+        line_driver::execute_command(self, &format!("${key}={value}")).await?;
         Ok(())
     }
 
     async fn read_wcs_offsets(
         &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
-        let lines = line_session::execute_command(self, "$#").await?;
+    ) -> Result<HashMap<String, (f64, f64, f64)>, DriverError> {
+        let lines = line_driver::execute_command(self, "$#").await?;
         let report_in_inches = self.report_in_inches.load(Ordering::SeqCst);
         let mut offsets = HashMap::new();
         for line in &lines {
@@ -606,8 +606,8 @@ impl Session for GrblSimpleSession {
         Ok(offsets)
     }
 
-    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
-        let lines = line_session::execute_command(self, "$G").await?;
+    async fn read_parser_state(&self) -> Result<Option<String>, DriverError> {
+        let lines = line_driver::execute_command(self, "$G").await?;
         Ok(parser::parse_grbl_parser_state(&lines))
     }
 
@@ -616,7 +616,7 @@ impl Session for GrblSimpleSession {
         axis_letter: &str,
         max_travel: f64,
         feed_rate: f64,
-    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+    ) -> Result<Option<(f64, f64, f64)>, DriverError> {
         let axis_letter = axis_letter.to_uppercase();
         let dialect = self.base.dialect();
         let cmd = format_template(
@@ -627,12 +627,12 @@ impl Session for GrblSimpleSession {
                 ("feed_rate", Arg::Speed(feed_rate)),
             ],
         )
-        .map_err(SessionError::Other)?;
+        .map_err(DriverError::Other)?;
 
         self.base
             .events
             .probe_status(&format!("Probing {axis_letter}..."));
-        let lines = match line_session::execute_command(self, &cmd).await {
+        let lines = match line_driver::execute_command(self, &cmd).await {
             Ok(lines) => lines,
             Err(_) => {
                 self.base.events.probe_status("Probe failed: Timed out");
@@ -666,8 +666,8 @@ impl Session for GrblSimpleSession {
 
     async fn detect_unit_system(
         &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines = match line_session::execute_command(self, "$$").await {
+    ) -> Result<Option<UnitSystem>, DriverError> {
+        let lines = match line_driver::execute_command(self, "$$").await {
             Ok(lines) => lines,
             Err(err) => {
                 log::warn!("Unit system detection failed: {err}");

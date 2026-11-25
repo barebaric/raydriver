@@ -1,9 +1,9 @@
 //! Python-facing session events.
 //!
-//! Implements [`SessionEvents`] by marshaling each event onto the
+//! Implements [`DriverEvents`] by marshaling each event onto the
 //! caller's asyncio loop.  Events are queued on the Rust side and a
 //! single `call_soon_threadsafe(drain)` signal per batch wakes the
-//! loop, which materializes one [`SessionEvent`] per queued event and
+//! loop, which materializes one [`DriverEvent`] per queued event and
 //! invokes `event_callback(event)` for it on the loop thread.
 //! Batching keeps the loop's self-pipe write rate at one signal per
 //! batch regardless of event volume.
@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::gen_stub_pyclass_complex_enum;
 
-use crate::core::session::{SessionEvent as CoreEvent, SessionEvents};
+use crate::core::driver::{DriverEvent as CoreEvent, DriverEvents};
 
 use crate::python::core::types::DeviceState as PyDeviceState;
 
@@ -23,7 +23,7 @@ use crate::python::core::types::DeviceState as PyDeviceState;
 #[gen_stub_pyclass_complex_enum]
 #[pyclass(module = "raydriver.core", skip_from_py_object)]
 #[derive(Clone)]
-pub enum SessionEvent {
+pub enum DriverEvent {
     StateChanged {
         state: PyDeviceState,
     },
@@ -60,7 +60,7 @@ pub enum SessionEvent {
 /// One queued event: session events go to the event callback, a
 /// progress report goes to the progress callback.
 enum QueuedEvent {
-    Session(SessionEvent),
+    Driver(DriverEvent),
     Progress(i64),
 }
 
@@ -95,8 +95,8 @@ impl EventQueue {
             let raw = pending.iter().position(|event| {
                 matches!(
                     event,
-                    QueuedEvent::Session(
-                        SessionEvent::RawRx { .. } | SessionEvent::RawTx { .. }
+                    QueuedEvent::Driver(
+                        DriverEvent::RawRx { .. } | DriverEvent::RawTx { .. }
                     )
                 )
             });
@@ -190,7 +190,7 @@ impl PyEvents {
     /// drain if this caller flipped the scheduled flag.  The GIL is
     /// attached only for the single `call_soon_threadsafe` signal;
     /// the event is materialized into a Python object at drain time.
-    fn schedule(&self, event: SessionEvent) {
+    fn schedule(&self, event: DriverEvent) {
         if self.event_callback.is_none() || self.closed.load(Ordering::SeqCst) {
             return;
         }
@@ -199,7 +199,7 @@ impl PyEvents {
             return;
         }
         let result: PyResult<()> = Python::attach(|py| {
-            if self.queue.push(QueuedEvent::Session(event)) {
+            if self.queue.push(QueuedEvent::Driver(event)) {
                 let loop_guard = self.loop_.lock().unwrap();
                 let Some(loop_) = loop_guard.as_ref() else {
                     self.queue.unschedule();
@@ -300,49 +300,49 @@ impl PyEvents {
     }
 }
 
-impl SessionEvents for PyEvents {
+impl DriverEvents for PyEvents {
     fn emit(&self, event: CoreEvent) {
         match event {
             CoreEvent::StateChanged(state) => {
-                self.schedule(SessionEvent::StateChanged {
+                self.schedule(DriverEvent::StateChanged {
                     state: PyDeviceState::new(state),
                 });
             }
             CoreEvent::ConnectionStatus { status, message } => {
-                self.schedule(SessionEvent::ConnectionStatusChanged {
+                self.schedule(DriverEvent::ConnectionStatusChanged {
                     status: status.name().to_string(),
                     message,
                 });
             }
             CoreEvent::CommandStatus { status, message } => {
-                self.schedule(SessionEvent::CommandStatusChanged {
+                self.schedule(DriverEvent::CommandStatusChanged {
                     status: status.name().to_string(),
                     message,
                 });
             }
             CoreEvent::JobFinished => {
-                self.schedule(SessionEvent::JobFinished {});
+                self.schedule(DriverEvent::JobFinished {});
             }
             CoreEvent::JobError { message } => {
-                self.schedule(SessionEvent::JobError { message });
+                self.schedule(DriverEvent::JobError { message });
             }
             CoreEvent::ProbeStatus { message } => {
-                self.schedule(SessionEvent::ProbeStatusChanged { message });
+                self.schedule(DriverEvent::ProbeStatusChanged { message });
             }
             CoreEvent::WcsUpdated { offsets } => {
-                self.schedule(SessionEvent::WcsUpdated { offsets });
+                self.schedule(DriverEvent::WcsUpdated { offsets });
             }
             CoreEvent::ConfigChanged { key, value } => {
-                self.schedule(SessionEvent::ConfigChanged { key, value });
+                self.schedule(DriverEvent::ConfigChanged { key, value });
             }
             CoreEvent::CommandDone(op_index) => {
                 self.schedule_progress(op_index);
             }
             CoreEvent::RawRx(line) => {
-                self.schedule(SessionEvent::RawRx { line });
+                self.schedule(DriverEvent::RawRx { line });
             }
             CoreEvent::RawTx(line) => {
-                self.schedule(SessionEvent::RawTx { line });
+                self.schedule(DriverEvent::RawTx { line });
             }
         }
     }
@@ -355,7 +355,7 @@ impl EventDrainer {
     fn take_and_deliver(&self, py: Python<'_>) {
         for event in self.queue.take() {
             match event {
-                QueuedEvent::Session(event) => {
+                QueuedEvent::Driver(event) => {
                     let Some(callback) = self.events.as_ref() else {
                         continue;
                     };

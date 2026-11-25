@@ -17,7 +17,7 @@ from conftest import (
     wait_until,
 )
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -88,7 +88,7 @@ async def connect_and_wait(session, events, timeout=10.0):
     """
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
         timeout=timeout,
     )
@@ -245,7 +245,7 @@ async def test_disconnect_sleeping_and_reattach(remote_rig):
         with pytest.raises(ConnectionError):
             await run_task
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "SLEEPING",
         )
         await proxy.attach()

@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::session::{get_bool, get_f64, get_i64, get_str};
@@ -77,7 +77,7 @@ impl PyM2Session {
         config: Option<Bound<'_, PyAny>>,
 
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

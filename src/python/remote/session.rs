@@ -13,11 +13,11 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use serde_json::Value;
 
+use crate::core::driver::DriverError;
 use crate::core::remote::protocol::WireEvent;
 use crate::core::remote::session::{
     HostedSession, RemoteEventSink, SessionFactory,
 };
-use crate::core::session::SessionError;
 use crate::core::types::DeviceState;
 use crate::python::core::json::value_to_py;
 use crate::python::core::types::DeviceState as PyDeviceState;
@@ -28,15 +28,15 @@ use crate::python::remote::events::{event_to_wire, extract_event};
 
 type BoxFuture = Pin<Box<dyn Future<Output = PyResult<Py<PyAny>>> + Send>>;
 
-fn classify(py: Python<'_>, err: &PyErr) -> SessionError {
+fn classify(py: Python<'_>, err: &PyErr) -> DriverError {
     if err.is_instance_of::<PyTimeoutError>(py) {
-        SessionError::Timeout(err.to_string())
+        DriverError::Timeout(err.to_string())
     } else if err.is_instance_of::<PyNotImplementedError>(py) {
-        SessionError::Unsupported(err.to_string())
+        DriverError::Unsupported(err.to_string())
     } else if err.is_instance_of::<PyConnectionError>(py) {
-        SessionError::Connection(err.to_string())
+        DriverError::Connection(err.to_string())
     } else {
-        SessionError::Other(err.to_string())
+        DriverError::Other(err.to_string())
     }
 }
 
@@ -83,7 +83,7 @@ impl PySessionAdapter {
         method: &str,
         args: Vec<Py<PyAny>>,
         kwargs: Option<Py<PyAny>>,
-    ) -> Result<Py<PyAny>, SessionError> {
+    ) -> Result<Py<PyAny>, DriverError> {
         let future: BoxFuture = Python::attach(|py| {
             let session = self.session.clone_ref(py);
             let loop_ = self.loop_.clone_ref(py);
@@ -107,7 +107,7 @@ impl PySessionAdapter {
         &self,
         method: &str,
         kwargs: Option<Py<PyAny>>,
-    ) -> Result<Value, SessionError> {
+    ) -> Result<Value, DriverError> {
         let result: PyResult<Value> = Python::attach(|py| {
             let session = self.session.bind(py);
             let kwargs = kwargs.as_ref().map(|kwargs| kwargs.bind(py));
@@ -130,7 +130,7 @@ impl PySessionAdapter {
         result.map_err(|err| Python::attach(|py| classify(py, &err)))
     }
 
-    fn config_kwargs(&self, args: &Value) -> Result<Py<PyAny>, SessionError> {
+    fn config_kwargs(&self, args: &Value) -> Result<Py<PyAny>, DriverError> {
         Python::attach(|py| -> PyResult<Py<PyAny>> {
             let dict = PyDict::new(py);
             if let Some(entries) = args.as_object() {
@@ -214,13 +214,13 @@ impl HostedSession for PySessionAdapter {
         *self.sink.lock().unwrap() = Some(sink);
     }
 
-    async fn connect(&self) -> Result<(), SessionError> {
+    async fn connect(&self) -> Result<(), DriverError> {
         self.call_async("connect", Vec::new(), None)
             .await
             .map(|_| ())
     }
 
-    async fn disconnect(&self) -> Result<(), SessionError> {
+    async fn disconnect(&self) -> Result<(), DriverError> {
         self.call_async("disconnect", Vec::new(), None)
             .await
             .map(|_| ())
@@ -230,7 +230,7 @@ impl HostedSession for PySessionAdapter {
         &self,
         method: &str,
         args: Value,
-    ) -> Result<Value, SessionError> {
+    ) -> Result<Value, DriverError> {
         let kwargs = self.config_kwargs(&args)?;
         if method == "update_dialect" {
             return self.call_sync(method, Some(kwargs));
@@ -245,9 +245,9 @@ impl HostedSession for PySessionAdapter {
         gcode: String,
         op_map: Option<HashMap<usize, i64>>,
         op_estimates: Option<Vec<f64>>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let sink = self.sink.lock().unwrap().clone().ok_or_else(|| {
-            SessionError::Other("session has no event sink".to_string())
+            DriverError::Other("session has no event sink".to_string())
         })?;
         let kwargs = Python::attach(|py| {
             let dict = PyDict::new(py);
@@ -319,7 +319,7 @@ impl SessionFactory for PySessionFactory {
         config: Value,
         dialect: Value,
         sink: Arc<dyn RemoteEventSink>,
-    ) -> Result<Arc<dyn HostedSession>, SessionError> {
+    ) -> Result<Arc<dyn HostedSession>, DriverError> {
         Python::attach(|py| {
             let sink_slot = Arc::new(Mutex::new(Some(sink)));
             let callback = Py::new(
@@ -351,6 +351,6 @@ impl SessionFactory for PySessionFactory {
                 sink: sink_slot,
             }) as Arc<dyn HostedSession>)
         })
-        .map_err(|err| SessionError::Other(err.to_string()))
+        .map_err(|err| DriverError::Other(err.to_string()))
     }
 }

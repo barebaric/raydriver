@@ -12,10 +12,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::Dialect;
-use crate::core::http;
-use crate::core::session::{
-    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::driver::{
+    AsyncEvent, CancelMode, Driver, DriverError, DriverEvents,
 };
+use crate::core::http;
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
 };
@@ -33,7 +33,7 @@ pub const DEFAULT_WS_PORT: u16 = 8081;
 /// laser output off.
 const STOP_FLUSH_BLOCK: &str = "M108\nM112 N0\nM9 S0 N0\n";
 
-/// Session configuration.
+/// Driver configuration.
 #[derive(Clone)]
 pub struct XtoolConfig {
     pub host: String,
@@ -82,7 +82,7 @@ impl XtoolConfig {
 pub struct XtoolSession {
     config: XtoolConfig,
     dialect: RwLock<Dialect>,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     state: Mutex<DeviceState>,
     keep_running: AtomicBool,
     job_running: AtomicBool,
@@ -102,7 +102,7 @@ impl XtoolSession {
     pub fn new(
         config: XtoolConfig,
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -225,7 +225,7 @@ impl XtoolSession {
     /// without this check a misconfigured endpoint (or an ESP3D
     /// firmware on another machine) shows up as "connected" while
     /// every command silently fails.
-    async fn verify_machine(&self) -> Result<String, SessionError> {
+    async fn verify_machine(&self) -> Result<String, DriverError> {
         let timeout = XtoolConfig::secs(self.config.request_timeout);
         let machine_type = probe_machine_type(
             &self.config.host,
@@ -234,7 +234,7 @@ impl XtoolSession {
         )
         .await?;
         if !machine_type.to_ascii_lowercase().contains("xtool") {
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "the device at {}:{} did not identify itself as an \
                  xTool machine (reported type: {:?})",
                 self.config.host, self.config.http_port, machine_type,
@@ -246,7 +246,7 @@ impl XtoolSession {
     /// The event loop: establish the WebSocket notification
     /// channel, then supervise it and the HTTP liveness poll; the
     /// first failure of either ends the connected phase.
-    async fn event_loop(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn event_loop(self: Arc<Self>) -> Result<(), DriverError> {
         self.settled.clear();
         self.started.clear();
         self.ws_lost.clear();
@@ -292,7 +292,7 @@ impl XtoolSession {
     /// as unreachable.
     async fn poll_loop(
         self: Arc<Self>,
-        tx: mpsc::UnboundedSender<SessionError>,
+        tx: mpsc::UnboundedSender<DriverError>,
     ) {
         loop {
             let result = match http::get(
@@ -304,7 +304,7 @@ impl XtoolSession {
             .await
             {
                 Ok(response) if response.status == 200 => None,
-                Ok(response) => Some(SessionError::Connection(format!(
+                Ok(response) => Some(DriverError::Connection(format!(
                     "liveness poll returned HTTP {}",
                     response.status
                 ))),
@@ -328,7 +328,7 @@ impl XtoolSession {
     async fn ws_receive_loop(
         self: Arc<Self>,
         mut ws: WsClient,
-        tx: mpsc::UnboundedSender<SessionError>,
+        tx: mpsc::UnboundedSender<DriverError>,
     ) {
         loop {
             match ws.receive().await {
@@ -384,7 +384,7 @@ impl XtoolSession {
     /// Wait until the machine reports IDLE, raising on error states.
     /// An infinite *timeout* waits unbounded (job length is
     /// unknowable; cancellation flows through `cancel`).
-    async fn wait_settled(&self, timeout: f64) -> Result<(), SessionError> {
+    async fn wait_settled(&self, timeout: f64) -> Result<(), DriverError> {
         let deadline = if timeout.is_finite() {
             Some(tokio::time::Instant::now() + XtoolConfig::secs(timeout))
         } else {
@@ -405,13 +405,13 @@ impl XtoolSession {
                     self.settled.clear();
                 }
                 _ = self.ws_lost.wait() => {
-                    return Err(SessionError::Connection(
+                    return Err(DriverError::Connection(
                         "connection lost while waiting for the machine"
                             .to_string(),
                     ));
                 }
                 _ = &mut timer => {
-                    return Err(SessionError::Timeout("operation timed out".to_string()));
+                    return Err(DriverError::Timeout("operation timed out".to_string()));
                 }
             }
             let state = self.state();
@@ -426,7 +426,7 @@ impl XtoolSession {
                             "the machine reported an error state".to_string()
                         }
                     };
-                    return Err(SessionError::Device(message));
+                    return Err(DriverError::Device(message));
                 }
                 _ => {}
             }
@@ -437,7 +437,7 @@ impl XtoolSession {
     // HTTP command exchange
     // ---------------------------------------------------------------
 
-    async fn request_get(&self, path: &str) -> Result<String, SessionError> {
+    async fn request_get(&self, path: &str) -> Result<String, DriverError> {
         let response = http::get(
             &self.config.host,
             self.config.http_port,
@@ -449,7 +449,7 @@ impl XtoolSession {
             if response.status == 200 {
                 Ok(response)
             } else {
-                Err(SessionError::Connection(format!(
+                Err(DriverError::Connection(format!(
                     "unexpected HTTP status {} for {path}",
                     response.status
                 )))
@@ -463,7 +463,7 @@ impl XtoolSession {
         path: &str,
         content_type: &str,
         body: &[u8],
-    ) -> Result<String, SessionError> {
+    ) -> Result<String, DriverError> {
         let response = http::post(
             &self.config.host,
             self.config.http_port,
@@ -477,7 +477,7 @@ impl XtoolSession {
             if response.status == 200 {
                 Ok(response)
             } else {
-                Err(SessionError::Connection(format!(
+                Err(DriverError::Connection(format!(
                     "unexpected HTTP status {} for {path}",
                     response.status
                 )))
@@ -489,11 +489,11 @@ impl XtoolSession {
     /// Validate the JSON acknowledgement of an HTTP API request: a
     /// JSON object whose `result` member is `"ok"`.  Anything else
     /// (e.g. an HTML error page from a foreign device) is a failure.
-    fn check_result(&self, text: &str, what: &str) -> Result<(), SessionError> {
+    fn check_result(&self, text: &str, what: &str) -> Result<(), DriverError> {
         let payload: HashMap<String, Value> = match serde_json::from_str(text) {
             Ok(payload) => payload,
             Err(_) => {
-                return Err(SessionError::Device(format!(
+                return Err(DriverError::Device(format!(
                     "unexpected response from the device (response: {})",
                     truncate(text.trim(), 100),
                 )));
@@ -502,7 +502,7 @@ impl XtoolSession {
         if payload.get("result").and_then(Value::as_str) == Some("ok") {
             return Ok(());
         }
-        Err(SessionError::Device(format!(
+        Err(DriverError::Device(format!(
             "the device rejected {what} (response: {})",
             truncate(text.trim(), 100),
         )))
@@ -517,7 +517,7 @@ impl XtoolSession {
     pub async fn execute_block(
         &self,
         block: String,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let _guard = self.cmd_lock.lock().await;
         for line in block.lines() {
             if !line.trim().is_empty() {
@@ -556,7 +556,7 @@ impl XtoolSession {
     // Jobs
     // ---------------------------------------------------------------
 
-    async fn run_inner(&self, gcode: &str) -> Result<(), SessionError> {
+    async fn run_inner(&self, gcode: &str) -> Result<(), DriverError> {
         let text = http::post_multipart(
             &self.config.host,
             self.config.http_port,
@@ -571,7 +571,7 @@ impl XtoolSession {
             if response.status == 200 {
                 Ok(response.text())
             } else {
-                Err(SessionError::Connection(format!(
+                Err(DriverError::Connection(format!(
                     "unexpected HTTP status {} for /upload",
                     response.status
                 )))
@@ -594,7 +594,7 @@ impl XtoolSession {
             _ = &mut started => {}
             _ = &mut settled => {}
             _ = tokio::time::sleep_until(deadline) => {
-                return Err(SessionError::Device(
+                return Err(DriverError::Device(
                     "the machine did not start the job".to_string(),
                 ));
             }
@@ -614,14 +614,14 @@ pub async fn probe_machine_type(
     host: &str,
     port: u16,
     timeout: Duration,
-) -> Result<String, SessionError> {
+) -> Result<String, DriverError> {
     let response = http::get(host, port, "/getmachinetype", timeout)
         .await
         .and_then(|response| {
             if response.status == 200 {
                 Ok(response)
             } else {
-                Err(SessionError::Connection(format!(
+                Err(DriverError::Connection(format!(
                     "unexpected HTTP status {} from /getmachinetype",
                     response.status
                 )))
@@ -629,7 +629,7 @@ pub async fn probe_machine_type(
         })?;
     let payload: HashMap<String, Value> =
         serde_json::from_str(&response.text()).map_err(|err| {
-            SessionError::Device(format!(
+            DriverError::Device(format!(
                 "unexpected response from /getmachinetype: {err}"
             ))
         })?;
@@ -752,10 +752,10 @@ fn format_power(template: &str, power: f64) -> String {
         .unwrap_or_else(|_| template.to_string())
 }
 
-/// The session's [`Session`] impl: the single, real implementation
+/// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for XtoolSession {
+impl Driver for XtoolSession {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
@@ -784,13 +784,13 @@ impl Session for XtoolSession {
         }
         self.abort_background_tasks_now_inner();
     }
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         let action = if hold { "pause" } else { "resume" };
         let path = format!("/cnc/data?action={action}");
         let text = self.request_get(&path).await?;
         self.check_result(&text, &format!("'{action}'"))
     }
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.abort_background_tasks().await;
         self.keep_running.store(true, Ordering::SeqCst);
         self.is_cancelled.store(false, Ordering::SeqCst);
@@ -807,7 +807,7 @@ impl Session for XtoolSession {
         gcode: &str,
         _op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.job_running.store(true, Ordering::SeqCst);
         self.is_cancelled.store(false, Ordering::SeqCst);
         let result = self.run_inner(gcode).await;
@@ -821,11 +821,11 @@ impl Session for XtoolSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
-        Session::run(self, machine_code, &HashMap::new(), &[]).await
+    ) -> Result<(), DriverError> {
+        Driver::run(self, machine_code, &HashMap::new(), &[]).await
     }
 
-    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
+    async fn cancel(&self, mode: CancelMode) -> Result<(), DriverError> {
         let emergency = mode == CancelMode::Immediate;
         self.is_cancelled.store(true, Ordering::SeqCst);
         let stop = async {
@@ -850,7 +850,7 @@ impl Session for XtoolSession {
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let command = command.to_string();
         let _guard = self.cmd_lock.lock().await;
         self.raw_tx_line(&command);
@@ -880,7 +880,7 @@ impl Session for XtoolSession {
         &self,
         _axes: Option<Vec<String>>,
         _active_wcs: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.settled.clear();
         self.execute_interactive_command("M17 S1").await?;
         self.execute_interactive_command("M207 S0").await?;
@@ -896,7 +896,7 @@ impl Session for XtoolSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut axes = vec![format!("X{x}"), format!("Y{y}")];
         if let Some(z) = z {
             axes.push(format!("Z{z}"));
@@ -914,7 +914,7 @@ impl Session for XtoolSession {
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let deltas = deltas.to_vec();
         if deltas.is_empty() {
             return Ok(());
@@ -934,7 +934,7 @@ impl Session for XtoolSession {
         self.execute_block(block).await
     }
 
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let command = match power {
             Some(power) => format_power(&dialect.laser_on, power),
@@ -950,7 +950,7 @@ impl Session for XtoolSession {
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let dialect = self.dialect();
         let command = match power {
             Some(power) => format_power(&dialect.focus_laser_on, power),
@@ -966,7 +966,7 @@ impl Session for XtoolSession {
     async fn execute_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let command = command.to_string();
         if let Err(err) = self.execute_interactive_command(&command).await {
             self.update_command_status(

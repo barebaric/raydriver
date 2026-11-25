@@ -9,7 +9,7 @@ showing live progress while the job executes:
     raydriver run job.gcode --emulator
     raydriver status --port /dev/ttyUSB0 --seconds 5
 
-Session diagnostics (stall detection, liveness, unexpected device
+Driver diagnostics (stall detection, liveness, unexpected device
 lines) go to stderr by default; ``--log-file`` redirects them to a
 dedicated file so they never interleave with the progress display.
 Verbosity follows ``RUST_LOG`` (e.g. ``RUST_LOG=debug``).
@@ -25,7 +25,7 @@ import raydriver.raydriver as _native
 from raydriver.cli.analyzer import add_analyzer_parser
 from raydriver.cli.daemon import add_daemon_parser
 from raydriver.cli.debug import add_debug_parser
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
 from raydriver.grbl import GrblSession
@@ -164,15 +164,15 @@ async def cmd_run(args) -> int:
 
     connected = asyncio.get_running_loop().create_future()
 
-    def on_event(event: SessionEvent):
+    def on_event(event: DriverEvent):
         match event:
-            case SessionEvent.StateChanged():
+            case DriverEvent.StateChanged():
                 view.on_state(event.state)
-            case SessionEvent.ConnectionStatusChanged(status="CONNECTED") if (
+            case DriverEvent.ConnectionStatusChanged(status="CONNECTED") if (
                 not connected.done()
             ):
                 connected.set_result(True)
-            case SessionEvent.ConnectionStatusChanged(
+            case DriverEvent.ConnectionStatusChanged(
                 status="ERROR", message=message
             ) if not connected.done():
                 connected.set_exception(
@@ -221,9 +221,9 @@ async def cmd_run(args) -> int:
 
 
 async def cmd_status(args) -> int:
-    def on_event(event: SessionEvent):
+    def on_event(event: DriverEvent):
         match event:
-            case SessionEvent.StateChanged():
+            case DriverEvent.StateChanged():
                 state = event.state
                 mpos = ",".join(
                     f"{v:8.3f}" if v is not None else "     -  "

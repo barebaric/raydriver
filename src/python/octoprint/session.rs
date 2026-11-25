@@ -7,7 +7,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::octoprint::session::{OctoPrintConfig, OctoPrintSession};
 use crate::python::core::json::{value_to_dict, JsonDict};
 use crate::python::core::types::DeviceState;
@@ -55,7 +55,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
 /// An OctoPrint server session: job submission and live printer
 /// state over the REST API and SockJS WebSocket.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 /// Operations the OctoPrint API cannot perform (e.g. writing
 /// firmware settings) raise `NotImplementedError`.
@@ -96,7 +96,7 @@ impl PyOctoPrintSession {
         dialect: Option<Bound<'_, PyDict>>,
 
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

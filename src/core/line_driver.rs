@@ -8,8 +8,8 @@
 //! shutdown — so the quirks (late-ack suppression, wire-ordered FIFO
 //! for Marlin, event-outside-the-lock emission) exist exactly once.
 //!
-//! A session is a struct that embeds a [`LineSessionBase`] and
-//! implements [`PingPongSession`]: the trait's *hooks* carry
+//! A session is a struct that embeds a [`LineDriverBase`] and
+//! implements [`PingPongDriver`]: the trait's *hooks* carry
 //! everything protocol-specific (line dispatch, handshake style,
 //! poll loop, cancel bytes), while its *operations* — command
 //! exchange, job streaming, the dialect-formatted device operations
@@ -17,7 +17,7 @@
 //! trait is the supported way to add a new strict ping-pong protocol;
 //! callers use the session's own API (the trait is in scope in this
 //! crate's bindings) or the protocol-agnostic
-//! [`crate::core::session::Session`] surface.
+//! [`crate::core::driver::Driver`] surface.
 
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::core::dialect::{format_template, Arg, Dialect};
-use crate::core::session::{AsyncEvent, SessionError, SessionEvents};
+use crate::core::driver::{AsyncEvent, DriverError, DriverEvents};
 use crate::core::transport::Transport;
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
@@ -99,7 +99,7 @@ impl PendingStore {
         }
     }
 
-    /// Register a newly sent command (used by [`LineSessionBase::await_ack`]).
+    /// Register a newly sent command (used by [`LineDriverBase::await_ack`]).
     fn enqueue(&self, pending: Arc<PendingCmd>) {
         match &self.inner {
             PendingInner::Slot(slot) => {
@@ -181,14 +181,14 @@ impl PendingStore {
 
 /// The state bundle shared by every ping-pong session.  A session
 /// struct embeds one and hands a reference to it back from
-/// [`PingPongSession::base`]; the bundle's methods carry everything
+/// [`PingPongDriver::base`]; the bundle's methods carry everything
 /// the hooks and provided operations have in common.
-pub struct LineSessionBase {
+pub struct LineDriverBase {
     /// The command templates (owned data; see [`Dialect`]).
     pub dialect: RwLock<Dialect>,
     /// The event sink (implemented by the Python bindings or by the
     /// embedding application).
-    pub events: Arc<dyn SessionEvents>,
+    pub events: Arc<dyn DriverEvents>,
     /// The byte transport to the device.
     pub transport: Arc<dyn Transport>,
     /// The last reported device state.
@@ -209,7 +209,7 @@ pub struct LineSessionBase {
     /// The pending-acknowledgement bookkeeping.
     pub pending: PendingStore,
     /// The error that aborted the current job, if any.
-    pub job_exception: Mutex<Option<SessionError>>,
+    pub job_exception: Mutex<Option<DriverError>>,
     /// Serializes user commands for slot-style sessions.
     pub cmd_lock: tokio::sync::Mutex<()>,
     /// The last op index reported via `command_done`.
@@ -218,12 +218,12 @@ pub struct LineSessionBase {
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
 
-impl LineSessionBase {
+impl LineDriverBase {
     /// Build the bundle for a transport already chosen by the
     /// session's constructor.
     pub fn new(
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
         transport: Arc<dyn Transport>,
         pending: PendingStore,
     ) -> Self {
@@ -335,13 +335,13 @@ impl LineSessionBase {
     /// The shared tail of every ping-pong: enqueue the pending
     /// acknowledgement, write the command, await its acknowledgement
     /// under *timeout*, then drop the entry.  A session's
-    /// [`PingPongSession::ping_pong`] wraps this with its protocol
+    /// [`PingPongDriver::ping_pong`] wraps this with its protocol
     /// specifics (serialization, handshake gates).
     pub async fn await_ack(
         &self,
         command: &str,
         timeout: Duration,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let pending = Arc::new(PendingCmd::new());
         self.pending.enqueue(pending.clone());
         self.events.raw_tx(command);
@@ -351,9 +351,9 @@ impl LineSessionBase {
                 .await?;
             match tokio::time::timeout(timeout, pending.finished.wait()).await {
                 Ok(()) => Ok(()),
-                Err(_) => Err(SessionError::Timeout(
-                    "operation timed out".to_string(),
-                )),
+                Err(_) => {
+                    Err(DriverError::Timeout("operation timed out".to_string()))
+                }
             }
         }
         .await;
@@ -429,7 +429,7 @@ impl LineSessionBase {
         self.events.state_changed(&state);
     }
 
-    /// Fire [`SessionEvents::command_done`] when the op index
+    /// Fire [`DriverEvents::command_done`] when the op index
     /// changes, before the op's first line is sent.
     fn fire_op_progress(&self, op_map: &HashMap<usize, i64>, line_idx: usize) {
         if let Some(op_index) = op_map.get(&line_idx).copied() {
@@ -446,8 +446,8 @@ impl LineSessionBase {
 
 /// Open the connection for *session*: clean up any previous run,
 /// spawn the connection loop until
-/// [`cleanup`](LineSessionBase::cleanup).
-pub async fn connect<S: PingPongSession>(session: &Arc<S>) {
+/// [`cleanup`](LineDriverBase::cleanup).
+pub async fn connect<S: PingPongDriver>(session: &Arc<S>) {
     session.base().cleanup().await;
     session.base().keep_running.store(true, Ordering::SeqCst);
     let core = session.clone();
@@ -458,7 +458,7 @@ pub async fn connect<S: PingPongSession>(session: &Arc<S>) {
 /// The connection loop skeleton: open the transport, spawn the RX
 /// reader, run the protocol handshake, run the poll loop while the
 /// connection holds, then tear down and sleep until reconnect.
-async fn connection_loop<S: PingPongSession>(session: Arc<S>) {
+async fn connection_loop<S: PingPongDriver>(session: Arc<S>) {
     let base = session.base();
     while base.keep_running.load(Ordering::SeqCst) {
         base.handshake_received.clear();
@@ -512,17 +512,17 @@ pub struct StopCommand {
 /// The ping-pong session hooks.
 ///
 /// Implement this trait to plug a strict ping-pong line protocol
-/// into the shared skeleton: the struct embeds a [`LineSessionBase`],
-/// hands it back from [`PingPongSession::base`], and fills in the
+/// into the shared skeleton: the struct embeds a [`LineDriverBase`],
+/// hands it back from [`PingPongDriver::base`], and fills in the
 /// protocol hooks.  The skeleton's operations — job streaming, the
 /// command exchange, cancel, the dialect-formatted device operations
 /// and the connection loop — are the free functions of this module;
-/// a session's [`Session`](crate::core::session::Session) impl calls
+/// a session's [`Driver`](crate::core::driver::Driver) impl calls
 /// them with its own signatures.
 #[async_trait]
-pub trait PingPongSession: Send + Sync + 'static {
+pub trait PingPongDriver: Send + Sync + 'static {
     /// The session's shared state bundle.
-    fn base(&self) -> &LineSessionBase;
+    fn base(&self) -> &LineDriverBase;
 
     /// Dispatch one complete RX line (status reports, acks, alarms,
     /// protocol-specific lines).
@@ -557,7 +557,7 @@ pub trait PingPongSession: Send + Sync + 'static {
     async fn ping_pong(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError>;
+    ) -> Result<Vec<String>, DriverError>;
 
     /// Send one command and wait up to *timeout* for its
     /// acknowledgement.  Sessions that can honour a per-command
@@ -566,7 +566,7 @@ pub trait PingPongSession: Send + Sync + 'static {
         &self,
         command: &str,
         _timeout: Duration,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         self.ping_pong(command).await
     }
 
@@ -632,7 +632,7 @@ pub trait PingPongSession: Send + Sync + 'static {
 /// alarm/cancel stop rules, exception handling and the tail
 /// (safety shutdown, `job_finished`).  Errors are reported through
 /// the event sink, mirroring the sessions' historical behavior.
-pub async fn stream_job<S: PingPongSession>(
+pub async fn stream_job<S: PingPongDriver>(
     session: &S,
     gcode: &str,
     op_map: &HashMap<usize, i64>,
@@ -707,7 +707,7 @@ pub async fn stream_job<S: PingPongSession>(
 }
 
 /// Stream pre-rendered machine code: trim, drop empties, stream.
-pub async fn run_raw<S: PingPongSession>(session: &S, machine_code: &str) {
+pub async fn run_raw<S: PingPongDriver>(session: &S, machine_code: &str) {
     let lines: Vec<String> = machine_code
         .lines()
         .map(|l| l.trim().to_string())
@@ -721,10 +721,10 @@ pub async fn run_raw<S: PingPongSession>(session: &S, machine_code: &str) {
 
 /// The shared command path: clear a finished job's cancellation
 /// flag, send the line, await its acknowledgement.
-pub async fn execute_command<S: PingPongSession>(
+pub async fn execute_command<S: PingPongDriver>(
     session: &S,
     command: &str,
-) -> Result<Vec<String>, SessionError> {
+) -> Result<Vec<String>, DriverError> {
     if !session.base().job_running.load(Ordering::SeqCst) {
         session.base().is_cancelled.store(false, Ordering::SeqCst);
     }
@@ -734,11 +734,11 @@ pub async fn execute_command<S: PingPongSession>(
 /// Like [`execute_command`], but with an explicit acknowledgement
 /// budget for operations such as homing that outlast the ordinary
 /// ping-pong timeout.
-pub async fn execute_command_with_timeout<S: PingPongSession>(
+pub async fn execute_command_with_timeout<S: PingPongDriver>(
     session: &S,
     command: &str,
     timeout: Duration,
-) -> Result<Vec<String>, SessionError> {
+) -> Result<Vec<String>, DriverError> {
     if !session.base().job_running.load(Ordering::SeqCst) {
         session.base().is_cancelled.store(false, Ordering::SeqCst);
     }
@@ -749,10 +749,10 @@ pub async fn execute_command_with_timeout<S: PingPongSession>(
 /// pending acknowledgements, write the protocol's stop bytes, run
 /// the safety shutdown and report the job finished if one was
 /// running.
-pub async fn cancel<S: PingPongSession>(
+pub async fn cancel<S: PingPongDriver>(
     session: &S,
     emergency: bool,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let base = session.base();
     let stop = session.stop_command();
     log::debug!("Cancel command initiated.");
@@ -767,7 +767,7 @@ pub async fn cancel<S: PingPongSession>(
     base.line_buffer.lock().unwrap().clear();
 
     if !base.transport.is_open() {
-        return Err(SessionError::Connection(
+        return Err(DriverError::Connection(
             session.not_connected_message().to_string(),
         ));
     }
@@ -785,7 +785,7 @@ pub async fn cancel<S: PingPongSession>(
 /// Best-effort transmission of the dialect's tool-off commands so a
 /// cancelled or aborted job cannot leave persistent PWM outputs
 /// energized.  Fire-and-forget: responses are ignored.
-async fn safety_shutdown<S: PingPongSession>(session: &S, emergency: bool) {
+async fn safety_shutdown<S: PingPongDriver>(session: &S, emergency: bool) {
     let base = session.base();
     let dialect = base.dialect();
     let mut commands = dialect.safety_off_commands.clone();
@@ -817,10 +817,10 @@ async fn safety_shutdown<S: PingPongSession>(session: &S, emergency: bool) {
 /// Home all axes or *axes*; *active_wcs* is irrelevant for the
 /// generic path (protocols with a re-assertion step implement their
 /// own homing).
-pub async fn home<S: PingPongSession>(
+pub async fn home<S: PingPongDriver>(
     session: &S,
     axes: Option<Vec<String>>,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     match axes {
         None => {
@@ -832,7 +832,7 @@ pub async fn home<S: PingPongSession>(
                     &dialect.home_axis,
                     &[("axis_letter", Arg::Str(axis))],
                 )
-                .map_err(SessionError::Other)?;
+                .map_err(DriverError::Other)?;
                 execute_command(session, &cmd).await?;
             }
         }
@@ -843,12 +843,12 @@ pub async fn home<S: PingPongSession>(
 
 /// Absolute move in the machine's current coordinate frame.  *z* is
 /// ignored: the GRBL-family `move_to` templates carry no Z word.
-pub async fn move_to<S: PingPongSession>(
+pub async fn move_to<S: PingPongDriver>(
     session: &S,
     speed: f64,
     pos_x: f64,
     pos_y: f64,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     let cmd = format_template(
         &dialect.move_to,
@@ -858,20 +858,20 @@ pub async fn move_to<S: PingPongSession>(
             ("y", Arg::Length(pos_y)),
         ],
     )
-    .map_err(SessionError::Other)?;
+    .map_err(DriverError::Other)?;
     execute_command(session, &cmd).await?;
     Ok(())
 }
 
 /// Relative jog by per-axis distances.
-pub async fn jog<S: PingPongSession>(
+pub async fn jog<S: PingPongDriver>(
     session: &S,
     speed: f64,
     deltas: &[(String, f64)],
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     let head = format_template(&dialect.jog, &[("speed", Arg::Speed(speed))])
-        .map_err(SessionError::Other)?;
+        .map_err(DriverError::Other)?;
     let mut cmd_parts = vec![head];
     for (axis_name, distance) in deltas {
         cmd_parts.push(format!(
@@ -889,30 +889,30 @@ pub async fn jog<S: PingPongSession>(
 }
 
 /// Switch to *tool_number*.
-pub async fn select_tool<S: PingPongSession>(
+pub async fn select_tool<S: PingPongDriver>(
     session: &S,
     tool_number: i64,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     let cmd = format_template(
         &dialect.tool_change,
         &[("tool_number", Arg::Int(tool_number))],
     )
-    .map_err(SessionError::Other)?;
+    .map_err(DriverError::Other)?;
     execute_command(session, &cmd).await?;
     Ok(())
 }
 
 /// Laser/spindle power; `None` disables the tool.
-pub async fn set_power<S: PingPongSession>(
+pub async fn set_power<S: PingPongDriver>(
     session: &S,
     power: Option<f64>,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     let cmd = match power {
         Some(p) if p > 0.0 => {
             format_template(&dialect.laser_on, &[("power", Arg::Length(p))])
-                .map_err(SessionError::Other)?
+                .map_err(DriverError::Other)?
         }
         _ => dialect.laser_off.clone(),
     };
@@ -921,17 +921,17 @@ pub async fn set_power<S: PingPongSession>(
 }
 
 /// Laser power used while focusing; `None` disables it.
-pub async fn set_focus_power<S: PingPongSession>(
+pub async fn set_focus_power<S: PingPongDriver>(
     session: &S,
     power: Option<f64>,
-) -> Result<(), SessionError> {
+) -> Result<(), DriverError> {
     let dialect = session.base().dialect();
     let cmd = match power {
         Some(p) if p > 0.0 => format_template(
             &dialect.focus_laser_on,
             &[("power", Arg::Length(p))],
         )
-        .map_err(SessionError::Other)?,
+        .map_err(DriverError::Other)?,
         _ => dialect.laser_off.clone(),
     };
     execute_command(session, &cmd).await?;

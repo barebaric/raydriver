@@ -8,7 +8,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyByteArray, PyBytes, PyDict};
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::epilog::session::{EpilogConfig, EpilogSession};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
@@ -46,7 +46,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<EpilogConfig> {
 /// An Epilog laser session: prints jobs through the machine's LPD
 /// print queue.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 /// The machine has no status channel, so most session operations
 /// raise `NotImplementedError`; job submission uses `upload`.
@@ -84,7 +84,7 @@ impl PyEpilogSession {
         dialect: Option<Bound<'_, PyDict>>,
 
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -131,7 +131,7 @@ impl PyEpilogSession {
             move || {
                 crate::python::runtime::handle().spawn(async move {
                     let _ =
-                        Session::cancel(&*cancel_core, CancelMode::Immediate)
+                        Driver::cancel(&*cancel_core, CancelMode::Immediate)
                             .await;
                 });
             },

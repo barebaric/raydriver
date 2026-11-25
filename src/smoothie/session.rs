@@ -16,7 +16,7 @@
 //!
 //! The ping-pong mechanics (pending acknowledgements, connection
 //! loop, job streaming, cancel, safety shutdown) are shared with the
-//! other line sessions via [`core::line_session`]; this module only
+//! other line sessions via [`core::line_driver`]; this module only
 //! holds the Smoothie-specific dispatch and hooks.
 
 use std::borrow::Cow;
@@ -29,11 +29,11 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use crate::core::dialect::Dialect;
-use crate::core::line_session::{
-    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+use crate::core::driver::{
+    secs, CancelMode, Driver, DriverError, DriverEvents,
 };
-use crate::core::session::{
-    secs, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::line_driver::{
+    self, LineDriverBase, PendingStore, PingPongDriver, StopCommand,
 };
 use crate::core::transport::TransportKind;
 use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
@@ -71,7 +71,7 @@ impl SmoothieConfig {
 /// The Smoothie session: connection lifecycle, status polling and
 /// ping-pong command exchange.
 pub struct SmoothieSession {
-    base: LineSessionBase,
+    base: LineDriverBase,
     config: SmoothieConfig,
 }
 
@@ -79,11 +79,11 @@ impl SmoothieSession {
     pub fn new(
         config: SmoothieConfig,
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         let transport = config.transport.build();
         Arc::new(Self {
-            base: LineSessionBase::new(
+            base: LineDriverBase::new(
                 dialect,
                 events,
                 transport,
@@ -155,7 +155,7 @@ impl SmoothieSession {
         if self.base.is_job_running() {
             log::error!("Device error during job: {line}. Halting stream.");
             *self.base.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("Device error: {line}")));
+                Some(DriverError::Device(format!("Device error: {line}")));
         }
     }
 
@@ -177,7 +177,7 @@ impl SmoothieSession {
         if self.base.is_job_running() {
             log::error!("Device ALARM during job: {line}. Halting stream.");
             *self.base.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("Device ALARM: {line}")));
+                Some(DriverError::Device(format!("Device ALARM: {line}")));
         }
     }
 
@@ -206,12 +206,12 @@ impl SmoothieSession {
 }
 
 /// The Smoothie session contract: the protocol hooks, plus the
-/// [`Session`] operations Smoothieware supports, with their real
+/// [`Driver`] operations Smoothieware supports, with their real
 /// bodies.  Everything shared streams through the
-/// [`PingPongSession`] supertrait.
+/// [`PingPongDriver`] supertrait.
 #[async_trait]
-impl PingPongSession for SmoothieSession {
-    fn base(&self) -> &LineSessionBase {
+impl PingPongDriver for SmoothieSession {
+    fn base(&self) -> &LineDriverBase {
         &self.base
     }
 
@@ -261,10 +261,10 @@ impl PingPongSession for SmoothieSession {
     async fn ping_pong(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let _guard = self.base.cmd_lock.lock().await;
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Transport not connected".to_string(),
             ));
         }
@@ -306,11 +306,11 @@ impl PingPongSession for SmoothieSession {
     }
 }
 
-/// The Smoothie [`Session`]: the shared ping-pong operations call
+/// The Smoothie [`Driver`]: the shared ping-pong operations call
 /// the skeleton's free functions; the Smoothie-specific operations
 /// carry their real bodies here.
 #[async_trait]
-impl Session for SmoothieSession {
+impl Driver for SmoothieSession {
     fn state(&self) -> DeviceState {
         self.base.state()
     }
@@ -331,8 +331,8 @@ impl Session for SmoothieSession {
         self.base.abort_background_tasks_now();
     }
 
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        line_session::connect(&self).await;
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
+        line_driver::connect(&self).await;
         Ok(())
     }
 
@@ -345,8 +345,8 @@ impl Session for SmoothieSession {
         gcode: &str,
         op_map: &HashMap<usize, i64>,
         op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
-        line_session::stream_job(self.as_ref(), gcode, op_map, op_estimates)
+    ) -> Result<(), DriverError> {
+        line_driver::stream_job(self.as_ref(), gcode, op_map, op_estimates)
             .await;
         Ok(())
     }
@@ -354,28 +354,28 @@ impl Session for SmoothieSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
-        line_session::run_raw(self.as_ref(), machine_code).await;
+    ) -> Result<(), DriverError> {
+        line_driver::run_raw(self.as_ref(), machine_code).await;
         Ok(())
     }
 
-    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        line_session::cancel(self, mode == CancelMode::Immediate).await
+    async fn cancel(&self, mode: CancelMode) -> Result<(), DriverError> {
+        line_driver::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
-        line_session::execute_command(self, command).await
+    ) -> Result<Vec<String>, DriverError> {
+        line_driver::execute_command(self, command).await
     }
 
     async fn home(
         &self,
         axes: Option<Vec<String>>,
         _active_wcs: &str,
-    ) -> Result<(), SessionError> {
-        line_session::home(self, axes).await
+    ) -> Result<(), DriverError> {
+        line_driver::home(self, axes).await
     }
 
     async fn move_to(
@@ -384,37 +384,37 @@ impl Session for SmoothieSession {
         x: f64,
         y: f64,
         _z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::move_to(self, speed, x, y).await
+    ) -> Result<(), DriverError> {
+        line_driver::move_to(self, speed, x, y).await
     }
 
     async fn jog(
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        line_session::jog(self, speed, deltas).await
+    ) -> Result<(), DriverError> {
+        line_driver::jog(self, speed, deltas).await
     }
 
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        line_session::select_tool(self, tool_number).await
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
+        line_driver::select_tool(self, tool_number).await
     }
 
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        line_session::set_power(self, power).await
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
+        line_driver::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::set_focus_power(self, power).await
+    ) -> Result<(), DriverError> {
+        line_driver::set_focus_power(self, power).await
     }
 
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         self.base.is_holding.store(hold, Ordering::SeqCst);
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Transport not connected".to_string(),
             ));
         }
@@ -444,10 +444,10 @@ impl Session for SmoothieSession {
         Ok(())
     }
 
-    async fn clear_alarm(&self) -> Result<(), SessionError> {
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
         let dialect = self.base.dialect();
         let response =
-            line_session::execute_command(self, &dialect.clear_alarm).await?;
+            line_driver::execute_command(self, &dialect.clear_alarm).await?;
         let has_error = response.iter().any(|line| line.starts_with("error:"));
         if !has_error {
             self.base.clear_device_error();
@@ -461,15 +461,15 @@ impl Session for SmoothieSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let p_num = parser::gcode_to_p_number(wcs_slot).ok_or_else(|| {
-            SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+            DriverError::Other(format!("Invalid WCS slot: {wcs_slot}"))
         })?;
         let dialect = self.base.dialect();
         let cmd = dialect
             .format_wcs_offset(p_num, x, y, z)
-            .map_err(SessionError::Other)?;
-        line_session::execute_command(self, &cmd).await?;
+            .map_err(DriverError::Other)?;
+        line_driver::execute_command(self, &cmd).await?;
         Ok(())
     }
 }

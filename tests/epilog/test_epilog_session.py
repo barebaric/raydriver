@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 import pytest
 from conftest import EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.epilog import EpilogSession
 
 
@@ -207,7 +207,7 @@ async def test_connect_reports_reachable_machine():
         session = make_session(port, events)
         await session.connect()
         event = await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
         )
         assert "reachable" in (event.message or "")
@@ -224,7 +224,7 @@ async def test_connect_failure_reports_error():
     with pytest.raises((ConnectionError, TimeoutError)):
         await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "ERROR",
     )
     await session.disconnect()

@@ -7,7 +7,7 @@ import asyncio
 import pytest
 from conftest import DEFAULT_DIALECT
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.marlin import MarlinSession
 from raydriver.marlin.emulator import MarlinEmulator
 from raydriver.marlin.probe import MarlinDeviceInfo, describe
@@ -49,7 +49,7 @@ async def marlin_rig(mock, events):
     session = make_marlin_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()

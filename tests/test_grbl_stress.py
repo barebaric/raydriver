@@ -5,7 +5,7 @@ import asyncio
 
 from conftest import make_session, start_device
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 
 
 def gcode(n_lines):
@@ -23,7 +23,7 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )
@@ -51,7 +51,7 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )
@@ -73,7 +73,7 @@ class TestStress:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
                 timeout=5.0,
             )

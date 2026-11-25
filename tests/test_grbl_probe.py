@@ -12,7 +12,7 @@ from conftest import (
     server_port,
 )
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -185,7 +185,7 @@ class TestProbeDeviceRemote:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             info = await session.probe_device()

@@ -8,7 +8,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::core::transport::TransportKind;
 use crate::grbl::simple::{GrblSimpleSession, SimpleConfig};
 
@@ -83,7 +83,7 @@ fn build_simple_config(
 /// deadlock detection — for hardware where the full
 /// [`GrblSession`][raydriver.grbl.GrblSession] misbehaves.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
 #[pyclass(name = "GrblSimpleSession", module = "raydriver.grbl.simple")]
@@ -106,7 +106,7 @@ impl PyGrblSimpleSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -130,7 +130,7 @@ impl PyGrblSimpleSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

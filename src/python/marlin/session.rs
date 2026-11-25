@@ -7,7 +7,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::core::transport::TransportKind;
 use crate::marlin::session::{MarlinConfig, MarlinSession};
 use crate::python::core::types::DeviceState;
@@ -57,7 +57,7 @@ fn build_marlin_config(
 /// positions are polled with `M114`.  Marlin has no feed-hold
 /// support — pausing is the caller's concern.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
 #[pyclass(name = "MarlinSession", module = "raydriver.marlin")]
@@ -80,7 +80,7 @@ impl PyMarlinSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -104,7 +104,7 @@ impl PyMarlinSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

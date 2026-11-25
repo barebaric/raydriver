@@ -10,7 +10,7 @@
 //! properties.
 //!
 //! Operations a protocol cannot perform raise
-//! [`SessionError::Unsupported`](crate::core::session::SessionError)
+//! [`DriverError::Unsupported`](crate::core::driver::DriverError)
 //! through the usual mapping — the method is still present, so
 //! callers never branch on `hasattr`.
 
@@ -26,7 +26,7 @@ macro_rules! uniform_session_api {
                 self.events.capture_loop(py)?;
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::connect(core).await?;
+                    $crate::core::driver::Driver::connect(core).await?;
                     Ok(())
                 })
             }
@@ -39,7 +39,7 @@ macro_rules! uniform_session_api {
                 let core = self.core.clone();
                 let events = self.events.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::cleanup(&*core).await;
+                    $crate::core::driver::Driver::cleanup(&*core).await;
                     events.quiesce();
                     Ok(())
                 })
@@ -65,7 +65,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, Vec<String>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::execute_interactive_command(
+                    Ok($crate::core::driver::Driver::execute_interactive_command(
                         &*core, &command,
                     )
                     .await?)
@@ -80,7 +80,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, Vec<String>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::execute_command(
+                    Ok($crate::core::driver::Driver::execute_command(
                         &*core, &command,
                     )
                     .await?)
@@ -110,7 +110,7 @@ macro_rules! uniform_session_api {
                     py,
                     async move {
                         events.set_progress_callback(progress_callback);
-                        $crate::core::session::Session::run(
+                        $crate::core::driver::Driver::run(
                             core,
                             &gcode,
                             &op_map,
@@ -121,9 +121,9 @@ macro_rules! uniform_session_api {
                     },
                     move || {
                         $crate::python::runtime::handle().spawn(async move {
-                            let _ = $crate::core::session::Session::cancel(
+                            let _ = $crate::core::driver::Driver::cancel(
                                 &*cancel_core,
-                                $crate::core::session::CancelMode::Graceful,
+                                $crate::core::driver::CancelMode::Graceful,
                             )
                             .await;
                         });
@@ -142,7 +142,7 @@ macro_rules! uniform_session_api {
                 $crate::python::pyfuture::spawn_future_with_cancel(
                     py,
                     async move {
-                        $crate::core::session::Session::run_raw(
+                        $crate::core::driver::Driver::run_raw(
                             core,
                             &machine_code,
                         )
@@ -151,9 +151,9 @@ macro_rules! uniform_session_api {
                     },
                     move || {
                         $crate::python::runtime::handle().spawn(async move {
-                            let _ = $crate::core::session::Session::cancel(
+                            let _ = $crate::core::driver::Driver::cancel(
                                 &*cancel_core,
-                                $crate::core::session::CancelMode::Graceful,
+                                $crate::core::driver::CancelMode::Graceful,
                             )
                             .await;
                         });
@@ -175,7 +175,7 @@ macro_rules! uniform_session_api {
                     } else {
                         CancelMode::Graceful
                     };
-                    $crate::core::session::Session::cancel(&*core, mode).await?;
+                    $crate::core::driver::Driver::cancel(&*core, mode).await?;
                     Ok(())
                 })
             }
@@ -189,7 +189,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::set_hold(&*core, hold).await?;
+                    $crate::core::driver::Driver::set_hold(&*core, hold).await?;
                     Ok(())
                 })
             }
@@ -206,7 +206,7 @@ macro_rules! uniform_session_api {
                 let active_wcs =
                     active_wcs.unwrap_or_else(|| "G54".to_string());
                 spawn_future(py, async move {
-                    $crate::core::session::Session::home(
+                    $crate::core::driver::Driver::home(
                         &*core,
                         axes,
                         &active_wcs,
@@ -228,7 +228,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::move_to(
+                    $crate::core::driver::Driver::move_to(
                         &*core, speed, x, y, z,
                     )
                     .await?;
@@ -247,7 +247,7 @@ macro_rules! uniform_session_api {
                 let core = self.core.clone();
                 let deltas = deltas.unwrap_or_default();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::jog(&*core, speed, &deltas)
+                    $crate::core::driver::Driver::jog(&*core, speed, &deltas)
                         .await?;
                     Ok(())
                 })
@@ -261,7 +261,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::select_tool(
+                    $crate::core::driver::Driver::select_tool(
                         &*core,
                         tool_number,
                     )
@@ -279,7 +279,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::set_power(&*core, power)
+                    $crate::core::driver::Driver::set_power(&*core, power)
                         .await?;
                     Ok(())
                 })
@@ -294,7 +294,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::set_focus_power(&*core, power)
+                    $crate::core::driver::Driver::set_focus_power(&*core, power)
                         .await?;
                     Ok(())
                 })
@@ -304,7 +304,7 @@ macro_rules! uniform_session_api {
             fn clear_alarm<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::clear_alarm(&*core).await?;
+                    $crate::core::driver::Driver::clear_alarm(&*core).await?;
                     Ok(())
                 })
             }
@@ -321,7 +321,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::set_wcs_offset(
+                    $crate::core::driver::Driver::set_wcs_offset(
                         &*core, &wcs_slot, x, y, z,
                     )
                     .await?;
@@ -336,7 +336,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, Vec<(String, String)>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::read_settings(&*core)
+                    Ok($crate::core::driver::Driver::read_settings(&*core)
                         .await?)
                 })
             }
@@ -350,7 +350,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, ()>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    $crate::core::session::Session::write_setting(
+                    $crate::core::driver::Driver::write_setting(
                         &*core, &key, &value,
                     )
                     .await?;
@@ -365,7 +365,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, std::collections::HashMap<String, (f64, f64, f64)>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::read_wcs_offsets(&*core)
+                    Ok($crate::core::driver::Driver::read_wcs_offsets(&*core)
                         .await?)
                 })
             }
@@ -377,7 +377,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, Option<String>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::read_parser_state(&*core)
+                    Ok($crate::core::driver::Driver::read_parser_state(&*core)
                         .await?)
                 })
             }
@@ -392,7 +392,7 @@ macro_rules! uniform_session_api {
             ) -> PyResult<PyAwait<'py, Option<(f64, f64, f64)>>> {
                 let core = self.core.clone();
                 spawn_future(py, async move {
-                    Ok($crate::core::session::Session::run_probe_cycle(
+                    Ok($crate::core::driver::Driver::run_probe_cycle(
                         &*core,
                         &axis_letter,
                         max_travel,
@@ -411,7 +411,7 @@ macro_rules! uniform_session_api {
                 let core = self.core.clone();
                 spawn_future(py, async move {
                     let unit =
-                        $crate::core::session::Session::detect_unit_system(
+                        $crate::core::driver::Driver::detect_unit_system(
                             &*core,
                         )
                         .await?;

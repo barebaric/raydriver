@@ -19,8 +19,8 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::task::JoinHandle;
 
+use crate::core::driver::{CancelMode, Driver, DriverError, DriverEvents};
 use crate::core::http;
-use crate::core::session::{CancelMode, Session, SessionError, SessionEvents};
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
@@ -112,7 +112,7 @@ struct JobState {
 /// The OctoPrint session core.
 pub struct OctoPrintSession {
     config: OctoPrintConfig,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     state: Mutex<DeviceState>,
     keep_running: AtomicBool,
     job_running: AtomicBool,
@@ -132,7 +132,7 @@ impl OctoPrintSession {
         y: f64,
         z: Option<f64>,
         speed: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut params = json!({
             "command": "jog",
             "x": x,
@@ -151,7 +151,7 @@ impl OctoPrintSession {
     }
     pub fn new(
         config: OctoPrintConfig,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         Arc::new(Self {
             config,
@@ -214,7 +214,7 @@ impl OctoPrintSession {
         method: &str,
         path: &str,
         body: Option<Value>,
-    ) -> Result<Option<Value>, SessionError> {
+    ) -> Result<Option<Value>, DriverError> {
         let timeout = self.config.secs(self.config.request_timeout);
         let headers = [("X-Api-Key", self.api_key())];
         let headers: Vec<(&str, &str)> =
@@ -243,20 +243,20 @@ impl OctoPrintSession {
                 .await?
             }
             _ => {
-                return Err(SessionError::Device(format!(
+                return Err(DriverError::Device(format!(
                     "unsupported request: {method} {path}"
                 )))
             }
         };
         if response.status == 403 {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "authentication failed: the API key is invalid or \
                  expired"
                     .to_string(),
             ));
         }
         if !(200..300).contains(&response.status) {
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "unexpected HTTP status {} from {path}",
                 response.status
             )));
@@ -277,7 +277,7 @@ impl OctoPrintSession {
 
     /// Fetches the census payloads: the parsed ``/api/version``
     /// and ``/api/printer`` responses, as JSON-serializable dicts.
-    pub async fn probe_info(&self) -> Result<(Value, Value), SessionError> {
+    pub async fn probe_info(&self) -> Result<(Value, Value), DriverError> {
         let version = self
             .api_request("GET", "/api/version", None)
             .await?
@@ -289,12 +289,12 @@ impl OctoPrintSession {
         Ok((version, printer))
     }
 
-    async fn verify_connection(&self) -> Result<(), SessionError> {
+    async fn verify_connection(&self) -> Result<(), DriverError> {
         let login = self
             .api_request("POST", "/api/login", Some(json!({"passive": true})))
             .await?
             .ok_or_else(|| {
-                SessionError::Device(
+                DriverError::Device(
                     "OctoPrint returned no login data".to_string(),
                 )
             })?;
@@ -376,7 +376,7 @@ impl OctoPrintSession {
         }
     }
 
-    async fn run_websocket(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn run_websocket(self: Arc<Self>) -> Result<(), DriverError> {
         let ws_path = format!("{}/sockjs/websocket", self.config.path_prefix);
         let mut ws = WsClient::connect_path(
             &self.config.host,
@@ -392,7 +392,7 @@ impl OctoPrintSession {
         // socket when a passive login gave us credentials.
         let first = ws.receive().await?;
         if first.starts_with("c[") {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "server closed the WebSocket connection".to_string(),
             ));
         }
@@ -421,7 +421,7 @@ impl OctoPrintSession {
         }
     }
 
-    async fn run_polling(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn run_polling(self: Arc<Self>) -> Result<(), DriverError> {
         while self.keep_running.load(Ordering::SeqCst) {
             match self
                 .api_request("GET", "/api/printer?exclude=temperature,sd", None)
@@ -434,8 +434,8 @@ impl OctoPrintSession {
                 }
                 Ok(None) => {}
                 Err(err) => match err {
-                    SessionError::Device(message)
-                    | SessionError::Connection(message) => {
+                    DriverError::Device(message)
+                    | DriverError::Connection(message) => {
                         self.update_connection_status(
                             TransportStatus::Error,
                             Some(&message),
@@ -597,7 +597,7 @@ impl OctoPrintSession {
         gcode.as_bytes().to_vec()
     }
 
-    async fn upload_and_print(&self, gcode: &str) -> Result<(), SessionError> {
+    async fn upload_and_print(&self, gcode: &str) -> Result<(), DriverError> {
         let timeout = self.config.secs(self.config.request_timeout);
         let headers = [("X-Api-Key", self.api_key())];
         let headers: Vec<(&str, &str)> =
@@ -615,19 +615,19 @@ impl OctoPrintSession {
         )
         .await?;
         if response.status == 403 {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "authentication failed during upload".to_string(),
             ));
         }
         if response.status == 409 {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "printer is busy or not operational; cannot start a \
                  new job"
                     .to_string(),
             ));
         }
         if !(200..300).contains(&response.status) {
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "unexpected HTTP status {} from the upload endpoint",
                 response.status
             )));
@@ -635,7 +635,7 @@ impl OctoPrintSession {
         let data = serde_json::from_str::<Value>(&response.text())
             .unwrap_or(json!({}));
         if data.get("effectivePrint").and_then(Value::as_bool) != Some(true) {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "OctoPrint accepted the file but could not start \
                  printing; the printer may not be operational or is \
                  already busy"
@@ -649,10 +649,7 @@ impl OctoPrintSession {
     // Motion and control
     // ---------------------------------------------------------------
 
-    async fn printer_command(
-        &self,
-        command: Value,
-    ) -> Result<(), SessionError> {
+    async fn printer_command(&self, command: Value) -> Result<(), DriverError> {
         self.api_request("POST", "/api/printer/command", Some(command))
             .await?;
         Ok(())
@@ -687,10 +684,10 @@ fn sockjs_payloads(frame: &str) -> Vec<Value> {
         .collect()
 }
 
-/// The session's [`Session`] impl: the single, real implementation
+/// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for OctoPrintSession {
+impl Driver for OctoPrintSession {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
@@ -717,7 +714,7 @@ impl Session for OctoPrintSession {
         self.abort_background_tasks().await;
         self.update_connection_status(TransportStatus::Disconnected, None);
     }
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         let action = if hold { "pause" } else { "resume" };
         self.api_request(
             "POST",
@@ -727,7 +724,7 @@ impl Session for OctoPrintSession {
         .await?;
         Ok(())
     }
-    async fn clear_alarm(&self) -> Result<(), SessionError> {
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
         self.execute_command("M999").await?;
         self.set_error(None);
         self.set_status(DeviceStatus::Idle);
@@ -739,7 +736,7 @@ impl Session for OctoPrintSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let p_map: HashMap<&str, i64> = [
             ("G54", 1),
             ("G55", 2),
@@ -751,7 +748,7 @@ impl Session for OctoPrintSession {
         .into_iter()
         .collect();
         let p_num = p_map.get(wcs_slot).copied().ok_or_else(|| {
-            SessionError::Device(format!("invalid WCS slot: {wcs_slot}"))
+            DriverError::Device(format!("invalid WCS slot: {wcs_slot}"))
         })?;
         let mut command = format!("G10 L2 P{p_num} X{x:.3} Y{y:.3}");
         if let Some(z) = z {
@@ -761,17 +758,17 @@ impl Session for OctoPrintSession {
     }
     async fn read_wcs_offsets(
         &self,
-    ) -> Result<HashMap<String, (f64, f64, f64)>, SessionError> {
+    ) -> Result<HashMap<String, (f64, f64, f64)>, DriverError> {
         // OctoPrint exposes no work coordinate offsets.
         Ok(HashMap::new())
     }
-    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+    async fn read_parser_state(&self) -> Result<Option<String>, DriverError> {
         // The server API exposes no G-code parser state.
         Ok(None)
     }
     async fn read_settings(
         &self,
-    ) -> Result<Vec<(String, String)>, SessionError> {
+    ) -> Result<Vec<(String, String)>, DriverError> {
         // OctoPrint does not expose firmware settings.
         Ok(Vec::new())
     }
@@ -779,13 +776,13 @@ impl Session for OctoPrintSession {
         &self,
         _key: &str,
         _value: &str,
-    ) -> Result<(), SessionError> {
-        Err(SessionError::Unsupported(
+    ) -> Result<(), DriverError> {
+        Err(DriverError::Unsupported(
         "OctoPrint does not support writing device firmware              settings through its API"
             .to_string(),
     ))
     }
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.abort_background_tasks().await;
         self.keep_running.store(true, Ordering::SeqCst);
         self.job_running.store(false, Ordering::SeqCst);
@@ -801,7 +798,7 @@ impl Session for OctoPrintSession {
         gcode: &str,
         op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         // No granular progress exists on this protocol; report
         // every op in the line map as done once the job starts.
         let op_indices: Vec<i64> = op_map.values().copied().collect();
@@ -821,14 +818,14 @@ impl Session for OctoPrintSession {
         // states).
         loop {
             if !self.keep_running.load(Ordering::SeqCst) {
-                return Err(SessionError::Connection(
+                return Err(DriverError::Connection(
                     "connection closed while the job was running".to_string(),
                 ));
             }
             {
                 let job = self.job_done.lock().unwrap();
                 if let Some(done) = &job.done {
-                    return done.clone().map_err(SessionError::Device);
+                    return done.clone().map_err(DriverError::Device);
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -838,7 +835,7 @@ impl Session for OctoPrintSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let commands: Vec<String> = machine_code
             .lines()
             .map(|line| line.trim().to_string())
@@ -858,7 +855,7 @@ impl Session for OctoPrintSession {
         Ok(())
     }
 
-    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), DriverError> {
         self.api_request(
             "POST",
             "/api/job",
@@ -872,7 +869,7 @@ impl Session for OctoPrintSession {
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         self.execute_command(command).await?;
         // OctoPrint reports no per-line response text.
         Ok(Vec::new())
@@ -882,7 +879,7 @@ impl Session for OctoPrintSession {
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let speed = Some(speed);
         let mut params = json!({"command": "jog"});
         if let Some(speed) = speed {
@@ -900,7 +897,7 @@ impl Session for OctoPrintSession {
         &self,
         axes: Option<Vec<String>>,
         _active_wcs: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let axis_list: Vec<String> = axes
             .map(|names| names.iter().map(|name| name.to_lowercase()).collect())
             .unwrap_or_else(|| {
@@ -921,7 +918,7 @@ impl Session for OctoPrintSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut params =
             json!({"command": "jog", "x": x, "y": y, "absolute": true});
         if let Some(z) = z {
@@ -933,12 +930,12 @@ impl Session for OctoPrintSession {
         Ok(())
     }
 
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
         self.execute_command(&format!("T{tool_number}"))
             .await
             .map(|_| ())
     }
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
         let command = match power {
             Some(p) if p <= 0.0 => "M5".to_string(),
             Some(p) => format!("M3 S{}", p.round()),
@@ -949,12 +946,12 @@ impl Session for OctoPrintSession {
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.set_power(power).await
     }
     async fn detect_unit_system(
         &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
+    ) -> Result<Option<UnitSystem>, DriverError> {
         // OctoPrint exposes no unit configuration; the dialect works
         // in millimeters.
         Ok(None)
@@ -965,7 +962,7 @@ impl Session for OctoPrintSession {
         axis_letter: &str,
         max_travel: f64,
         feed_rate: f64,
-    ) -> Result<Option<(f64, f64, f64)>, SessionError> {
+    ) -> Result<Option<(f64, f64, f64)>, DriverError> {
         self.events
             .probe_status(&format!("Probing {axis_letter}..."));
         self.execute_command(&format!(
@@ -983,7 +980,7 @@ impl Session for OctoPrintSession {
     async fn execute_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         self.printer_command(json!({"command": command})).await?;
         Ok(Vec::new())
     }

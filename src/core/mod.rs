@@ -18,11 +18,11 @@
 pub mod connector;
 pub mod dialect;
 pub mod discovery;
+pub mod driver;
 pub mod http;
-pub mod line_session;
+pub mod line_driver;
 #[cfg(any(feature = "net", feature = "mdns"))]
 pub mod remote;
-pub mod session;
 pub mod transport;
 pub mod types;
 pub mod ws;

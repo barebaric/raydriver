@@ -148,7 +148,7 @@ impl RemoteSession {
         ))]
         dialect: Option<Py<PyAny>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("typing", "collections.abc", "raydriver.core", "builtins")
         ))]
         event_callback: Option<Py<PyAny>>,
@@ -893,7 +893,7 @@ pub(crate) fn create_session(
     ))]
     dialect: Option<Py<PyAny>>,
     #[gen_stub(override_type(
-        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
         imports = ("typing", "collections.abc", "raydriver.core", "builtins")
     ))]
     event_callback: Option<Py<PyAny>>,
@@ -970,7 +970,7 @@ pub(crate) fn open_session(
     ))]
     dialect: Option<Py<PyAny>>,
     #[gen_stub(override_type(
-        type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+        type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
         imports = ("typing", "collections.abc", "raydriver.core", "builtins")
     ))]
     event_callback: Option<Py<PyAny>>,

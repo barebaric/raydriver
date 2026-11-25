@@ -1,4 +1,4 @@
-"""Session lifecycle and interactive command tests, driven against
+"""Driver lifecycle and interactive command tests, driven against
 the GRBL firmware emulator."""
 
 import asyncio
@@ -6,7 +6,7 @@ import asyncio
 import pytest
 from conftest import make_session, sent_bytes, start_device
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceStatus
 
 
@@ -17,7 +17,7 @@ class TestConnection:
         try:
             await session.connect()
             event = await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             assert event.message is None
@@ -35,12 +35,12 @@ class TestConnection:
         try:
             await session.connect()
             event = await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "ERROR",
             )
             assert "No response" in event.message
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "SLEEPING",
             )
         finally:
@@ -51,13 +51,13 @@ class TestConnection:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "ERROR",
             )
             # The device appears (cable plugged back in).
             emulator, device_task = await start_device(mock)
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
                 timeout=8.0,
             )
@@ -85,7 +85,7 @@ class TestStatusReports:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             # OPT and Bf advertise 128, but the override sticks.
@@ -101,7 +101,7 @@ class TestStatusReports:
             [
                 e
                 for e in events.events
-                if isinstance(e, SessionEvent.StateChanged)
+                if isinstance(e, DriverEvent.StateChanged)
             ]
         )
         mock.push(b"<Idle|MPos")
@@ -110,7 +110,7 @@ class TestStatusReports:
             [
                 e
                 for e in events.events
-                if isinstance(e, SessionEvent.StateChanged)
+                if isinstance(e, DriverEvent.StateChanged)
             ]
         )
         assert states_after == states_before
@@ -158,7 +158,7 @@ class TestInteractiveCommands:
         assert "ALARM:2" in lines
         assert lines[-1] == "error:5"
         await events.wait_for(
-            SessionEvent.StateChanged, lambda e: e.state.error is not None
+            DriverEvent.StateChanged, lambda e: e.state.error is not None
         )
         # Like real Grbl, subsequent gcode is rejected.
         lines = await session.execute_interactive_command("G0 X1")
@@ -175,7 +175,7 @@ class TestHold:
         await session.set_hold(True)
         assert b"!" in mock.sent()
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status == DeviceStatus.HOLD,
         )
         await session.set_hold(False)
@@ -186,7 +186,7 @@ class TestHold:
         await session.set_hold(True)
         await session.set_hold(False)
         await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: e.state.status == DeviceStatus.IDLE,
         )
 
@@ -267,7 +267,7 @@ class TestDeviceOperations:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -288,7 +288,7 @@ class TestDeviceOperations:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -310,7 +310,7 @@ class TestDeviceOperations:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda event: event.status == "CONNECTED",
             )
             emulator.settings["22"] = 1
@@ -358,7 +358,7 @@ class TestWcs:
         session, mock, emulator, events = rig
         offsets = await session.read_wcs_offsets()
         assert offsets["G54"] == (0.0, 0.0, 0.0)
-        await events.wait_for(SessionEvent.WcsUpdated)
+        await events.wait_for(DriverEvent.WcsUpdated)
 
     async def test_set_then_read_wcs_offset(self, rig):
         session, mock, emulator, events = rig
@@ -390,7 +390,7 @@ class TestProbe:
         pos = await session.run_probe_cycle("Z", 10.0, 100)
         assert pos == pytest.approx((0.0, 0.0, -5.0))
         await events.wait_for(
-            SessionEvent.ProbeStatusChanged,
+            DriverEvent.ProbeStatusChanged,
             lambda e: "triggered" in e.message,
         )
         assert emulator.mpos == pytest.approx([0.0, 0.0, -5.0])
@@ -401,11 +401,11 @@ class TestProbe:
         pos = await session.run_probe_cycle("Z", 10.0, 100)
         assert pos is None
         await events.wait_for(
-            SessionEvent.ProbeStatusChanged,
+            DriverEvent.ProbeStatusChanged,
             lambda e: e.message == "Probe failed",
         )
         event = await events.wait_for(
-            SessionEvent.StateChanged, lambda e: e.state.error is not None
+            DriverEvent.StateChanged, lambda e: e.state.error is not None
         )
         assert event.state.error.code == 4
         assert event.state.error.title.startswith("Probe Fail")
@@ -414,7 +414,7 @@ class TestProbe:
         session, mock, emulator, events = rig
         await session.run_probe_cycle("Z", 10.0, 100)
         await events.wait_for(
-            SessionEvent.StateChanged, lambda e: e.state.error is not None
+            DriverEvent.StateChanged, lambda e: e.state.error is not None
         )
         lines = await session.execute_command("$X")
         assert "[MSG:Caution: Unlocked]" in lines
@@ -435,7 +435,7 @@ class TestInchReports:
         emulator.settings["13"] = 1
         assert await session.detect_unit_system() == "imperial"
         event = await events.wait_for(
-            SessionEvent.StateChanged,
+            DriverEvent.StateChanged,
             lambda e: (
                 e.state.machine_pos[0] is not None
                 and e.state.machine_pos[0] > 20.0

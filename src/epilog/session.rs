@@ -12,8 +12,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::task::JoinHandle;
 
 use crate::core::connector::{dial, DynStream};
-use crate::core::session::{
-    unsupported, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::driver::{
+    unsupported, CancelMode, Driver, DriverError, DriverEvents,
 };
 use crate::core::types::{DeviceState, DeviceStatus, TransportStatus};
 
@@ -96,13 +96,13 @@ impl EpilogConfig {
 
 /// A submitted job the caller can still cancel while it uploads.
 struct ActiveUpload {
-    task: JoinHandle<Result<(), SessionError>>,
+    task: JoinHandle<Result<(), DriverError>>,
 }
 
 /// The Epilog LPD session core.
 pub struct EpilogSession {
     config: EpilogConfig,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     state: Mutex<DeviceState>,
     connected: AtomicBool,
     uploading: AtomicBool,
@@ -112,7 +112,7 @@ pub struct EpilogSession {
 }
 
 impl EpilogSession {
-    pub fn new(config: EpilogConfig, events: Arc<dyn SessionEvents>) -> Self {
+    pub fn new(config: EpilogConfig, events: Arc<dyn DriverEvents>) -> Self {
         Self {
             config,
             events,
@@ -151,7 +151,7 @@ impl EpilogSession {
     /// The LPD port accepts a connection only when the printer is
     /// reachable, so this is the whole reachability check; the
     /// machine exposes no status query.
-    pub async fn probe(&self) -> Result<(), SessionError> {
+    pub async fn probe(&self) -> Result<(), DriverError> {
         let deadline = self.config.deadline();
         let mut stream = tokio::time::timeout(
             deadline,
@@ -159,12 +159,12 @@ impl EpilogSession {
         )
         .await
         .map_err(|_| {
-            SessionError::Timeout(format!(
+            DriverError::Timeout(format!(
                 "connecting to {}:{} timed out",
                 self.config.host, self.config.port
             ))
         })?
-        .map_err(|e| SessionError::Connection(e.to_string()))?;
+        .map_err(|e| DriverError::Connection(e.to_string()))?;
         let _ = stream.shutdown().await;
         Ok(())
     }
@@ -180,14 +180,14 @@ impl EpilogSession {
         self: Arc<Self>,
         payload: Vec<u8>,
         title: String,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         if payload.is_empty() {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "the Epilog job is empty".to_string(),
             ));
         }
         if self.uploading.swap(true, Ordering::SeqCst) {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "an Epilog upload is already in progress".to_string(),
             ));
         }
@@ -202,13 +202,13 @@ impl EpilogSession {
                 let result = session.transfer(&payload, &title).await.map_err(
                     |e| match e {
                         TransferError::Connection(message) => {
-                            SessionError::Connection(message)
+                            DriverError::Connection(message)
                         }
                         TransferError::Timeout(message) => {
-                            SessionError::Timeout(message)
+                            DriverError::Timeout(message)
                         }
                         TransferError::Rejected(message) => {
-                            SessionError::Device(message)
+                            DriverError::Device(message)
                         }
                     },
                 );
@@ -218,22 +218,22 @@ impl EpilogSession {
         self.track_upload(task, seq);
 
         let Some(task) = self.upload_task() else {
-            return Err(SessionError::Device(
+            return Err(DriverError::Device(
                 "Epilog upload was cancelled".to_string(),
             ));
         };
         match task.await {
             Ok(result) => result,
-            Err(join) if join.is_cancelled() => Err(SessionError::Device(
+            Err(join) if join.is_cancelled() => Err(DriverError::Device(
                 "Epilog upload was cancelled".to_string(),
             )),
-            Err(join) => Err(SessionError::Other(join.to_string())),
+            Err(join) => Err(DriverError::Other(join.to_string())),
         }
     }
 
     /// Publishes the terminal state of an upload unless it has been
     /// superseded by a newer one.
-    fn finish_upload(&self, seq: u64, result: &Result<(), SessionError>) {
+    fn finish_upload(&self, seq: u64, result: &Result<(), DriverError>) {
         if seq != self.upload_seq.load(Ordering::SeqCst) {
             return;
         }
@@ -535,8 +535,8 @@ fn sanitize_title(title: &str) -> String {
 }
 
 #[async_trait]
-impl Session for EpilogSession {
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+impl Driver for EpilogSession {
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.connection(TransportStatus::Connecting, None);
         match self.probe().await {
             Ok(()) => {
@@ -585,7 +585,7 @@ impl Session for EpilogSession {
         self.uploading.store(false, Ordering::SeqCst);
     }
 
-    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), DriverError> {
         self.cancel_upload().await;
         Ok(())
     }
@@ -595,24 +595,24 @@ impl Session for EpilogSession {
         _gcode: &str,
         _op_map: &std::collections::HashMap<usize, i64>,
         _op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         Err(unsupported("run"))
     }
 
     async fn read_wcs_offsets(
         &self,
-    ) -> Result<std::collections::HashMap<String, (f64, f64, f64)>, SessionError>
+    ) -> Result<std::collections::HashMap<String, (f64, f64, f64)>, DriverError>
     {
         Ok([("MACHINE".to_string(), (0.0, 0.0, 0.0))]
             .into_iter()
             .collect())
     }
 
-    async fn read_parser_state(&self) -> Result<Option<String>, SessionError> {
+    async fn read_parser_state(&self) -> Result<Option<String>, DriverError> {
         Ok(Some("MACHINE".to_string()))
     }
 
-    async fn select_tool(&self, _tool_number: i64) -> Result<(), SessionError> {
+    async fn select_tool(&self, _tool_number: i64) -> Result<(), DriverError> {
         Err(unsupported("select_tool"))
     }
 }
@@ -621,14 +621,14 @@ impl EpilogSession {
     /// Store the upload task so `cancel` can abort it.
     fn track_upload(
         &self,
-        task: JoinHandle<Result<(), SessionError>>,
+        task: JoinHandle<Result<(), DriverError>>,
         _seq: u64,
     ) {
         *self.upload.lock().unwrap() = Some(ActiveUpload { task });
     }
 
     /// Take the tracked upload task out so the caller can await it.
-    fn upload_task(&self) -> Option<JoinHandle<Result<(), SessionError>>> {
+    fn upload_task(&self) -> Option<JoinHandle<Result<(), DriverError>>> {
         self.upload.lock().unwrap().take().map(|active| active.task)
     }
 }

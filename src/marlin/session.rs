@@ -21,7 +21,7 @@
 //!
 //! The ping-pong mechanics (pending acknowledgements, connection
 //! loop, job streaming, cancel, safety shutdown) are shared with the
-//! other line sessions via [`core::line_session`]; this module only
+//! other line sessions via [`core::line_driver`]; this module only
 //! holds the Marlin-specific dispatch, the wire-ordered FIFO
 //! pending queue and the M114 position polling.
 
@@ -33,11 +33,11 @@ use std::time::Duration;
 use async_trait::async_trait;
 
 use crate::core::dialect::Dialect;
-use crate::core::line_session::{
-    self, LineSessionBase, PendingStore, PingPongSession, StopCommand,
+use crate::core::driver::{
+    secs, AsyncEvent, CancelMode, Driver, DriverError, DriverEvents,
 };
-use crate::core::session::{
-    secs, AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::line_driver::{
+    self, LineDriverBase, PendingStore, PingPongDriver, StopCommand,
 };
 use crate::core::transport::TransportKind;
 use crate::core::types::{
@@ -79,7 +79,7 @@ impl MarlinConfig {
 /// The Marlin session: connection lifecycle, M114 position polling
 /// and ping-pong command exchange.
 pub struct MarlinSession {
-    base: LineSessionBase,
+    base: LineDriverBase,
     config: MarlinConfig,
     /// Set once the device announced itself; commands must not be
     /// sent before that: the boot banner's trailing ok would
@@ -91,11 +91,11 @@ impl MarlinSession {
     pub fn new(
         config: MarlinConfig,
         dialect: Dialect,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         let transport = config.transport.build();
         Arc::new(Self {
-            base: LineSessionBase::new(
+            base: LineDriverBase::new(
                 dialect,
                 events,
                 transport,
@@ -193,7 +193,7 @@ impl MarlinSession {
         if self.base.is_job_running() {
             log::error!("Device error during job: {line}. Halting stream.");
             *self.base.job_exception.lock().unwrap() =
-                Some(SessionError::Device(format!("Device error: {line}")));
+                Some(DriverError::Device(format!("Device error: {line}")));
         }
     }
 
@@ -233,14 +233,14 @@ impl MarlinSession {
         &self,
         command: &str,
         serialize: bool,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         let _guard = if serialize {
             Some(self.base.cmd_lock.lock().await)
         } else {
             None
         };
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
@@ -251,8 +251,8 @@ impl MarlinSession {
 }
 
 #[async_trait]
-impl PingPongSession for MarlinSession {
-    fn base(&self) -> &LineSessionBase {
+impl PingPongDriver for MarlinSession {
+    fn base(&self) -> &LineDriverBase {
         &self.base
     }
 
@@ -311,7 +311,7 @@ impl PingPongSession for MarlinSession {
     async fn ping_pong(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
+    ) -> Result<Vec<String>, DriverError> {
         if !self.connected.is_set() {
             // Wait out the handshake: sending earlier would let the
             // boot banner's trailing ok resolve this command.
@@ -325,13 +325,13 @@ impl PingPongSession for MarlinSession {
                 .await
                 .is_err()
             {
-                return Err(SessionError::Connection(
+                return Err(DriverError::Connection(
                     "device did not announce itself".to_string(),
                 ));
             }
         }
         if !self.base.transport.is_open() {
-            return Err(SessionError::Connection(
+            return Err(DriverError::Connection(
                 "Serial transport not connected".to_string(),
             ));
         }
@@ -370,11 +370,11 @@ impl PingPongSession for MarlinSession {
     }
 }
 
-/// The Marlin [`Session`]: the shared ping-pong operations call the
+/// The Marlin [`Driver`]: the shared ping-pong operations call the
 /// skeleton's free functions; the Marlin-specific operations carry
 /// their real bodies here.
 #[async_trait]
-impl Session for MarlinSession {
+impl Driver for MarlinSession {
     fn state(&self) -> DeviceState {
         self.base.state()
     }
@@ -395,8 +395,8 @@ impl Session for MarlinSession {
         self.base.abort_background_tasks_now();
     }
 
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
-        line_session::connect(&self).await;
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
+        line_driver::connect(&self).await;
         Ok(())
     }
 
@@ -409,8 +409,8 @@ impl Session for MarlinSession {
         gcode: &str,
         op_map: &HashMap<usize, i64>,
         op_estimates: &[f64],
-    ) -> Result<(), SessionError> {
-        line_session::stream_job(self.as_ref(), gcode, op_map, op_estimates)
+    ) -> Result<(), DriverError> {
+        line_driver::stream_job(self.as_ref(), gcode, op_map, op_estimates)
             .await;
         Ok(())
     }
@@ -418,28 +418,28 @@ impl Session for MarlinSession {
     async fn run_raw(
         self: Arc<Self>,
         machine_code: &str,
-    ) -> Result<(), SessionError> {
-        line_session::run_raw(self.as_ref(), machine_code).await;
+    ) -> Result<(), DriverError> {
+        line_driver::run_raw(self.as_ref(), machine_code).await;
         Ok(())
     }
 
-    async fn cancel(&self, mode: CancelMode) -> Result<(), SessionError> {
-        line_session::cancel(self, mode == CancelMode::Immediate).await
+    async fn cancel(&self, mode: CancelMode) -> Result<(), DriverError> {
+        line_driver::cancel(self, mode == CancelMode::Immediate).await
     }
 
     async fn execute_interactive_command(
         &self,
         command: &str,
-    ) -> Result<Vec<String>, SessionError> {
-        line_session::execute_command(self, command).await
+    ) -> Result<Vec<String>, DriverError> {
+        line_driver::execute_command(self, command).await
     }
 
     async fn home(
         &self,
         axes: Option<Vec<String>>,
         _active_wcs: &str,
-    ) -> Result<(), SessionError> {
-        line_session::home(self, axes).await
+    ) -> Result<(), DriverError> {
+        line_driver::home(self, axes).await
     }
 
     async fn move_to(
@@ -448,37 +448,37 @@ impl Session for MarlinSession {
         x: f64,
         y: f64,
         _z: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::move_to(self, speed, x, y).await
+    ) -> Result<(), DriverError> {
+        line_driver::move_to(self, speed, x, y).await
     }
 
     async fn jog(
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
-        line_session::jog(self, speed, deltas).await
+    ) -> Result<(), DriverError> {
+        line_driver::jog(self, speed, deltas).await
     }
 
-    async fn select_tool(&self, tool_number: i64) -> Result<(), SessionError> {
-        line_session::select_tool(self, tool_number).await
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
+        line_driver::select_tool(self, tool_number).await
     }
 
-    async fn set_power(&self, power: Option<f64>) -> Result<(), SessionError> {
-        line_session::set_power(self, power).await
+    async fn set_power(&self, power: Option<f64>) -> Result<(), DriverError> {
+        line_driver::set_power(self, power).await
     }
 
     async fn set_focus_power(
         &self,
         power: Option<f64>,
-    ) -> Result<(), SessionError> {
-        line_session::set_focus_power(self, power).await
+    ) -> Result<(), DriverError> {
+        line_driver::set_focus_power(self, power).await
     }
 
-    async fn clear_alarm(&self) -> Result<(), SessionError> {
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
         let dialect = self.base.dialect();
         let response =
-            line_session::execute_command(self, &dialect.clear_alarm).await?;
+            line_driver::execute_command(self, &dialect.clear_alarm).await?;
         let has_error = response.iter().any(|line| parser::is_error(line));
         if !has_error {
             self.base.clear_device_error();
@@ -492,23 +492,23 @@ impl Session for MarlinSession {
         x: f64,
         y: f64,
         z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let p_num = crate::grbl::parser::gcode_to_p_number(wcs_slot)
             .ok_or_else(|| {
-                SessionError::Other(format!("Invalid WCS slot: {wcs_slot}"))
+                DriverError::Other(format!("Invalid WCS slot: {wcs_slot}"))
             })?;
         let dialect = self.base.dialect();
         let cmd = dialect
             .format_wcs_offset(p_num, x, y, z)
-            .map_err(SessionError::Other)?;
-        line_session::execute_command(self, &cmd).await?;
+            .map_err(DriverError::Other)?;
+        line_driver::execute_command(self, &cmd).await?;
         Ok(())
     }
 
     async fn detect_unit_system(
         &self,
-    ) -> Result<Option<UnitSystem>, SessionError> {
-        let lines = match line_session::execute_command(self, "M149").await {
+    ) -> Result<Option<UnitSystem>, DriverError> {
+        let lines = match line_driver::execute_command(self, "M149").await {
             Ok(lines) => lines,
             Err(err) => {
                 log::warn!("Unit system detection failed: {err}");

@@ -13,7 +13,7 @@ import inspect
 import pytest
 from conftest import DEFAULT_DIALECT, EventRecorder
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
 from raydriver.epilog import EpilogSession
@@ -94,7 +94,7 @@ async def test_remote_home_smoothie():
     try:
         await asyncio.wait_for(session.connect(), timeout=5)
         await events.wait_for(
-            SessionEvent.ConnectionStatusChanged,
+            DriverEvent.ConnectionStatusChanged,
             lambda event: event.status == "CONNECTED",
             timeout=5,
         )
@@ -157,7 +157,7 @@ async def test_remote_run_reports_job_errors():
             await asyncio.wait_for(session.run("G1 X1\n", {0: 0}), timeout=5)
         assert "job exploded" in str(excinfo.value)
         await events.wait_for(
-            SessionEvent.JobError,
+            DriverEvent.JobError,
             lambda event: "job exploded" in event.message,
             timeout=5,
         )

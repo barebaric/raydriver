@@ -10,7 +10,7 @@ import json
 import pytest
 from conftest import server_port
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.types import DeviceError, DeviceState, DeviceStatus
 from raydriver.remote import protocol
 
@@ -144,16 +144,16 @@ def test_envelope_shapes():
 
 def all_events():
     return [
-        SessionEvent.StateChanged(full_state()),
-        SessionEvent.ConnectionStatusChanged("CONNECTED", None),
-        SessionEvent.ConnectionStatusChanged("SLEEPING", "link lost"),
-        SessionEvent.CommandStatusChanged("ok", None),
-        SessionEvent.JobFinished(),
-        SessionEvent.ProbeStatusChanged("probing Z"),
-        SessionEvent.WcsUpdated({"G54": (1.0, 2.0, 3.0)}),
-        SessionEvent.ConfigChanged("rx_buffer_size", 128),
-        SessionEvent.RawRx("ok"),
-        SessionEvent.RawTx("G0 X1"),
+        DriverEvent.StateChanged(full_state()),
+        DriverEvent.ConnectionStatusChanged("CONNECTED", None),
+        DriverEvent.ConnectionStatusChanged("SLEEPING", "link lost"),
+        DriverEvent.CommandStatusChanged("ok", None),
+        DriverEvent.JobFinished(),
+        DriverEvent.ProbeStatusChanged("probing Z"),
+        DriverEvent.WcsUpdated({"G54": (1.0, 2.0, 3.0)}),
+        DriverEvent.ConfigChanged("rx_buffer_size", 128),
+        DriverEvent.RawRx("ok"),
+        DriverEvent.RawTx("G0 X1"),
     ]
 
 
@@ -192,12 +192,12 @@ def test_decode_state_unknown_status():
 
 
 def test_wcs_offsets_restored_as_tuples():
-    event = SessionEvent.WcsUpdated(
+    event = DriverEvent.WcsUpdated(
         {"G54": (1.0, 2.0, 3.0), "G55": (0.0, 0.0, 0.0)}
     )
     wire = json.loads(json.dumps(protocol.encode_event(event)))
     decoded = protocol.decode_event(wire)
-    assert isinstance(decoded, SessionEvent.WcsUpdated)
+    assert isinstance(decoded, DriverEvent.WcsUpdated)
     assert decoded.offsets == event.offsets
     assert all(isinstance(value, tuple) for value in decoded.offsets.values())
 

@@ -38,8 +38,8 @@ use tokio_tungstenite::{
 };
 use uuid::Uuid;
 
-use crate::core::session::{
-    AsyncEvent, CancelMode, Session, SessionError, SessionEvents,
+use crate::core::driver::{
+    AsyncEvent, CancelMode, Driver, DriverError, DriverEvents,
 };
 use crate::core::types::{
     DeviceError, DeviceState, DeviceStatus, TransportStatus,
@@ -87,7 +87,7 @@ impl M2Config {
 
 pub struct M2Session {
     config: M2Config,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     state: Arc<Mutex<DeviceState>>,
     keep_running: AtomicBool,
     connection: AsyncMutex<Option<Arc<M2Connection>>>,
@@ -95,7 +95,7 @@ pub struct M2Session {
 }
 
 impl M2Session {
-    pub fn new(config: M2Config, events: Arc<dyn SessionEvents>) -> Arc<Self> {
+    pub fn new(config: M2Config, events: Arc<dyn DriverEvents>) -> Arc<Self> {
         Arc::new(Self {
             config,
             events,
@@ -206,7 +206,7 @@ impl M2Session {
     async fn refresh_state(
         &self,
         conn: &Arc<M2Connection>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let snapshot = conn
             .request(
                 "POST",
@@ -251,13 +251,15 @@ impl M2Session {
 
     async fn current_connection(
         &self,
-    ) -> Result<Arc<M2Connection>, SessionError> {
-        self.connection.lock().await.clone().ok_or_else(|| {
-            SessionError::Connection("not connected".to_string())
-        })
+    ) -> Result<Arc<M2Connection>, DriverError> {
+        self.connection
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| DriverError::Connection("not connected".to_string()))
     }
 
-    async fn control(&self, action: &str) -> Result<(), SessionError> {
+    async fn control(&self, action: &str) -> Result<(), DriverError> {
         self.current_connection()
             .await?
             .request(
@@ -271,27 +273,27 @@ impl M2Session {
         Ok(())
     }
 
-    pub async fn start(&self) -> Result<(), SessionError> {
+    pub async fn start(&self) -> Result<(), DriverError> {
         self.control("START").await
     }
 }
 
 struct M2Connection {
     writer: AsyncMutex<SocketWriter>,
-    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, SessionError>>>>,
+    pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, DriverError>>>>,
     reader_task: Mutex<Option<JoinHandle<()>>>,
     transaction: AtomicU64,
     closed: AsyncEvent,
-    events: Arc<dyn SessionEvents>,
+    events: Arc<dyn DriverEvents>,
     state: Arc<Mutex<DeviceState>>,
 }
 
 impl M2Connection {
     async fn connect(
         config: &M2Config,
-        events: Arc<dyn SessionEvents>,
+        events: Arc<dyn DriverEvents>,
         state: Arc<Mutex<DeviceState>>,
-    ) -> Result<Arc<Self>, SessionError> {
+    ) -> Result<Arc<Self>, DriverError> {
         let client_id = Uuid::new_v4();
         let url = format!(
             "wss://{}:{}/websocket?id={client_id}&function=instruction",
@@ -299,7 +301,7 @@ impl M2Connection {
         );
         let mut request = url
             .into_client_request()
-            .map_err(|err| SessionError::Connection(err.to_string()))?;
+            .map_err(|err| DriverError::Connection(err.to_string()))?;
         request
             .headers_mut()
             .insert(ORIGIN, HeaderValue::from_static("atomm://renderer"));
@@ -317,8 +319,8 @@ impl M2Connection {
             connect_async_tls_with_config(request, None, false, connector),
         )
         .await
-        .map_err(|_| SessionError::Timeout("operation timed out".to_string()))?
-        .map_err(|err| SessionError::Connection(err.to_string()))?;
+        .map_err(|_| DriverError::Timeout("operation timed out".to_string()))?
+        .map_err(|err| DriverError::Connection(err.to_string()))?;
         let (writer, reader) = socket.split();
         let connection = Arc::new(Self {
             writer: AsyncMutex::new(writer),
@@ -375,7 +377,7 @@ impl M2Connection {
             .to_ascii_lowercase();
         if !model.contains("m2") && !model.contains("js002") {
             connection.close().await;
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "device at {} did not identify itself as an xTool M2",
                 config.host
             )));
@@ -390,7 +392,7 @@ impl M2Connection {
         params: Value,
         data: Value,
         request_timeout: Duration,
-    ) -> Result<Value, SessionError> {
+    ) -> Result<Value, DriverError> {
         let transaction_id = self.next_transaction_id();
         let payload = json!({
             "type": "request",
@@ -402,7 +404,7 @@ impl M2Connection {
             "transactionId": transaction_id,
         });
         let bytes = serde_json::to_vec(&payload)
-            .map_err(|err| SessionError::Other(err.to_string()))?;
+            .map_err(|err| DriverError::Other(err.to_string()))?;
         let frame = encode_frame(&bytes, JSON_PROTOCOL);
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(transaction_id, sender);
@@ -414,16 +416,16 @@ impl M2Connection {
             .await;
         if let Err(err) = send_result {
             self.pending.lock().unwrap().remove(&transaction_id);
-            return Err(SessionError::Connection(err.to_string()));
+            return Err(DriverError::Connection(err.to_string()));
         }
         let response = timeout(request_timeout, receiver)
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout("operation timed out".to_string())
+                DriverError::Timeout("operation timed out".to_string())
             })?
             .map_err(|_| {
-                SessionError::Connection("connection closed".into())
+                DriverError::Connection("connection closed".into())
             })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
@@ -432,14 +434,14 @@ impl M2Connection {
                 .or_else(|| response.get("message"))
                 .and_then(Value::as_str)
                 .unwrap_or("unknown error");
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "M2 {method} {path} returned code {code}: {message}"
             )));
         }
         Ok(response.get("data").cloned().unwrap_or(Value::Null))
     }
 
-    async fn ping(&self) -> Result<(), SessionError> {
+    async fn ping(&self) -> Result<(), DriverError> {
         self.request_with_id(
             "GET",
             "/v1/user/ping",
@@ -460,7 +462,7 @@ impl M2Connection {
         data: Value,
         request_timeout: Duration,
         transaction_id: u64,
-    ) -> Result<Value, SessionError> {
+    ) -> Result<Value, DriverError> {
         let payload = json!({
             "type": "request",
             "method": method,
@@ -471,7 +473,7 @@ impl M2Connection {
             "timestamp": now_millis(),
         });
         let bytes = serde_json::to_vec(&payload)
-            .map_err(|err| SessionError::Other(err.to_string()))?;
+            .map_err(|err| DriverError::Other(err.to_string()))?;
         let frame = encode_frame(&bytes, JSON_PROTOCOL);
         let (sender, receiver) = oneshot::channel();
         self.pending.lock().unwrap().insert(transaction_id, sender);
@@ -483,20 +485,20 @@ impl M2Connection {
             .await
         {
             self.pending.lock().unwrap().remove(&transaction_id);
-            return Err(SessionError::Connection(err.to_string()));
+            return Err(DriverError::Connection(err.to_string()));
         }
         let response = timeout(request_timeout, receiver)
             .await
             .map_err(|_| {
                 self.pending.lock().unwrap().remove(&transaction_id);
-                SessionError::Timeout("operation timed out".to_string())
+                DriverError::Timeout("operation timed out".to_string())
             })?
             .map_err(|_| {
-                SessionError::Connection("connection closed".into())
+                DriverError::Connection("connection closed".into())
             })??;
         let code = response.get("code").and_then(Value::as_i64).unwrap_or(0);
         if code != 0 {
-            return Err(SessionError::Device(format!(
+            return Err(DriverError::Device(format!(
                 "M2 heartbeat returned code {code}"
             )));
         }
@@ -555,7 +557,7 @@ impl M2Connection {
         self.closed.set();
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err(SessionError::Connection(
+            let _ = sender.send(Err(DriverError::Connection(
                 "M2 WebSocket closed".into(),
             )));
         }
@@ -644,19 +646,19 @@ impl M2Connection {
     fn fail_pending(&self) {
         let pending = std::mem::take(&mut *self.pending.lock().unwrap());
         for (_, sender) in pending {
-            let _ = sender.send(Err(SessionError::Connection(
+            let _ = sender.send(Err(DriverError::Connection(
                 "M2 WebSocket closed".into(),
             )));
         }
     }
 }
 
-fn insecure_connector() -> Result<Connector, SessionError> {
+fn insecure_connector() -> Result<Connector, DriverError> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let verifier = Arc::new(AllowInvalidCerts(provider.clone()));
     let config = rustls::ClientConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()
-        .map_err(|err| SessionError::Other(err.to_string()))?
+        .map_err(|err| DriverError::Other(err.to_string()))?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
@@ -829,7 +831,7 @@ fn status_for_mode(mode: &str) -> DeviceStatus {
 
 fn apply_mode(
     state: &Mutex<DeviceState>,
-    events: &Arc<dyn SessionEvents>,
+    events: &Arc<dyn DriverEvents>,
     mode: &str,
 ) {
     let status = status_for_mode(mode);
@@ -862,10 +864,10 @@ fn apply_mode(
     events.state_changed(&state);
 }
 
-/// The session's [`Session`] impl: the single, real implementation
+/// The session's [`Driver`] impl: the single, real implementation
 /// of every operation the protocol supports.
 #[async_trait]
-impl Session for M2Session {
+impl Driver for M2Session {
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }
@@ -891,7 +893,7 @@ impl Session for M2Session {
             }
         }
     }
-    async fn connect(self: Arc<Self>) -> Result<(), SessionError> {
+    async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.disconnect_tasks().await;
         self.keep_running.store(true, Ordering::SeqCst);
         let core = self.clone();
@@ -907,11 +909,11 @@ impl Session for M2Session {
         self.set_connection_status(TransportStatus::Disconnected, None);
     }
 
-    async fn set_hold(&self, hold: bool) -> Result<(), SessionError> {
+    async fn set_hold(&self, hold: bool) -> Result<(), DriverError> {
         self.control(if hold { "PAUSE" } else { "RESUME" }).await
     }
 
-    async fn cancel(&self, _mode: CancelMode) -> Result<(), SessionError> {
+    async fn cancel(&self, _mode: CancelMode) -> Result<(), DriverError> {
         self.control("CANCEL").await
     }
 
@@ -919,7 +921,7 @@ impl Session for M2Session {
         &self,
         _axes: Option<Vec<String>>,
         _active_wcs: &str,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.current_connection()
             .await?
             .request(
@@ -939,7 +941,7 @@ impl Session for M2Session {
         x: f64,
         y: f64,
         _z: Option<f64>,
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         self.current_connection()
             .await?
             .request(
@@ -957,7 +959,7 @@ impl Session for M2Session {
         &self,
         speed: f64,
         deltas: &[(String, f64)],
-    ) -> Result<(), SessionError> {
+    ) -> Result<(), DriverError> {
         let mut dx = 0.0;
         let mut dy = 0.0;
         let mut dz = 0.0;
@@ -967,7 +969,7 @@ impl Session for M2Session {
                 "Y" => dy = *distance,
                 "Z" => dz = *distance,
                 other => {
-                    return Err(SessionError::Other(format!(
+                    return Err(DriverError::Other(format!(
                         "jog axis {other} is not supported"
                     )));
                 }

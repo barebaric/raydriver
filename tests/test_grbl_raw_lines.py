@@ -2,7 +2,7 @@
 
 from conftest import make_session, start_device
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 
 
 class TestRawLines:
@@ -12,12 +12,12 @@ class TestRawLines:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.ConnectionStatusChanged,
+                DriverEvent.ConnectionStatusChanged,
                 lambda e: e.status == "CONNECTED",
             )
             events.events.clear()
             await session.execute_interactive_command("$$")
-            await events.wait_for(SessionEvent.RawTx, lambda e: e.line == "$$")
+            await events.wait_for(DriverEvent.RawTx, lambda e: e.line == "$$")
         finally:
             await session.disconnect()
             device_task.cancel()
@@ -25,16 +25,16 @@ class TestRawLines:
     async def test_raw_rx_reports_settings_reply(self, rig):
         session, mock, emulator, events = rig
         await session.execute_interactive_command("$$")
-        await events.wait_for(SessionEvent.RawRx, lambda e: "ok" == e.line)
+        await events.wait_for(DriverEvent.RawRx, lambda e: "ok" == e.line)
         assert any(
-            isinstance(e, SessionEvent.RawRx) and e.line.startswith("$")
+            isinstance(e, DriverEvent.RawRx) and e.line.startswith("$")
             for e in events.events
         )
 
     async def test_raw_rx_reports_status_report(self, rig):
         session, mock, emulator, events = rig
         event = await events.wait_for(
-            SessionEvent.RawRx,
+            DriverEvent.RawRx,
             lambda e: e.line.startswith("<") and e.line.endswith(">"),
         )
         line = event.line
@@ -46,7 +46,7 @@ class TestRawLines:
         try:
             await session.connect()
             await events.wait_for(
-                SessionEvent.RawRx, lambda e: e.line.startswith("Grbl ")
+                DriverEvent.RawRx, lambda e: e.line.startswith("Grbl ")
             )
         finally:
             await session.disconnect()
@@ -58,7 +58,7 @@ class TestRawLines:
         raw = [
             e.line
             for e in events.events
-            if isinstance(e, (SessionEvent.RawRx, SessionEvent.RawTx))
+            if isinstance(e, (DriverEvent.RawRx, DriverEvent.RawTx))
         ]
         assert "$I" in raw
         assert any(line.startswith("[VER:") for line in raw)

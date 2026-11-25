@@ -8,7 +8,7 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
-use crate::core::session::{CancelMode, Session};
+use crate::core::driver::{CancelMode, Driver};
 use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 // The config/dialect dict helpers are shared across the protocol
@@ -57,7 +57,7 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
 /// commands and job execution over the proprietary WiFi API,
 /// entirely in Rust.
 ///
-/// All async methods return asyncio futures; a typed `SessionEvent`
+/// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
 #[pyclass(name = "XtoolSession", module = "raydriver.xtool")]
@@ -92,7 +92,7 @@ impl PyXtoolSession {
 
         dialect: Option<Bound<'_, PyDict>>,
         #[gen_stub(override_type(
-            type_repr = "typing.Optional[collections.abc.Callable[[core.SessionEvent], builtins.object]]",
+            type_repr = "typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]]",
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,

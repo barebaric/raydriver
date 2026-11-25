@@ -9,7 +9,7 @@ import time
 
 import pytest
 
-from raydriver.core import SessionEvent
+from raydriver.core import DriverEvent
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSession
 from raydriver.grbl.emulator import GrblEmulator
@@ -81,7 +81,7 @@ class EventRecorder:
         return [type(event).__name__ for event in self.events]
 
     async def wait_for(self, kind, pred=None, timeout=5.0):
-        """Wait until an event of *kind* (a SessionEvent variant
+        """Wait until an event of *kind* (a DriverEvent variant
         class) matching *pred* was recorded."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
@@ -146,7 +146,7 @@ async def rig(mock, events):
     session = make_session(mock, events)
     await session.connect()
     await events.wait_for(
-        SessionEvent.ConnectionStatusChanged,
+        DriverEvent.ConnectionStatusChanged,
         lambda event: event.status == "CONNECTED",
     )
     mock.clear_sent()
