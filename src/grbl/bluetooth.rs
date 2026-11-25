@@ -8,6 +8,8 @@ use crate::core::driver::{
     info::{caps, DEFAULT_SUPPORTED_WCS},
     ConnectionKind, DriverEvents, DriverInfo, DriverMaturity,
 };
+
+use crate::core::driver::{SetupField, SetupKind};
 use crate::core::transport::TransportKind;
 
 use super::stream::{GrblStream, GrblStreamConfig};
@@ -18,7 +20,7 @@ pub static INFO: DriverInfo = DriverInfo {
     connection: ConnectionKind::Bluetooth,
     maturity: DriverMaturity::Experimental,
     caps: caps(
-        true, true, true, true, false, true, true, true, false, true, true,
+        true, true, true, true, true, true, true, true, false, true, true,
     ),
     uses_gcode: true,
     machine_space_wcs: "G53",
@@ -30,6 +32,7 @@ pub static INFO: DriverInfo = DriverInfo {
         "deadlock_detection",
         "rx_buffer_size_override",
     ],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -72,3 +75,18 @@ impl GrblBluetoothDriver {
 }
 
 delegate_driver!(GrblBluetoothDriver, stream);
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("address", SetupKind::Text).required(),
+    SetupField::new("channel", SetupKind::Int)
+        .with_default("1")
+        .with_range(1.0, 30.0),
+    SetupField::new("poll_status_while_running", SetupKind::Bool)
+        .with_default("false"),
+    SetupField::new("deadlock_detection", SetupKind::Bool)
+        .with_default("false"),
+    SetupField::new("rx_buffer_size_override", SetupKind::Int)
+        .with_default("0")
+        .with_range(0.0, 1024.0),
+];

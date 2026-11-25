@@ -23,6 +23,8 @@ use crate::core::driver::{
     ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -100,12 +102,13 @@ pub static INFO: DriverInfo = DriverInfo {
     connection: ConnectionKind::Serial,
     maturity: DriverMaturity::Stable,
     caps: caps(
-        true, true, true, true, false, true, true, true, false, true, false,
+        true, true, true, true, true, true, true, true, false, true, false,
     ),
     uses_gcode: true,
     machine_space_wcs: "G53",
     supported_wcs: DEFAULT_SUPPORTED_WCS,
     config_keys: &["port", "baudrate"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -593,6 +596,19 @@ impl Driver for GrblSerialSimpleDriver {
         Ok(())
     }
 
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
+        let dialect = self.base.dialect();
+        let response =
+            line_driver::execute_command(self, &dialect.clear_alarm).await?;
+        let has_error = response.iter().any(|line| {
+            line.starts_with("error:") || line.starts_with("Error:")
+        });
+        if !has_error {
+            self.base.clear_device_error();
+        }
+        Ok(())
+    }
+
     async fn read_settings(
         &self,
     ) -> Result<Vec<(String, String)>, DriverError> {
@@ -708,3 +724,9 @@ impl Driver for GrblSerialSimpleDriver {
         Ok(parser::detect_unit_system_from_settings(&lines))
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("port", SetupKind::SerialPort).required(),
+    SetupField::new("baudrate", SetupKind::Baudrate).with_default("115200"),
+];

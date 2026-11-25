@@ -130,6 +130,7 @@ impl PyMarlinSerialDriver {
         py: Python<'py>,
         boot_lines: Option<Vec<String>>,
     ) -> PyResult<PyAwait<'py, MarlinDeviceInfo>> {
+        let boot_lines = boot_lines.unwrap_or_else(|| self.core.boot_lines());
         let core = self.core.clone();
         spawn_future(py, async move {
             let mut replies: Vec<Vec<String>> = Vec::new();
@@ -143,11 +144,18 @@ impl PyMarlinSerialDriver {
                     &replies[1],
                     &replies[2],
                     &replies[3],
-                    &boot_lines.unwrap_or_default(),
+                    &boot_lines,
                 ),
             })
         })
     }
+
+    /// Boot banner lines received from the device.
+    #[getter]
+    fn boot_lines(&self) -> Vec<String> {
+        self.core.boot_lines()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "MarlinSerialDriver(resource_uri={:?}, job_running={})",

@@ -96,3 +96,26 @@ async def wait_until(predicate, timeout=3.0):
             return
         await asyncio.sleep(0.01)
     raise AssertionError("condition was not met")
+
+
+@pytest.mark.asyncio
+async def test_unit_system_is_metric():
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
+    assert await session.detect_unit_system() == "metric"
+
+
+@pytest.mark.asyncio
+async def test_local_reads_and_alarm_need_no_connection():
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
+    await session.clear_alarm()
+    assert await session.read_settings() == []
+    assert await session.read_wcs_offsets() == {}
+
+
+@pytest.mark.asyncio
+async def test_single_axis_home_and_z_moves_are_rejected():
+    session = XtoolM2Driver(config={"host": "192.0.2.20"})
+    with pytest.raises(NotImplementedError):
+        await session.home(axes=["x"])
+    with pytest.raises(NotImplementedError):
+        await session.move_to(1000, 1.0, 2.0, z=0.0)

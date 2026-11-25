@@ -24,6 +24,8 @@ use crate::core::driver::{
     ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::borrow::Cow;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -92,6 +94,7 @@ pub static INFO: DriverInfo = DriverInfo {
     machine_space_wcs: "G53",
     supported_wcs: DEFAULT_SUPPORTED_WCS,
     config_keys: &["host", "tcp_port"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -497,3 +500,11 @@ impl Driver for SmoothieDriver {
         Ok(())
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("tcp_port", SetupKind::Port)
+        .with_default("23")
+        .with_range(1.0, 65535.0),
+];

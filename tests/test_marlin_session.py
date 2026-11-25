@@ -11,6 +11,7 @@ import pytest
 from conftest import DEFAULT_DIALECT, sent_bytes, wait_until
 
 from raydriver.core import DriverEvent
+from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceStatus
 from raydriver.marlin import MarlinSerialDriver
 from raydriver.marlin.emulator import MarlinEmulator
@@ -257,3 +258,30 @@ class TestEmulatorJobs:
     async def test_detect_unit_system(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         assert await session.detect_unit_system() == "metric"
+
+
+class TestMarlinDriverBehavior:
+    async def test_boot_lines_are_captured(self, events):
+        mock = MockTransport()
+        session = await connect_scripted(mock, events)
+        try:
+            assert any("Marlin" in line for line in session.boot_lines)
+        finally:
+            await session.disconnect()
+
+    async def test_set_hold_is_a_best_effort_noop(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        await session.set_hold(True)
+        await session.set_hold(False)
+
+    async def test_jog_restores_absolute_mode(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        before = len(mock.sent())
+        await session.jog(1000, deltas=[("x", 1.0)])
+        sent = b"".join(mock.sent()[before:])
+        assert b"G90" in sent
+
+    async def test_disconnect_resets_the_device_status(self, marlin_rig):
+        session, mock, emulator, events = marlin_rig
+        await session.disconnect()
+        assert session.state.status == DeviceStatus.UNKNOWN

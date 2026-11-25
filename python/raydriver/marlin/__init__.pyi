@@ -32,6 +32,11 @@ class MarlinSerialDriver(driver.Driver):
     All async methods return asyncio futures; a typed `DriverEvent`
     is delivered to `event_callback(event)` on the event loop thread.
     """
+    @property
+    def boot_lines(self) -> builtins.list[builtins.str]:
+        r"""
+        Boot banner lines received from the device.
+        """
     def __new__(cls, config: typing.Optional[typing.Union[dict, config.MarlinConfig]], dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> MarlinSerialDriver: ...
     @staticmethod
     def with_transport(transport: transport.MockTransport, config: typing.Optional[typing.Union[dict, config.MarlinConfig]] = None, dialect: typing.Optional[dict] = None, event_callback: typing.Optional[collections.abc.Callable[[core.DriverEvent], builtins.object]] = None) -> MarlinSerialDriver:

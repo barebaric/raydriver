@@ -1784,6 +1784,29 @@ impl Driver for GrblStream {
         self.execute_command(&cmd).await?;
         Ok(())
     }
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
+        let dialect = self.dialect.read().unwrap().clone();
+        let lines = Driver::execute_command(self, &dialect.clear_alarm).await?;
+        let has_error = lines.iter().any(|line| {
+            line.starts_with("error:") || line.starts_with("Error:")
+        });
+        if !has_error {
+            let snapshot = {
+                let mut state = self.state.lock().unwrap();
+                if state.error.is_some() {
+                    state.error = None;
+                    Some(state.clone())
+                } else {
+                    None
+                }
+            };
+            if let Some(snapshot) = snapshot {
+                self.events.state_changed(&snapshot);
+            }
+        }
+        Ok(())
+    }
+
     async fn read_settings(
         &self,
     ) -> Result<Vec<(String, String)>, DriverError> {

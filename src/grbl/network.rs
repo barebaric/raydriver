@@ -8,6 +8,8 @@ use crate::core::driver::{
     info::{caps, DEFAULT_SUPPORTED_WCS},
     ConnectionKind, DriverEvents, DriverInfo, DriverMaturity,
 };
+
+use crate::core::driver::{SetupField, SetupKind};
 use crate::core::transport::TransportKind;
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport};
 
@@ -22,12 +24,13 @@ pub static INFO: DriverInfo = DriverInfo {
     connection: ConnectionKind::Network,
     maturity: DriverMaturity::Stable,
     caps: caps(
-        true, true, true, true, false, false, true, true, false, true, false,
+        true, true, true, true, true, false, true, true, false, true, false,
     ),
     uses_gcode: true,
     machine_space_wcs: "G53",
     supported_wcs: DEFAULT_SUPPORTED_WCS,
     config_keys: &["host", "http_port", "ws_port", "protocol"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -68,3 +71,17 @@ impl GrblNetworkDriver {
 }
 
 delegate_driver!(GrblNetworkDriver, stream);
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("http_port", SetupKind::Port)
+        .with_default("80")
+        .with_range(1.0, 65535.0),
+    SetupField::new("ws_port", SetupKind::Port)
+        .with_default("81")
+        .with_range(1.0, 65535.0),
+    SetupField::new("protocol", SetupKind::Choice)
+        .with_default("esp3d")
+        .with_choices(&["esp3d", "longer", "fluidnc"]),
+];

@@ -14,6 +14,8 @@ use crate::core::driver::{
     ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -142,6 +144,7 @@ pub static INFO: DriverInfo = DriverInfo {
     machine_space_wcs: "G53",
     supported_wcs: DEFAULT_SUPPORTED_WCS,
     config_keys: &["host", "port", "path", "api_key"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -1009,3 +1012,13 @@ impl Driver for OctoPrintDriver {
         Ok(Vec::new())
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("port", SetupKind::Port)
+        .with_default("80")
+        .with_range(1.0, 65535.0),
+    SetupField::new("path", SetupKind::Text),
+    SetupField::new("api_key", SetupKind::Text),
+];

@@ -20,6 +20,7 @@ use crate::grbl::stream::GrblStreamConfig;
 use crate::grbl::telnet::GrblTelnetDriver;
 use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
 use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
+use crate::simulator::{NoDeviceConfig, NoDeviceDriver};
 use crate::smoothie::driver::{SmoothieConfig, SmoothieDriver};
 use crate::xtool::driver::{XtoolConfig, XtoolNetworkDriver};
 
@@ -43,6 +44,7 @@ pub enum DriverKind {
     XtoolNetwork,
     OctoPrint,
     Epilog,
+    NoDevice,
 }
 
 impl DriverKind {
@@ -60,6 +62,7 @@ impl DriverKind {
         DriverKind::XtoolNetwork,
         DriverKind::OctoPrint,
         DriverKind::Epilog,
+        DriverKind::NoDevice,
     ];
 
     /// Resolve a persisted driver class name.
@@ -90,6 +93,7 @@ impl DriverKind {
             Self::XtoolNetwork => &crate::xtool::driver::INFO,
             Self::OctoPrint => &crate::octoprint::driver::INFO,
             Self::Epilog => &crate::epilog::driver::INFO,
+            Self::NoDevice => &crate::simulator::INFO,
         }
     }
 
@@ -107,6 +111,7 @@ impl DriverKind {
             | Self::Epilog => require(config, "host"),
             #[cfg(feature = "m2")]
             Self::XtoolM2 => require(config, "host"),
+            Self::NoDevice => Ok(()),
             Self::GrblBluetooth => {
                 let address = string(config, "address").unwrap_or_default();
                 crate::core::transport::bluetooth::normalize_address(&address)
@@ -269,6 +274,10 @@ impl DriverKind {
                 }
                 Ok(OctoPrintDriver::new(octoprint, events))
             }
+            Self::NoDevice => Ok(NoDeviceDriver::new(
+                NoDeviceConfig::from_value(config),
+                events,
+            )),
             Self::Epilog => {
                 let mut epilog = EpilogConfig::new(
                     &string(config, "host").unwrap_or_default(),

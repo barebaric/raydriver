@@ -19,6 +19,14 @@ caller's concern.
 All async methods return asyncio futures; a typed `DriverEvent` is delivered to
 `event_callback(event)` on the event loop thread.
 
+### `boot_lines`
+
+```python
+boot_lines: list[str]
+```
+
+Boot banner lines received from the device.
+
 ### `probe_device()`
 
 ```python

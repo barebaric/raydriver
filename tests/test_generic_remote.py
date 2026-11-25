@@ -47,7 +47,7 @@ def test_driver_capabilities():
     assert grbl["supports_probing"] is True
     assert grbl["supports_settings"] is True
     assert grbl["reports_buffer_stats"] is True
-    assert grbl["supports_clear_alarm"] is False
+    assert grbl["supports_clear_alarm"] is True
     smoothie = driver_info("SmoothieDriver").capabilities
     assert smoothie["supports_probing"] is True
     assert smoothie["supports_clear_alarm"] is True
@@ -271,5 +271,5 @@ def test_driver_capabilities_are_typed():
     # surface from the driver as NotImplementedError.
     grbl = driver_info("GrblSerialDriver").capabilities
     smoothie = driver_info("SmoothieDriver").capabilities
-    assert grbl["supports_clear_alarm"] is False
+    assert grbl["supports_clear_alarm"] is True
     assert smoothie["supports_clear_alarm"] is True

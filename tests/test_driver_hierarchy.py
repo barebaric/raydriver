@@ -15,6 +15,7 @@ from raydriver.core.transport import MockTransport
 from raydriver.driver import Driver, driver_info, drivers, get_driver_cls
 from raydriver.epilog import EpilogDriver
 from raydriver.octoprint import OctoPrintDriver
+from raydriver.simulator import NoDeviceDriver
 from raydriver.xtool import XtoolNetworkDriver
 from raydriver.xtool.m2 import XtoolM2Driver
 
@@ -29,6 +30,8 @@ NETWORK_DRIVERS = {
 
 def make_unconnected(cls):
     """Construct the driver without opening a connection."""
+    if cls is NoDeviceDriver:
+        return cls(config={"step_delay": 0.0})
     if cls in NETWORK_DRIVERS:
         return cls(config={"host": "127.0.0.1", "port": 1})
     return cls.with_transport(MockTransport(), dialect=DEFAULT_DIALECT)
@@ -52,6 +55,19 @@ def test_driver_lookup_round_trips():
         assert info.maturity
         assert isinstance(info.capabilities, dict)
         assert info.capabilities["uses_gcode"] is info.uses_gcode
+
+
+def test_driver_info_carries_the_setup_schema():
+    info = driver_info("GrblSerialDriver")
+    keys = [field.key for field in info.setup]
+    assert keys[:2] == ["port", "baudrate"]
+    port, baudrate = info.setup[0], info.setup[1]
+    assert port.kind == "serial_port"
+    assert port.required is True
+    assert baudrate.default == "115200"
+    assert port.to_dict()["key"] == "port"
+    for cls in drivers:
+        assert driver_info(cls.__name__).setup
 
 
 def test_instance_info_matches_class_info():

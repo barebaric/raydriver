@@ -7,6 +7,8 @@ use crate::core::driver::{
     info::caps, ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -128,6 +130,7 @@ pub static INFO: DriverInfo = DriverInfo {
     machine_space_wcs: "MACHINE",
     supported_wcs: &[],
     config_keys: &["host", "port", "queue", "timeout"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -656,3 +659,13 @@ impl EpilogDriver {
         self.upload.lock().unwrap().take().map(|active| active.task)
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("port", SetupKind::Port)
+        .with_default("515")
+        .with_range(1.0, 65535.0),
+    SetupField::new("queue", SetupKind::Text).with_default("Laser"),
+    SetupField::new("timeout", SetupKind::Float).with_default("30"),
+];

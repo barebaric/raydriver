@@ -329,6 +329,26 @@ impl LineDriverBase {
         status: TransportStatus,
         message: Option<&str>,
     ) {
+        // A lost or failed connection means the last reported status
+        // is stale: the protocol drivers reset it to Unknown, as the
+        // original shells did.
+        if matches!(
+            status,
+            TransportStatus::Error | TransportStatus::Disconnected
+        ) {
+            let snapshot = {
+                let mut state = self.state.lock().unwrap();
+                if state.status != DeviceStatus::Unknown {
+                    state.status = DeviceStatus::Unknown;
+                    Some(state.clone())
+                } else {
+                    None
+                }
+            };
+            if let Some(snapshot) = snapshot {
+                self.events.state_changed(&snapshot);
+            }
+        }
         self.events.connection_status(status, message);
     }
 

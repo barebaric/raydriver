@@ -13,6 +13,7 @@ pub(crate) mod octoprint;
 pub(crate) mod pyfuture;
 pub(crate) mod remote;
 pub(crate) mod runtime;
+pub(crate) mod simulator;
 pub(crate) mod smoothie;
 pub(crate) mod xtool;
 
@@ -167,6 +168,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     driver::register(m)?;
     grbl::register(m)?;
     marlin::register(m)?;
+    simulator::register(m)?;
     smoothie::register(m)?;
     octoprint::register(m)?;
     epilog::register(m)?;

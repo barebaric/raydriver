@@ -4,6 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
+use crate::core::driver::info::SetupField as CoreSetupField;
 use crate::core::driver::DriverInfo as CoreInfo;
 use crate::python::core::json::value_to_py;
 
@@ -12,6 +13,69 @@ use crate::python::core::json::value_to_py;
 #[pyclass(frozen, module = "raydriver.driver")]
 pub struct DriverInfo {
     inner: CoreInfo,
+}
+
+/// One connection-setup field a driver accepts.
+#[gen_stub_pyclass]
+#[pyclass(frozen, module = "raydriver.driver")]
+pub struct SetupField {
+    inner: CoreSetupField,
+}
+
+#[gen_stub_pymethods]
+#[pymethods]
+impl SetupField {
+    /// The config key.
+    #[getter]
+    fn key(&self) -> String {
+        self.inner.key.to_string()
+    }
+
+    /// The value kind (`serial_port`, `hostname`, `port`, ...).
+    #[getter]
+    fn kind(&self) -> String {
+        self.inner.kind.as_str().to_string()
+    }
+
+    /// Whether the field must be configured.
+    #[getter]
+    fn required(&self) -> bool {
+        self.inner.required
+    }
+
+    /// The default value, if any.
+    #[getter]
+    fn default(&self) -> Option<String> {
+        self.inner.default.map(str::to_string)
+    }
+
+    /// The minimum value for numeric fields.
+    #[getter]
+    fn min(&self) -> Option<f64> {
+        self.inner.min
+    }
+
+    /// The maximum value for numeric fields.
+    #[getter]
+    fn max(&self) -> Option<f64> {
+        self.inner.max
+    }
+
+    /// The allowed values for a choice field.
+    #[getter]
+    fn choices(&self) -> Vec<String> {
+        self.inner
+            .choices
+            .iter()
+            .map(|choice| choice.to_string())
+            .collect()
+    }
+
+    /// The mapping form.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let dict = value_to_py(py, &self.inner.to_json())?.into_bound(py);
+        Ok(dict.cast_into::<PyDict>()?)
+    }
 }
 
 impl DriverInfo {
@@ -70,6 +134,16 @@ impl DriverInfo {
             .config_keys
             .iter()
             .map(|key| key.to_string())
+            .collect()
+    }
+
+    /// The typed connection-setup form.
+    #[getter]
+    fn setup(&self) -> Vec<SetupField> {
+        self.inner
+            .setup
+            .iter()
+            .map(|field| SetupField { inner: *field })
             .collect()
     }
 

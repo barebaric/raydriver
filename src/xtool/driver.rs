@@ -6,6 +6,8 @@ use crate::core::driver::{
     info::caps, ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -21,7 +23,7 @@ use crate::core::driver::{
 };
 use crate::core::http;
 use crate::core::types::{
-    DeviceError, DeviceState, DeviceStatus, TransportStatus,
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 use crate::core::ws::WsClient;
 use async_trait::async_trait;
@@ -108,12 +110,13 @@ pub static INFO: DriverInfo = DriverInfo {
     connection: ConnectionKind::Network,
     maturity: DriverMaturity::Experimental,
     caps: caps(
-        false, true, false, true, false, false, true, false, false, true, false,
+        false, true, true, true, true, false, true, false, false, true, false,
     ),
     uses_gcode: true,
     machine_space_wcs: "G53",
     supported_wcs: &[],
     config_keys: &["host", "http_port", "ws_port"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -828,11 +831,19 @@ impl Driver for XtoolNetworkDriver {
     async fn run(
         self: Arc<Self>,
         gcode: &str,
-        _op_map: &HashMap<usize, i64>,
+        op_map: &HashMap<usize, i64>,
         _op_estimates: &[f64],
     ) -> Result<(), DriverError> {
         self.job_running.store(true, Ordering::SeqCst);
         self.is_cancelled.store(false, Ordering::SeqCst);
+        // The protocol has no granular progress: report every op as
+        // done once the job is running on the device.
+        let mut ops: Vec<i64> = op_map.values().copied().collect();
+        ops.sort_unstable();
+        ops.dedup();
+        for op in ops {
+            self.events.command_done(op);
+        }
         let result = self.run_inner(gcode).await;
         if !self.is_cancelled.load(Ordering::SeqCst) {
             self.job_running.store(false, Ordering::SeqCst);
@@ -901,9 +912,14 @@ impl Driver for XtoolNetworkDriver {
 
     async fn home(
         &self,
-        _axes: Option<Vec<String>>,
+        axes: Option<Vec<String>>,
         _active_wcs: &str,
     ) -> Result<(), DriverError> {
+        if axes.is_some() {
+            return Err(DriverError::Unsupported(
+                "this device only supports homing all axes".to_string(),
+            ));
+        }
         self.settled.clear();
         self.execute_interactive_command("M17 S1").await?;
         self.execute_interactive_command("M207 S0").await?;
@@ -986,6 +1002,54 @@ impl Driver for XtoolNetworkDriver {
         Ok(())
     }
 
+    async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
+        let template = self.dialect().tool_change;
+        let command = crate::core::dialect::format_template(
+            &template,
+            &[("tool_number", crate::core::dialect::Arg::Int(tool_number))],
+        )
+        .map_err(DriverError::Other)?;
+        self.execute_interactive_command(&command).await?;
+        Ok(())
+    }
+
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
+        // The firmware clears its safety alarms itself; there is no
+        // remote reset, so only the locally mirrored error clears.
+        let snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.error.is_some() {
+                state.error = None;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.events.state_changed(&snapshot);
+        }
+        Ok(())
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, DriverError> {
+        Ok(Some(UnitSystem::Metric))
+    }
+
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, DriverError> {
+        log::warn!("xTool machines do not expose readable settings.");
+        Ok(Vec::new())
+    }
+
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<HashMap<String, (f64, f64, f64)>, DriverError> {
+        Ok(HashMap::new())
+    }
+
     async fn execute_command(
         &self,
         command: &str,
@@ -1003,3 +1067,14 @@ impl Driver for XtoolNetworkDriver {
         Ok(Vec::new())
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("http_port", SetupKind::Port)
+        .with_default("8080")
+        .with_range(1.0, 65535.0),
+    SetupField::new("ws_port", SetupKind::Port)
+        .with_default("8081")
+        .with_range(1.0, 65535.0),
+];

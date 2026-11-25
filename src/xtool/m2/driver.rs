@@ -16,6 +16,8 @@ use crate::core::driver::{
     info::caps, ConnectionKind, DriverInfo, DriverMaturity,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -46,7 +48,7 @@ use crate::core::driver::{
     AsyncEvent, CancelMode, Driver, DriverError, DriverEvents,
 };
 use crate::core::types::{
-    DeviceError, DeviceState, DeviceStatus, TransportStatus,
+    DeviceError, DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 
 const DEFAULT_PORT: u16 = 28900;
@@ -111,6 +113,7 @@ pub static INFO: DriverInfo = DriverInfo {
     machine_space_wcs: "G53",
     supported_wcs: &[],
     config_keys: &["host", "port", "tls_allow_invalid_certs"],
+    setup: SETUP,
     fingerprint: None,
 };
 
@@ -943,9 +946,14 @@ impl Driver for XtoolM2Driver {
 
     async fn home(
         &self,
-        _axes: Option<Vec<String>>,
+        axes: Option<Vec<String>>,
         _active_wcs: &str,
     ) -> Result<(), DriverError> {
+        if axes.is_some() {
+            return Err(DriverError::Unsupported(
+                "this device only supports homing all axes".to_string(),
+            ));
+        }
         self.current_connection()
             .await?
             .request(
@@ -964,8 +972,13 @@ impl Driver for XtoolM2Driver {
         speed: f64,
         x: f64,
         y: f64,
-        _z: Option<f64>,
+        z: Option<f64>,
     ) -> Result<(), DriverError> {
+        if z.is_some() {
+            return Err(DriverError::Unsupported(
+                "this device cannot move the Z axis".to_string(),
+            ));
+        }
         self.current_connection()
             .await?
             .request(
@@ -1011,4 +1024,50 @@ impl Driver for XtoolM2Driver {
             .await?;
         Ok(())
     }
+
+    async fn clear_alarm(&self) -> Result<(), DriverError> {
+        let snapshot = {
+            let mut state = self.state.lock().unwrap();
+            if state.error.is_some() {
+                state.error = None;
+                Some(state.clone())
+            } else {
+                None
+            }
+        };
+        if let Some(snapshot) = snapshot {
+            self.events.state_changed(&snapshot);
+        }
+        Ok(())
+    }
+
+    async fn detect_unit_system(
+        &self,
+    ) -> Result<Option<UnitSystem>, DriverError> {
+        Ok(Some(UnitSystem::Metric))
+    }
+
+    async fn read_settings(
+        &self,
+    ) -> Result<Vec<(String, String)>, DriverError> {
+        log::warn!("xTool machines do not expose readable settings.");
+        Ok(Vec::new())
+    }
+
+    async fn read_wcs_offsets(
+        &self,
+    ) -> Result<std::collections::HashMap<String, (f64, f64, f64)>, DriverError>
+    {
+        Ok(std::collections::HashMap::new())
+    }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("host", SetupKind::Hostname).required(),
+    SetupField::new("port", SetupKind::Port)
+        .with_default("28900")
+        .with_range(1.0, 65535.0),
+    SetupField::new("tls_allow_invalid_certs", SetupKind::Bool)
+        .with_default("false"),
+];

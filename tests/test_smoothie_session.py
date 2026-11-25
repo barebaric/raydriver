@@ -249,3 +249,9 @@ class TestEmulatorJobs:
         await asyncio.wait_for(job, 5)
         await events.wait_for(DriverEvent.JobFinished)
         assert b"\x03" in sent_bytes(mock)
+
+
+async def test_disconnect_resets_the_device_status(smoothie_rig):
+    session, mock, emulator, events = smoothie_rig
+    await session.disconnect()
+    assert session.state.status == DeviceStatus.UNKNOWN

@@ -60,7 +60,7 @@ The crate is split into layers that depend only downward:
 ```
 encode (machine-code encoders; raygeo core only)
 core (transports, value types, dialects, driver primitives)
-  →  grbl | smoothie | marlin | esp3d | octoprint | xtool | epilog  (drivers)
+  →  grbl | smoothie | marlin | esp3d | octoprint | xtool | epilog | simulator  (drivers)
   →  driver (the typed built-in driver list and resource lock)
   →  python (PyO3 bindings)
 ```
@@ -82,8 +82,8 @@ core (transports, value types, dialects, driver primitives)
   capsule name embeds the raygeo version the encoder was built
   against; raygeo rejects a mismatch instead of misreading it.
 - `src/grbl/`, `src/smoothie/`, `src/marlin/`, `src/esp3d/`,
-  `src/octoprint/`, `src/xtool/` (with `m2`) and `src/epilog/` hold
-  the drivers; they must not depend on PyO3 or any Python types.
+  `src/octoprint/`, `src/xtool/` (with `m2`), `src/epilog/` and
+  `src/simulator.rs` hold the drivers; they must not depend on PyO3 or any Python types.
   They may use `src/core/` freely. Cross-protocol imports between
   protocol modules need an explicit justification in the importing
   module's `mod.rs` docs (e.g. Smoothie reuses the GRBL parser and

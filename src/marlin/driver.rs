@@ -30,9 +30,11 @@ use crate::core::driver::{
     ConnectionKind, DriverInfo, DriverMaturity, ProbeFingerprint,
 };
 
+use crate::core::driver::{SetupField, SetupKind};
+
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -90,6 +92,9 @@ pub struct MarlinSerialDriver {
     /// sent before that: the boot banner's trailing ok would
     /// otherwise resolve a pending command.
     connected: AsyncEvent,
+    /// Startup banner lines, used to refine the firmware version in
+    /// the device census.
+    boot_lines: Mutex<Vec<String>>,
 }
 
 /// Typed identity and capabilities of this driver.
@@ -104,6 +109,7 @@ pub static INFO: DriverInfo = DriverInfo {
     machine_space_wcs: "MACHINE",
     supported_wcs: DEFAULT_SUPPORTED_WCS,
     config_keys: &["port", "baudrate"],
+    setup: SETUP,
     fingerprint: Some(ProbeFingerprint {
         command: "M115",
         signature: "FIRMWARE",
@@ -126,6 +132,7 @@ impl MarlinSerialDriver {
             ),
             config,
             connected: AsyncEvent::new(),
+            boot_lines: Mutex::new(Vec::new()),
         })
     }
 
@@ -273,6 +280,13 @@ impl MarlinSerialDriver {
     }
 }
 
+impl MarlinSerialDriver {
+    /// Boot banner lines received from the device.
+    pub fn boot_lines(&self) -> Vec<String> {
+        self.boot_lines.lock().unwrap().clone()
+    }
+}
+
 #[async_trait]
 impl PingPongDriver for MarlinSerialDriver {
     fn base(&self) -> &LineDriverBase {
@@ -280,6 +294,9 @@ impl PingPongDriver for MarlinSerialDriver {
     }
 
     fn handle_line(&self, line: &str) {
+        if parser::is_boot_message(line) {
+            self.boot_lines.lock().unwrap().push(line.to_string());
+        }
         self.maybe_announce_handshake(line);
         if parser::is_ok(line) {
             self.base.events.raw_rx(line);
@@ -484,7 +501,18 @@ impl Driver for MarlinSerialDriver {
         speed: f64,
         deltas: &[(String, f64)],
     ) -> Result<(), DriverError> {
-        line_driver::jog(self, speed, deltas).await
+        line_driver::jog(self, speed, deltas).await?;
+        // The jog template selects relative mode; Marlin's job
+        // streaming expects absolute moves, so restore it.
+        line_driver::execute_command(self, "G90").await?;
+        Ok(())
+    }
+
+    async fn set_hold(&self, _hold: bool) -> Result<(), DriverError> {
+        log::warn!(
+            "Marlin does not support reliable pause/resume on 8-bit              boards; set_hold is a best-effort no-op."
+        );
+        Ok(())
     }
 
     async fn select_tool(&self, tool_number: i64) -> Result<(), DriverError> {
@@ -545,3 +573,9 @@ impl Driver for MarlinSerialDriver {
         Ok(parser::detect_unit_system_from_m149(&lines))
     }
 }
+
+/// Connection-setup form for this driver.
+pub static SETUP: &[SetupField] = &[
+    SetupField::new("port", SetupKind::SerialPort).required(),
+    SetupField::new("baudrate", SetupKind::Baudrate).with_default("115200"),
+];

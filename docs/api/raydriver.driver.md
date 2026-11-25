@@ -462,6 +462,14 @@ name: str
 
 The class name, which is also the persisted driver name.
 
+### `setup`
+
+```python
+setup: list[SetupField]
+```
+
+The typed connection-setup form.
+
 ### `supported_wcs`
 
 ```python
@@ -485,6 +493,78 @@ to_dict() -> dict
 ```
 
 The wire form served by `driver/list`.
+
+| Parameter | Type   | Description |
+| --------- | ------ | ----------- |
+| _Returns_ | `dict` |             |
+
+## SetupField
+
+One connection-setup field a driver accepts.
+
+### `choices`
+
+```python
+choices: list[str]
+```
+
+The allowed values for a choice field.
+
+### `default`
+
+```python
+default: Optional[str]
+```
+
+The default value, if any.
+
+### `key`
+
+```python
+key: str
+```
+
+The config key.
+
+### `kind`
+
+```python
+kind: str
+```
+
+The value kind (`serial_port`, `hostname`, `port`, ...).
+
+### `max`
+
+```python
+max: Optional[float]
+```
+
+The maximum value for numeric fields.
+
+### `min`
+
+```python
+min: Optional[float]
+```
+
+The minimum value for numeric fields.
+
+### `required`
+
+```python
+required: bool
+```
+
+Whether the field must be configured.
+
+### `to_dict()`
+
+```python
+to_dict() -> dict
+```
+
+The mapping form.
 
 | Parameter | Type   | Description |
 | --------- | ------ | ----------- |

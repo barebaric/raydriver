@@ -6,6 +6,7 @@ pub mod info;
 
 pub use info::{
     Capabilities, ConnectionKind, DriverInfo, DriverMaturity, ProbeFingerprint,
+    SetupField, SetupKind,
 };
 
 use std::collections::HashMap;

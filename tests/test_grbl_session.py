@@ -443,3 +443,10 @@ class TestInchReports:
         )
         # The report arrived in inches; the driver reports mm.
         assert event.state.machine_pos[0] == pytest.approx(25.4, abs=0.1)
+
+
+class TestAlarm:
+    async def test_clear_alarm_sends_the_dialect_command(self, rig):
+        session, mock, emulator, events = rig
+        await session.clear_alarm()
+        assert b"$X\n" in sent_bytes(mock)

@@ -26,6 +26,7 @@ use crate::python::grbl::driver::{
 use crate::python::grbl::simple::PyGrblSerialSimpleDriver;
 use crate::python::marlin::driver::PyMarlinSerialDriver;
 use crate::python::octoprint::driver::PyOctoPrintDriver;
+use crate::python::simulator::PyNoDeviceDriver;
 use crate::python::smoothie::driver::PySmoothieDriver;
 use crate::python::xtool::driver::PyXtoolNetworkDriver;
 #[cfg(feature = "m2")]
@@ -517,6 +518,7 @@ fn builtin_drivers(py: Python<'_>) -> Vec<Py<PyAny>> {
         py.get_type::<PyXtoolNetworkDriver>().into_any().unbind(),
         py.get_type::<PyOctoPrintDriver>().into_any().unbind(),
         py.get_type::<PyEpilogDriver>().into_any().unbind(),
+        py.get_type::<PyNoDeviceDriver>().into_any().unbind(),
     ]
 }
 
@@ -585,6 +587,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("__all__", vec!["Driver", "DriverInfo", "driver_info"])?;
     module.add_class::<PyDriver>()?;
     module.add_class::<info::DriverInfo>()?;
+    module.add_class::<info::SetupField>()?;
     module.add_function(wrap_pyfunction!(driver_info, &module)?)?;
     let drivers = pyo3::types::PyList::new(py, builtin_drivers(py))?;
     module.add("drivers", &drivers)?;

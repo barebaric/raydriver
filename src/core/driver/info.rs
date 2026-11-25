@@ -117,6 +117,103 @@ pub struct ProbeFingerprint {
     pub signature: &'static str,
 }
 
+/// The kind of value a setup field takes, for host-side form
+/// rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SetupKind {
+    SerialPort,
+    Baudrate,
+    Hostname,
+    Port,
+    Text,
+    Bool,
+    Int,
+    Float,
+    Choice,
+}
+
+impl SetupKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SerialPort => "serial_port",
+            Self::Baudrate => "baudrate",
+            Self::Hostname => "hostname",
+            Self::Port => "port",
+            Self::Text => "text",
+            Self::Bool => "bool",
+            Self::Int => "int",
+            Self::Float => "float",
+            Self::Choice => "choice",
+        }
+    }
+}
+
+/// One connection-setup field a driver accepts.
+///
+/// This is the machine-readable half of the setup form: keys, types,
+/// defaults, ranges and choices.  Labels and descriptions are the
+/// host application's presentation data.
+#[derive(Debug, Clone, Copy)]
+pub struct SetupField {
+    pub key: &'static str,
+    pub kind: SetupKind,
+    pub required: bool,
+    pub default: Option<&'static str>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub choices: &'static [&'static str],
+}
+
+impl SetupField {
+    pub const fn new(key: &'static str, kind: SetupKind) -> Self {
+        Self {
+            key,
+            kind,
+            required: false,
+            default: None,
+            min: None,
+            max: None,
+            choices: &[],
+        }
+    }
+
+    pub const fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
+
+    pub const fn with_default(mut self, value: &'static str) -> Self {
+        self.default = Some(value);
+        self
+    }
+
+    pub const fn with_range(mut self, min: f64, max: f64) -> Self {
+        self.min = Some(min);
+        self.max = Some(max);
+        self
+    }
+
+    pub const fn with_choices(
+        mut self,
+        choices: &'static [&'static str],
+    ) -> Self {
+        self.choices = choices;
+        self
+    }
+
+    pub fn to_json(&self) -> Value {
+        json!({
+            "key": self.key,
+            "kind": self.kind.as_str(),
+            "required": self.required,
+            "default": self.default,
+            "min": self.min,
+            "max": self.max,
+            "choices": self.choices,
+        })
+    }
+}
+
 /// Typed metadata describing one driver class.
 ///
 /// Every driver owns exactly one of these; it replaces the former
@@ -137,6 +234,8 @@ pub struct DriverInfo {
     pub supported_wcs: &'static [&'static str],
     /// The connection config keys the driver accepts.
     pub config_keys: &'static [&'static str],
+    /// The typed connection-setup form.
+    pub setup: &'static [SetupField],
     /// Serial command/response signature for auto-detection.
     pub fingerprint: Option<ProbeFingerprint>,
 }
@@ -172,6 +271,7 @@ impl DriverInfo {
             "machine_space_wcs": self.machine_space_wcs,
             "supported_wcs": self.supported_wcs,
             "config_keys": self.config_keys,
+            "setup": self.setup.iter().map(SetupField::to_json).collect::<Vec<_>>(),
             "fingerprint": self.fingerprint.map(|fingerprint| json!({
                 "command": fingerprint.command,
                 "signature": fingerprint.signature,

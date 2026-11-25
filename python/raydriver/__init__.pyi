@@ -12,6 +12,7 @@ from . import grbl
 from . import marlin
 from . import octoprint
 from . import remote
+from . import simulator
 from . import smoothie
 from . import xtool
 __all__ = [
@@ -25,6 +26,7 @@ __all__ = [
     "marlin",
     "octoprint",
     "remote",
+    "simulator",
     "smoothie",
     "xtool",
 ]

@@ -132,8 +132,8 @@ class TestProbeDevice:
         assert info.max_speed is None
         assert info.acceleration is None
 
-    async def test_probe_device_without_boot_lines(self, marlin_rig):
+    async def test_probe_device_uses_captured_boot_lines(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         info = await session.probe_device()
         assert info.name == "Marlin"
-        assert info.firmware_version == "Marlin"
+        assert info.firmware_version == "2.1.2"

@@ -13,6 +13,7 @@ import typing
 __all__ = [
     "Driver",
     "DriverInfo",
+    "SetupField",
     "driver_info",
     "drivers",
     "get_driver_cls",
@@ -199,6 +200,11 @@ class DriverInfo:
         The connection config keys the driver accepts.
         """
     @property
+    def setup(self) -> builtins.list[SetupField]:
+        r"""
+        The typed connection-setup form.
+        """
+    @property
     def capabilities(self) -> dict[builtins.str, builtins.bool]:
         r"""
         The capability flags.
@@ -206,6 +212,51 @@ class DriverInfo:
     def to_dict(self) -> dict:
         r"""
         The wire form served by `driver/list`.
+        """
+
+@typing.final
+class SetupField:
+    r"""
+    One connection-setup field a driver accepts.
+    """
+    @property
+    def key(self) -> builtins.str:
+        r"""
+        The config key.
+        """
+    @property
+    def kind(self) -> builtins.str:
+        r"""
+        The value kind (`serial_port`, `hostname`, `port`, ...).
+        """
+    @property
+    def required(self) -> builtins.bool:
+        r"""
+        Whether the field must be configured.
+        """
+    @property
+    def default(self) -> typing.Optional[builtins.str]:
+        r"""
+        The default value, if any.
+        """
+    @property
+    def min(self) -> typing.Optional[builtins.float]:
+        r"""
+        The minimum value for numeric fields.
+        """
+    @property
+    def max(self) -> typing.Optional[builtins.float]:
+        r"""
+        The maximum value for numeric fields.
+        """
+    @property
+    def choices(self) -> builtins.list[builtins.str]:
+        r"""
+        The allowed values for a choice field.
+        """
+    def to_dict(self) -> dict:
+        r"""
+        The mapping form.
         """
 
 def driver_info(name: builtins.str) -> DriverInfo:

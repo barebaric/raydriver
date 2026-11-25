@@ -306,3 +306,35 @@ class TestStartFailure:
         finally:
             await session.disconnect()
             await emulator.stop()
+
+
+async def test_detect_unit_system_is_metric(rig):
+    session, emulator, events = rig
+    assert await session.detect_unit_system() == "metric"
+
+
+async def test_home_rejects_a_single_axis(rig):
+    session, emulator, events = rig
+    with pytest.raises(NotImplementedError):
+        await session.home(axes=["x"])
+
+
+async def test_clear_alarm_only_clears_the_local_state(rig):
+    session, emulator, events = rig
+    await session.clear_alarm()
+
+
+async def test_read_wcs_offsets_is_empty(rig):
+    session, emulator, events = rig
+    assert await session.read_wcs_offsets() == {}
+
+
+async def test_job_reports_every_op_at_start(rig):
+    session, emulator, events = rig
+    done = []
+    await session.run(
+        "G1 X0\nG1 X1\nG1 X2\n",
+        {0: 0, 1: 0, 2: 1},
+        progress_callback=done.append,
+    )
+    assert done == [0, 1]
