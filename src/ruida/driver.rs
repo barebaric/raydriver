@@ -358,11 +358,12 @@ impl RuidaDriver {
         axis: char,
         delta: f64,
     ) -> Result<(), DriverError> {
+        let axis = axis.to_ascii_uppercase();
         let speed = {
             let speeds = self.jog_speeds.lock().unwrap();
             match axis {
-                'z' => speeds.z,
-                'u' => speeds.u,
+                'Z' => speeds.z,
+                'U' => speeds.u,
                 _ => speeds.xy,
             }
         };

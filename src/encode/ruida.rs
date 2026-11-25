@@ -727,7 +727,11 @@ impl<'a> JobEncoder<'a> {
                 OpCategory::Moving { .. } => {
                     let kind = ops.command_type(i);
                     let end = ops.endpoint(i);
-                    if kind == CommandType::LineTo && in_raster_fill {
+                    if matches!(
+                        kind,
+                        CommandType::LineTo | CommandType::ScanLine
+                    ) && in_raster_fill
+                    {
                         if let Some(overscan) =
                             Self::classify_overscan(&pos, &end)
                         {
@@ -736,18 +740,7 @@ impl<'a> JobEncoder<'a> {
                     }
                     pos = end;
                 }
-                _ => {
-                    if ops.command_type(i) == CommandType::ScanLine
-                        && in_raster_fill
-                    {
-                        let end = ops.endpoint(i);
-                        if let Some(overscan) =
-                            Self::classify_overscan(&pos, &end)
-                        {
-                            return overscan;
-                        }
-                    }
-                }
+                _ => {}
             }
         }
         "NONE"

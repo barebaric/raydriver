@@ -148,6 +148,37 @@ class TestGolden:
         assert payload_bytes(result)
 
 
+
+    def test_scan_only_raster_derives_overscan(self):
+        # A raster layer whose fill is only SCAN_LINE ops still derives
+        # the horizontal overscan form.
+        ops = Ops()
+        ops.job_start()
+        ops.layer_start(layer_uid="layer-0")
+        ops.workpiece_start("wp")
+        ops.ops_section_start(
+            SectionType.RASTER_FILL,
+            "wp",
+            raster_mode=RasterMode.VARIABLE_POWER,
+        )
+        ops.move_to(0.0, 0.0, 0.0)
+        ops.scan_to(5.0, 0.0, 0.0, bytearray([128, 128]))
+        ops.ops_section_end(
+            SectionType.RASTER_FILL,
+            raster_mode=RasterMode.VARIABLE_POWER,
+        )
+        ops.workpiece_end("wp")
+        ops.layer_end(layer_uid="layer-0")
+        ops.job_end()
+        result = ops.encode(
+            Encoder(RuidaSpec(json.dumps(context())))
+        )
+        assert (
+            "declare_layer('Cut', '#ff6600', 'IMAGE', 'X_BI',"
+            in result.text
+        )
+
+
 class TestPolicy:
     def test_empty_ops(self):
         result = Ops().encode(Encoder(RuidaSpec(json.dumps(context()))))
