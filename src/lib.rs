@@ -19,6 +19,7 @@
 //! - [`smoothie`]: the Smoothieware driver.
 //! - [`xtool`]: the xTool proprietary WiFi-API drivers.
 //! - [`marlin`]: the Marlin driver.
+//! - [`ruida`]: the Ruida laser controller protocol.
 //! - [`simulator`]: a transport-free machine for UI previews and tests.
 //!
 //! The crate is layered: `core` and the protocol modules are pure
@@ -55,6 +56,7 @@ pub mod esp3d;
 pub mod grbl;
 pub mod marlin;
 pub mod octoprint;
+pub mod ruida;
 pub mod simulator;
 pub mod smoothie;
 pub mod xtool;
