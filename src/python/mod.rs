@@ -3,6 +3,7 @@
 pub(crate) mod census;
 pub(crate) mod config;
 pub(crate) mod core;
+pub(crate) mod driver;
 pub(crate) mod encode;
 pub(crate) mod epilog;
 pub(crate) mod events;
@@ -13,7 +14,6 @@ pub(crate) mod protocols;
 pub(crate) mod pyfuture;
 pub(crate) mod remote;
 pub(crate) mod runtime;
-pub(crate) mod session_api;
 pub(crate) mod smoothie;
 pub(crate) mod xtool;
 
@@ -166,6 +166,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     protocols::register(m)?;
     encode::register(m)?;
     core::register(m)?;
+    driver::register(m)?;
     grbl::register(m)?;
     marlin::register(m)?;
     smoothie::register(m)?;

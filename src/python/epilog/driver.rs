@@ -10,7 +10,6 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::driver::{CancelMode, Driver};
 use crate::epilog::driver::{EpilogConfig, EpilogDriver};
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{get_f64, get_i64, get_str};
 use crate::python::pyfuture::{
@@ -51,17 +50,22 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<EpilogConfig> {
 /// The machine has no status channel, so most session operations
 /// raise `NotImplementedError`; job submission uses `upload`.
 #[gen_stub_pyclass(module = "raydriver.epilog")]
-#[pyclass(name = "EpilogDriver", module = "raydriver.epilog")]
+#[pyclass(name = "EpilogDriver", module = "raydriver.epilog", extends = crate::python::driver::PyDriver)]
 pub struct PyEpilogDriver {
     core: Arc<EpilogDriver>,
     events: Arc<PyEvents>,
 }
 
 impl PyEpilogDriver {
-    fn build(config: EpilogConfig, event_callback: Option<Py<PyAny>>) -> Self {
+    fn initializer(
+        config: EpilogConfig,
+        event_callback: Option<Py<PyAny>>,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let events = Arc::new(PyEvents::new(event_callback));
         let core = Arc::new(EpilogDriver::new(config, events.clone()));
-        Self { core, events }
+        let base =
+            crate::python::driver::PyDriver::new(core.clone(), events.clone());
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core, events }))
     }
 }
 
@@ -69,6 +73,7 @@ impl PyEpilogDriver {
 #[pymethods]
 impl PyEpilogDriver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "EpilogDriver"))]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
@@ -88,11 +93,11 @@ impl PyEpilogDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let _ = dialect;
         let config = crate::python::config::config_dict(config.as_ref())?;
         let config = build_config(config.as_ref())?;
-        Ok(Self::build(config, event_callback))
+        Self::initializer(config, event_callback)
     }
 
     /// Upload a complete print job and wait until the machine accepts
@@ -148,22 +153,6 @@ impl PyEpilogDriver {
         .expect("probe future")
     }
 
-    /// Current snapshot of the machine state.
-    #[getter]
-    fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
-    }
-
-    #[getter]
-    fn job_running(&self) -> bool {
-        self.core.is_job_running()
-    }
-
-    #[getter]
-    fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "EpilogDriver(resource_uri={:?}, job_running={})",
@@ -172,7 +161,3 @@ impl PyEpilogDriver {
         )
     }
 }
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyEpilogDriver);

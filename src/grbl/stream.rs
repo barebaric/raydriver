@@ -191,6 +191,7 @@ impl StreamHandle {
 /// Shared session state, owned jointly by the public handle and the
 /// background tasks.
 pub struct GrblStream {
+    info: &'static crate::core::driver::DriverInfo,
     config: GrblStreamConfig,
     dialect: RwLock<Dialect>,
     events: Arc<dyn DriverEvents>,
@@ -224,12 +225,14 @@ impl GrblStream {
     pub fn new(
         transport: TransportKind,
         config: GrblStreamConfig,
+        info: &'static crate::core::driver::DriverInfo,
         dialect: Dialect,
         events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         let transport: Arc<dyn Transport> = transport.build();
         let (cmd_tx, _) = mpsc::unbounded_channel();
         let core = Self {
+            info,
             config,
             dialect: RwLock::new(dialect),
             events,
@@ -1591,6 +1594,10 @@ impl GrblStream {
 /// of every operation the protocol supports.
 #[async_trait]
 impl Driver for GrblStream {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        self.info
+    }
+
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

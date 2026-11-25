@@ -9,7 +9,6 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::dialect::Dialect;
 use crate::core::driver::Driver;
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 // The config/dialect dict helpers are shared across the protocol
 // bindings and live with the largest consumer (grbl), mirroring how
@@ -60,21 +59,21 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<XtoolConfig> {
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "XtoolNetworkDriver", module = "raydriver.xtool")]
+#[pyclass(name = "XtoolNetworkDriver", module = "raydriver.xtool", extends = crate::python::driver::PyDriver)]
 pub struct PyXtoolNetworkDriver {
     core: Arc<XtoolNetworkDriver>,
-    events: Arc<PyEvents>,
 }
 
 impl PyXtoolNetworkDriver {
-    fn build(
+    fn initializer(
         config: XtoolConfig,
         dialect: Dialect,
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let events = Arc::new(PyEvents::new(event_callback));
         let core = XtoolNetworkDriver::new(config, dialect, events.clone());
-        Ok(Self { core, events })
+        let base = crate::python::driver::PyDriver::new(core.clone(), events);
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
 }
 
@@ -82,6 +81,7 @@ impl PyXtoolNetworkDriver {
 #[pymethods]
 impl PyXtoolNetworkDriver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "XtoolNetworkDriver"))]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
@@ -96,11 +96,11 @@ impl PyXtoolNetworkDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let config = build_config(config.as_ref())?;
         let dialect = parse_dialect(dialect.as_ref())?;
-        Self::build(config, dialect, event_callback)
+        Self::initializer(config, dialect, event_callback)
     }
     /// Execute a multi-line block of G-code via POST /cmd.
     fn execute_block<'py>(
@@ -114,20 +114,9 @@ impl PyXtoolNetworkDriver {
             Ok(())
         })
     }
-    /// Current snapshot of the device state.
-    #[getter]
-    fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
-    }
-
     #[getter]
     fn is_job_running(&self) -> bool {
         self.core.is_job_running()
-    }
-
-    #[getter]
-    fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
     }
 
     fn __repr__(&self) -> String {
@@ -138,7 +127,3 @@ impl PyXtoolNetworkDriver {
         )
     }
 }
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyXtoolNetworkDriver);

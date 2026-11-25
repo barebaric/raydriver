@@ -25,6 +25,11 @@
 //! holds the Marlin-specific dispatch, the wire-ordered FIFO
 //! pending queue and the M114 position polling.
 
+use crate::core::driver::{
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverInfo, DriverMaturity, ProbeFingerprint,
+};
+
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -86,6 +91,24 @@ pub struct MarlinSerialDriver {
     /// otherwise resolve a pending command.
     connected: AsyncEvent,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "MarlinSerialDriver",
+    connection: ConnectionKind::Serial,
+    maturity: DriverMaturity::Stable,
+    caps: caps(
+        false, true, true, false, true, true, true, true, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "MACHINE",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &["port", "baudrate"],
+    fingerprint: Some(ProbeFingerprint {
+        command: "M115",
+        signature: "FIRMWARE",
+    }),
+};
 
 impl MarlinSerialDriver {
     pub fn new(
@@ -375,6 +398,10 @@ impl PingPongDriver for MarlinSerialDriver {
 /// their real bodies here.
 #[async_trait]
 impl Driver for MarlinSerialDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.base.state()
     }

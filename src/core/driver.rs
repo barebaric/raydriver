@@ -1,6 +1,12 @@
-//! Driver primitives shared by the protocol sessions: the event
-//! notification trait, the error type, the async latch and small
-//! shared helpers.
+//! Driver primitives shared by the protocol drivers: the typed
+//! metadata, the event notification trait, the error type, the async
+//! latch and small shared helpers.
+
+pub mod info;
+
+pub use info::{
+    Capabilities, ConnectionKind, DriverInfo, DriverMaturity, ProbeFingerprint,
+};
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -11,6 +17,9 @@ use async_trait::async_trait;
 use crate::core::dialect::Dialect;
 use crate::core::transport::TransportError;
 use crate::core::types::{DeviceState, TransportStatus, UnitSystem};
+
+/// WCS slot → (x, y, z) offsets in machine units.
+pub type WcsOffsets = HashMap<String, (f64, f64, f64)>;
 
 /// Converts a (possibly negative) seconds value into a non-negative
 /// [`Duration`]; shared by every session's timeout configuration.
@@ -188,6 +197,9 @@ pub enum CancelMode {
 /// perform at all return [`DriverError::Unsupported`].
 #[async_trait]
 pub trait Driver: Send + Sync {
+    /// The driver's typed identity and capabilities.
+    fn info(&self) -> &'static DriverInfo;
+
     /// Open the connection.  Connection problems are reported
     /// through [`DriverEvents::connection_status`], not the return
     /// value.
@@ -408,6 +420,10 @@ macro_rules! delegate_driver {
     ($ty:ty, $field:ident) => {
         #[async_trait::async_trait]
         impl $crate::core::driver::Driver for $ty {
+            fn info(&self) -> &'static $crate::core::driver::DriverInfo {
+                $crate::core::driver::Driver::info(&*self.$field)
+            }
+
             fn state(&self) -> $crate::core::types::DeviceState {
                 $crate::core::driver::Driver::state(&*self.$field)
             }

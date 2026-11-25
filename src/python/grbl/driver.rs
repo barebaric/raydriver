@@ -24,7 +24,6 @@ use crate::grbl::stream::GrblStreamConfig;
 use crate::grbl::telnet::GrblTelnetDriver;
 
 use crate::python::core::mock::MockTransport;
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::probe::GrblDeviceInfo;
 use crate::python::pyfuture::{spawn_future, PyAwait};
@@ -267,16 +266,16 @@ macro_rules! grbl_driver {
     ) => {
         #[doc = $doc]
         #[gen_stub_pyclass]
-        #[pyclass(name = $py_name, module = "raydriver.grbl")]
+        #[pyclass(name = $py_name, module = "raydriver.grbl", extends = crate::python::driver::PyDriver)]
         pub struct $cls {
             core: Arc<$driver_ty>,
-            events: Arc<PyEvents>,
         }
 
         #[gen_stub_pymethods]
         #[pymethods]
         impl $cls {
             #[new]
+            #[gen_stub(override_return_type(type_repr = $py_name))]
             #[pyo3(signature = (config, dialect=None, event_callback=None))]
             fn new(
                 #[gen_stub(override_type(
@@ -291,12 +290,12 @@ macro_rules! grbl_driver {
                     imports = ("builtins", "collections.abc", "typing", "raydriver.core")
                 ))]
                 event_callback: Option<Py<PyAny>>,
-            ) -> PyResult<Self> {
+            ) -> PyResult<PyClassInitializer<Self>> {
                 let config =
                     crate::python::config::config_dict(config.as_ref())?;
                 let kind = $transport_fn(config.as_ref())?;
                 let stream_config = build_config(config.as_ref())?;
-                Self::build(kind, stream_config, dialect, event_callback)
+                Self::initializer(kind, stream_config, dialect, event_callback)
             }
 
             /// Build a driver around a [`MockTransport`] (for
@@ -304,6 +303,7 @@ macro_rules! grbl_driver {
             #[staticmethod]
             #[pyo3(signature = (transport, config=None, dialect=None, event_callback=None))]
             fn with_transport(
+                py: Python<'_>,
                 transport: PyRef<'_, MockTransport>,
                 #[gen_stub(override_type(
                     type_repr = $config_repr,
@@ -317,12 +317,18 @@ macro_rules! grbl_driver {
                     imports = ("builtins", "collections.abc", "typing", "raydriver.core")
                 ))]
                 event_callback: Option<Py<PyAny>>,
-            ) -> PyResult<Self> {
+            ) -> PyResult<Py<Self>> {
                 let config =
                     crate::python::config::config_dict(config.as_ref())?;
                 let kind = TransportKind::Mock(transport.inner.clone());
                 let stream_config = build_config(config.as_ref())?;
-                Self::build(kind, stream_config, dialect, event_callback)
+                let initializer = Self::initializer(
+                    kind,
+                    stream_config,
+                    dialect,
+                    event_callback,
+                )?;
+                Py::new(py, initializer)
             }
 
             /// Run the device census: query `$I` and `$$`.
@@ -348,42 +354,6 @@ macro_rules! grbl_driver {
                 })
             }
 
-            /// Current snapshot of the device state.
-            #[getter]
-            fn state(&self) -> DeviceState {
-                DeviceState::new(Driver::state(&*self.core))
-            }
-
-            /// Bytes currently occupying the device's RX buffer.
-            #[getter]
-            fn buffer_count(&self) -> usize {
-                Driver::buffer_count(&*self.core)
-            }
-
-            /// The device's RX buffer size in bytes.
-            #[getter]
-            fn rx_buffer_size(&self) -> usize {
-                Driver::rx_buffer_size(&*self.core)
-            }
-
-            /// Commands awaiting their 'ok' acknowledgement.
-            #[getter]
-            fn pending_commands(&self) -> Vec<String> {
-                Driver::pending_commands(&*self.core)
-            }
-
-            /// True while a job is running or held.
-            #[getter]
-            fn job_running(&self) -> bool {
-                Driver::is_job_running(&*self.core)
-            }
-
-            /// Identifier of the physical resource, or `None`.
-            #[getter]
-            fn resource_uri(&self) -> Option<String> {
-                Driver::resource_uri(&*self.core)
-            }
-
             fn __repr__(&self) -> String {
                 format!(
                     concat!(
@@ -397,12 +367,12 @@ macro_rules! grbl_driver {
         }
 
         impl $cls {
-            fn build(
+            fn initializer(
                 kind: TransportKind,
                 config: GrblStreamConfig,
                 dialect: Option<Bound<'_, PyDict>>,
                 event_callback: Option<Py<PyAny>>,
-            ) -> PyResult<Self> {
+            ) -> PyResult<PyClassInitializer<Self>> {
                 let dialect = parse_dialect(dialect.as_ref())?;
                 let events = Arc::new(PyEvents::new(event_callback));
                 let core = <$driver_ty>::with_transport(
@@ -411,18 +381,13 @@ macro_rules! grbl_driver {
                     dialect,
                     events.clone(),
                 );
-                Ok(Self { core, events })
+                let base = crate::python::driver::PyDriver::new(
+                    core.clone(),
+                    events,
+                );
+                Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
             }
         }
-
-        impl Drop for $cls {
-            fn drop(&mut self) {
-                self.events.close();
-                Driver::abort_background_tasks_now(&*self.core);
-            }
-        }
-
-        uniform_session_api!($cls);
     };
 }
 
@@ -463,5 +428,3 @@ grbl_driver!(
     GrblNetworkDriver,
     network_transport
 );
-
-use crate::python::session_api::uniform_session_api;

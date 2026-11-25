@@ -9,6 +9,11 @@
 //! onto the generic device state and completes jobs from the
 //! server's print events.
 
+use crate::core::driver::{
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -124,6 +129,21 @@ pub struct OctoPrintDriver {
     connection_task: Mutex<Option<JoinHandle<()>>>,
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "OctoPrintDriver",
+    connection: ConnectionKind::Network,
+    maturity: DriverMaturity::Untested,
+    caps: caps(
+        false, true, false, true, true, false, true, true, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &["host", "port", "path", "api_key"],
+    fingerprint: None,
+};
 
 impl OctoPrintDriver {
     pub async fn jog_absolute(
@@ -688,6 +708,10 @@ fn sockjs_payloads(frame: &str) -> Vec<Value> {
 /// of every operation the protocol supports.
 #[async_trait]
 impl Driver for OctoPrintDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

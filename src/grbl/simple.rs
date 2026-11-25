@@ -18,6 +18,11 @@
 //! response during a job halts the stream and triggers the safety
 //! shutdown.
 
+use crate::core::driver::{
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -88,6 +93,21 @@ pub struct GrblSerialSimpleDriver {
     config: GrblSimpleConfig,
     report_in_inches: AtomicBool,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "GrblSerialSimpleDriver",
+    connection: ConnectionKind::Serial,
+    maturity: DriverMaturity::Stable,
+    caps: caps(
+        true, true, true, true, false, true, true, true, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &["port", "baudrate"],
+    fingerprint: None,
+};
 
 impl GrblSerialSimpleDriver {
     pub fn new(
@@ -365,6 +385,10 @@ impl PingPongDriver for GrblSerialSimpleDriver {
 /// operations carry their real bodies here.
 #[async_trait]
 impl Driver for GrblSerialSimpleDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.base.state()
     }

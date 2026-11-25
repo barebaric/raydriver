@@ -3,10 +3,38 @@
 use std::sync::Arc;
 
 use crate::core::dialect::Dialect;
-use crate::core::driver::{delegate_driver, DriverEvents};
+use crate::core::driver::{
+    delegate_driver,
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverEvents, DriverInfo, DriverMaturity, ProbeFingerprint,
+};
 use crate::core::transport::TransportKind;
 
 use super::stream::{GrblStream, GrblStreamConfig};
+
+/// Typed identity and capabilities of the serial GRBL driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "GrblSerialDriver",
+    connection: ConnectionKind::Serial,
+    maturity: DriverMaturity::Stable,
+    caps: caps(
+        true, true, true, true, false, true, true, true, false, true, true,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &[
+        "port",
+        "baudrate",
+        "poll_status_while_running",
+        "deadlock_detection",
+        "rx_buffer_size_override",
+    ],
+    fingerprint: Some(ProbeFingerprint {
+        command: "$I",
+        signature: "VER:",
+    }),
+};
 
 /// A GRBL-compatible device on a serial port.
 pub struct GrblSerialDriver {
@@ -41,7 +69,7 @@ impl GrblSerialDriver {
         events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            stream: GrblStream::new(transport, config, dialect, events),
+            stream: GrblStream::new(transport, config, &INFO, dialect, events),
         })
     }
 }

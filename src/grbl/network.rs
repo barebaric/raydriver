@@ -3,11 +3,33 @@
 use std::sync::Arc;
 
 use crate::core::dialect::Dialect;
-use crate::core::driver::{delegate_driver, DriverEvents};
+use crate::core::driver::{
+    delegate_driver,
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverEvents, DriverInfo, DriverMaturity,
+};
 use crate::core::transport::TransportKind;
 use crate::esp3d::transport::{Esp3dConfig, Esp3dTransport};
 
 use super::stream::{GrblStream, GrblStreamConfig};
+
+/// A GRBL-compatible device on the FluidNC / ESP3D HTTP + WebSocket
+/// interface.  Commands travel over HTTP; jobs are uploaded whole and
+/// started, and status is reported over the WebSocket.
+/// Typed identity and capabilities of the network GRBL driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "GrblNetworkDriver",
+    connection: ConnectionKind::Network,
+    maturity: DriverMaturity::Stable,
+    caps: caps(
+        true, true, true, true, false, false, true, true, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &["host", "http_port", "ws_port", "protocol"],
+    fingerprint: None,
+};
 
 /// A GRBL-compatible device on the FluidNC / ESP3D HTTP + WebSocket
 /// interface.  Commands travel over HTTP; jobs are uploaded whole and
@@ -40,7 +62,7 @@ impl GrblNetworkDriver {
         events: Arc<dyn DriverEvents>,
     ) -> Arc<Self> {
         Arc::new(Self {
-            stream: GrblStream::new(transport, config, dialect, events),
+            stream: GrblStream::new(transport, config, &INFO, dialect, events),
         })
     }
 }

@@ -19,6 +19,11 @@
 //! other line sessions via [`core::line_driver`]; this module only
 //! holds the Smoothie-specific dispatch and hooks.
 
+use crate::core::driver::{
+    info::{caps, DEFAULT_SUPPORTED_WCS},
+    ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::borrow::Cow;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -74,6 +79,21 @@ pub struct SmoothieDriver {
     base: LineDriverBase,
     config: SmoothieConfig,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "SmoothieDriver",
+    connection: ConnectionKind::Telnet,
+    maturity: DriverMaturity::Stable,
+    caps: caps(
+        false, true, false, true, true, true, true, true, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: DEFAULT_SUPPORTED_WCS,
+    config_keys: &["host", "tcp_port"],
+    fingerprint: None,
+};
 
 impl SmoothieDriver {
     pub fn new(
@@ -311,6 +331,10 @@ impl PingPongDriver for SmoothieDriver {
 /// carry their real bodies here.
 #[async_trait]
 impl Driver for SmoothieDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.base.state()
     }

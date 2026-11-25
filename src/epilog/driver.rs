@@ -3,6 +3,10 @@
 //! See the module docs for the wire exchange. The session opens one
 //! connection per operation and never retries a partial job.
 
+use crate::core::driver::{
+    info::caps, ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -110,6 +114,22 @@ pub struct EpilogDriver {
     upload_seq: AtomicU64,
     upload: Mutex<Option<ActiveUpload>>,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "EpilogDriver",
+    connection: ConnectionKind::Network,
+    maturity: DriverMaturity::Experimental,
+    caps: caps(
+        false, false, false, false, false, false, false, false, false, false,
+        false,
+    ),
+    uses_gcode: false,
+    machine_space_wcs: "MACHINE",
+    supported_wcs: &[],
+    config_keys: &["host", "port", "queue", "timeout"],
+    fingerprint: None,
+};
 
 impl EpilogDriver {
     pub fn new(config: EpilogConfig, events: Arc<dyn DriverEvents>) -> Self {
@@ -536,6 +556,10 @@ fn sanitize_title(title: &str) -> String {
 
 #[async_trait]
 impl Driver for EpilogDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     async fn connect(self: Arc<Self>) -> Result<(), DriverError> {
         self.connection(TransportStatus::Connecting, None);
         match self.probe().await {

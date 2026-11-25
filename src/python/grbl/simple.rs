@@ -13,7 +13,6 @@ use crate::core::transport::TransportKind;
 use crate::grbl::simple::{GrblSerialSimpleDriver, GrblSimpleConfig};
 
 use crate::python::core::mock::MockTransport;
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{get_bool, get_f64, parse_dialect};
 use crate::python::grbl::probe::GrblDeviceInfo;
@@ -83,16 +82,16 @@ fn build_simple_config(
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "GrblSerialSimpleDriver", module = "raydriver.grbl.simple")]
+#[pyclass(name = "GrblSerialSimpleDriver", module = "raydriver.grbl.simple", extends = crate::python::driver::PyDriver)]
 pub struct PyGrblSerialSimpleDriver {
     core: Arc<GrblSerialSimpleDriver>,
-    events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
 impl PyGrblSerialSimpleDriver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "GrblSerialSimpleDriver"))]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
@@ -107,18 +106,19 @@ impl PyGrblSerialSimpleDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let kind =
             crate::python::grbl::driver::serial_transport(config.as_ref())?;
         let simple_config = build_simple_config(config.as_ref())?;
-        Self::build(kind, simple_config, dialect, event_callback)
+        Self::initializer(kind, simple_config, dialect, event_callback)
     }
 
     /// Build a driver around a [`MockTransport`] (for tests).
     #[staticmethod]
     #[pyo3(signature = (transport, config=None, dialect=None, event_callback=None))]
     fn with_transport(
+        py: Python<'_>,
         transport: PyRef<'_, MockTransport>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[typing.Union[dict, config.GrblSimpleConfig]]",
@@ -132,11 +132,14 @@ impl PyGrblSerialSimpleDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<Py<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = TransportKind::Mock(transport.inner.clone());
         let simple_config = build_simple_config(config.as_ref())?;
-        Self::build(kind, simple_config, dialect, event_callback)
+        Py::new(
+            py,
+            Self::initializer(kind, simple_config, dialect, event_callback)?,
+        )
     }
 
     /// Run the device census: query `$I` and `$$`, and return the
@@ -160,24 +163,6 @@ impl PyGrblSerialSimpleDriver {
         })
     }
 
-    /// Current snapshot of the device state.
-    #[getter]
-    fn state(&self) -> DeviceState {
-        DeviceState::new(Driver::state(&*self.core))
-    }
-
-    /// True while a job is running or held.
-    #[getter]
-    fn job_running(&self) -> bool {
-        Driver::is_job_running(&*self.core)
-    }
-
-    /// Identifier of the physical resource, or `None`.
-    #[getter]
-    fn resource_uri(&self) -> Option<String> {
-        Driver::resource_uri(&*self.core)
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "GrblSerialSimpleDriver(resource_uri={:?}, job_running={})",
@@ -188,17 +173,18 @@ impl PyGrblSerialSimpleDriver {
 }
 
 impl PyGrblSerialSimpleDriver {
-    fn build(
+    fn initializer(
         kind: TransportKind,
         config: GrblSimpleConfig,
         dialect: Option<Bound<'_, PyDict>>,
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
         let core =
             GrblSerialSimpleDriver::new(kind, config, dialect, events.clone());
-        Ok(Self { core, events })
+        let base = crate::python::driver::PyDriver::new(core.clone(), events);
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
 }
 
@@ -208,7 +194,3 @@ pub(crate) fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGrblSerialSimpleDriver>()?;
     Ok(())
 }
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyGrblSerialSimpleDriver);

@@ -9,7 +9,6 @@ use pyo3::types::PyDict;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
 use crate::core::driver::Driver;
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{get_bool, get_f64, get_i64, get_str};
 use crate::python::pyfuture::{spawn_future, PyAwait};
@@ -49,17 +48,20 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<M2Config> {
 /// This session does not upload G-code jobs. `start` controls a job
 /// that is already staged on the device, such as a job sent by xTool
 /// Studio.
-#[pyclass(name = "XtoolM2Driver", module = "raydriver.xtool.m2")]
+#[pyclass(name = "XtoolM2Driver", module = "raydriver.xtool.m2", extends = crate::python::driver::PyDriver)]
 pub struct PyXtoolM2Driver {
     core: Arc<XtoolM2Driver>,
-    events: Arc<PyEvents>,
 }
 
 impl PyXtoolM2Driver {
-    fn build(config: M2Config, event_callback: Option<Py<PyAny>>) -> Self {
+    fn initializer(
+        config: M2Config,
+        event_callback: Option<Py<PyAny>>,
+    ) -> PyResult<PyClassInitializer<Self>> {
         let events = Arc::new(PyEvents::new(event_callback));
         let core = XtoolM2Driver::new(config, events.clone());
-        Self { core, events }
+        let base = crate::python::driver::PyDriver::new(core.clone(), events);
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
 }
 
@@ -67,6 +69,7 @@ impl PyXtoolM2Driver {
 #[pymethods]
 impl PyXtoolM2Driver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "XtoolM2Driver"))]
     #[pyo3(signature = (config, event_callback=None))]
     /// Create an M2 session for the configured host.
     fn new(
@@ -81,9 +84,9 @@ impl PyXtoolM2Driver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
-        Ok(Self::build(build_config(config.as_ref())?, event_callback))
+        Self::initializer(build_config(config.as_ref())?, event_callback)
     }
     /// Start a job already staged on the device.
     fn start<'py>(&self, py: Python<'py>) -> PyResult<PyAwait<'py, ()>> {
@@ -94,21 +97,9 @@ impl PyXtoolM2Driver {
         })
     }
     #[getter]
-    /// Current snapshot of the machine state.
-    fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
-    }
-
-    #[getter]
     /// Whether the state currently indicates an active or held job.
     fn is_job_running(&self) -> bool {
         self.core.is_job_running()
-    }
-
-    #[getter]
-    /// WebSocket URI of the configured device.
-    fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
     }
 
     fn __repr__(&self) -> String {
@@ -119,14 +110,3 @@ impl PyXtoolM2Driver {
         )
     }
 }
-
-impl Drop for PyXtoolM2Driver {
-    fn drop(&mut self) {
-        self.events.close();
-        self.core.abort_background_tasks_now();
-    }
-}
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyXtoolM2Driver);

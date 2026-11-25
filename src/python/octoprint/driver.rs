@@ -10,7 +10,6 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use crate::core::driver::Driver;
 use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
 use crate::python::core::json::{value_to_dict, JsonDict};
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{get_f64, get_i64, get_str};
 use crate::python::octoprint::probe::OctoPrintDeviceInfo;
@@ -60,20 +59,20 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<OctoPrintConfig> {
 /// Operations the OctoPrint API cannot perform (e.g. writing
 /// firmware settings) raise `NotImplementedError`.
 #[gen_stub_pyclass(module = "raydriver.octoprint")]
-#[pyclass(name = "OctoPrintDriver", module = "raydriver.octoprint")]
+#[pyclass(name = "OctoPrintDriver", module = "raydriver.octoprint", extends = crate::python::driver::PyDriver)]
 pub struct PyOctoPrintDriver {
     core: Arc<OctoPrintDriver>,
-    events: Arc<PyEvents>,
 }
 
 impl PyOctoPrintDriver {
-    fn build(
+    fn initializer(
         config: OctoPrintConfig,
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let events = Arc::new(PyEvents::new(event_callback));
         let core = OctoPrintDriver::new(config, events.clone());
-        Ok(Self { core, events })
+        let base = crate::python::driver::PyDriver::new(core.clone(), events);
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
 }
 
@@ -81,6 +80,7 @@ impl PyOctoPrintDriver {
 #[pymethods]
 impl PyOctoPrintDriver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "OctoPrintDriver"))]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
@@ -100,11 +100,11 @@ impl PyOctoPrintDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let _ = dialect;
         let config = crate::python::config::config_dict(config.as_ref())?;
         let config = build_config(config.as_ref())?;
-        Self::build(config, event_callback)
+        Self::initializer(config, event_callback)
     }
 
     /// Fetch the census payloads (the parsed ``/api/version`` and
@@ -142,22 +142,6 @@ impl PyOctoPrintDriver {
             })
         })
     }
-    /// Current snapshot of the printer state.
-    #[getter]
-    fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
-    }
-
-    #[getter]
-    fn job_running(&self) -> bool {
-        self.core.is_job_running()
-    }
-
-    #[getter]
-    fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "OctoPrintDriver(resource_uri={:?}, job_running={})",
@@ -166,7 +150,3 @@ impl PyOctoPrintDriver {
         )
     }
 }
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyOctoPrintDriver);

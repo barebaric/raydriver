@@ -2,6 +2,10 @@
 //! the proprietary HTTP API, and job execution with its WebSocket
 //! job-state events.
 
+use crate::core::driver::{
+    info::caps, ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -97,6 +101,21 @@ pub struct XtoolNetworkDriver {
     connection_task: Mutex<Option<JoinHandle<()>>>,
     background_tasks: Mutex<Vec<JoinHandle<()>>>,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "XtoolNetworkDriver",
+    connection: ConnectionKind::Network,
+    maturity: DriverMaturity::Experimental,
+    caps: caps(
+        false, true, true, true, false, false, true, false, false, true, false,
+    ),
+    uses_gcode: true,
+    machine_space_wcs: "G53",
+    supported_wcs: &[],
+    config_keys: &["host", "http_port", "ws_port"],
+    fingerprint: None,
+};
 
 impl XtoolNetworkDriver {
     pub fn new(
@@ -756,6 +775,10 @@ fn format_power(template: &str, power: f64) -> String {
 /// of every operation the protocol supports.
 #[async_trait]
 impl Driver for XtoolNetworkDriver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

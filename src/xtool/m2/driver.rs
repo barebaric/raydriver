@@ -12,6 +12,10 @@
 //! `ok`/`error` acks; a parked request fails when the socket drops
 //! (`fail_pending`) or at its per-request deadline.
 
+use crate::core::driver::{
+    info::caps, ConnectionKind, DriverInfo, DriverMaturity,
+};
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -93,6 +97,21 @@ pub struct XtoolM2Driver {
     connection: AsyncMutex<Option<Arc<M2Connection>>>,
     connection_task: Mutex<Option<JoinHandle<()>>>,
 }
+
+/// Typed identity and capabilities of this driver.
+pub static INFO: DriverInfo = DriverInfo {
+    name: "XtoolM2Driver",
+    connection: ConnectionKind::Network,
+    maturity: DriverMaturity::Experimental,
+    caps: caps(
+        false, false, true, true, false, false, true, false, false, true, false,
+    ),
+    uses_gcode: false,
+    machine_space_wcs: "G53",
+    supported_wcs: &[],
+    config_keys: &["host", "port", "tls_allow_invalid_certs"],
+    fingerprint: None,
+};
 
 impl XtoolM2Driver {
     pub fn new(config: M2Config, events: Arc<dyn DriverEvents>) -> Arc<Self> {
@@ -868,6 +887,10 @@ fn apply_mode(
 /// of every operation the protocol supports.
 #[async_trait]
 impl Driver for XtoolM2Driver {
+    fn info(&self) -> &'static crate::core::driver::DriverInfo {
+        &INFO
+    }
+
     fn state(&self) -> DeviceState {
         self.state.lock().unwrap().clone()
     }

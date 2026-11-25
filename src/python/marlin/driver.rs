@@ -10,7 +10,6 @@ use crate::core::dialect::Dialect;
 use crate::core::driver::Driver;
 use crate::core::transport::TransportKind;
 use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
-use crate::python::core::types::DeviceState;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{
     get_bool, get_f64, parse_dialect, serial_transport,
@@ -60,16 +59,16 @@ fn build_marlin_config(
 /// All async methods return asyncio futures; a typed `DriverEvent`
 /// is delivered to `event_callback(event)` on the event loop thread.
 #[gen_stub_pyclass]
-#[pyclass(name = "MarlinSerialDriver", module = "raydriver.marlin")]
+#[pyclass(name = "MarlinSerialDriver", module = "raydriver.marlin", extends = crate::python::driver::PyDriver)]
 pub struct PyMarlinSerialDriver {
     core: Arc<MarlinSerialDriver>,
-    events: Arc<PyEvents>,
 }
 
 #[gen_stub_pymethods]
 #[pymethods]
 impl PyMarlinSerialDriver {
     #[new]
+    #[gen_stub(override_return_type(type_repr = "MarlinSerialDriver"))]
     #[pyo3(signature = (config, dialect=None, event_callback=None))]
     fn new(
         #[gen_stub(override_type(
@@ -84,17 +83,18 @@ impl PyMarlinSerialDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = serial_transport(config.as_ref())?;
         let session_config = build_marlin_config(kind, config.as_ref())?;
-        Self::build(session_config, dialect, event_callback)
+        Self::initializer(session_config, dialect, event_callback)
     }
 
     /// Build a session around a [`MockTransport`] (for tests).
     #[staticmethod]
     #[pyo3(signature = (transport, config=None, dialect=None, event_callback=None))]
     fn with_transport(
+        py: Python<'_>,
         transport: PyRef<'_, crate::python::core::mock::MockTransport>,
         #[gen_stub(override_type(
             type_repr = "typing.Optional[typing.Union[dict, config.MarlinConfig]]",
@@ -108,11 +108,14 @@ impl PyMarlinSerialDriver {
             imports = ("builtins", "collections.abc", "typing", "raydriver.core")
         ))]
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<Py<Self>> {
         let config = crate::python::config::config_dict(config.as_ref())?;
         let kind = TransportKind::Mock(transport.inner.clone());
         let session_config = build_marlin_config(kind, config.as_ref())?;
-        Self::build(session_config, dialect, event_callback)
+        Py::new(
+            py,
+            Self::initializer(session_config, dialect, event_callback)?,
+        )
     }
 
     /// Open the connection and start the background tasks.
@@ -144,54 +147,25 @@ impl PyMarlinSerialDriver {
             })
         })
     }
-    /// Current snapshot of the device state.
-    #[getter]
-    fn state(&self) -> DeviceState {
-        DeviceState::new(self.core.state())
-    }
-
-    #[getter]
-    fn job_running(&self) -> bool {
-        self.core.is_job_running()
-    }
-
-    #[getter]
-    fn resource_uri(&self) -> Option<String> {
-        self.core.resource_uri()
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "MarlinSerialDriver(resource_uri={:?}, job_running={})",
-            self.resource_uri(),
-            self.job_running()
+            Driver::resource_uri(&*self.core),
+            Driver::is_job_running(&*self.core)
         )
     }
 }
 
 impl PyMarlinSerialDriver {
-    fn build(
+    fn initializer(
         config: MarlinConfig,
         dialect: Option<Bound<'_, PyDict>>,
         event_callback: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
+    ) -> PyResult<PyClassInitializer<Self>> {
         let dialect: Dialect = parse_dialect(dialect.as_ref())?;
         let events = Arc::new(PyEvents::new(event_callback));
         let core = MarlinSerialDriver::new(config, dialect, events.clone());
-        Ok(Self { core, events })
+        let base = crate::python::driver::PyDriver::new(core.clone(), events);
+        Ok(PyClassInitializer::from(base).add_subclass(Self { core }))
     }
 }
-
-impl Drop for PyMarlinSerialDriver {
-    fn drop(&mut self) {
-        // Stop the background tasks even when the session is dropped
-        // without disconnect(); otherwise they orphan on the shared
-        // runtime and marshal events onto a possibly-closed loop.
-        self.events.close();
-        self.core.abort_background_tasks_now();
-    }
-}
-
-use crate::python::session_api::uniform_session_api;
-
-uniform_session_api!(PyMarlinSerialDriver);
