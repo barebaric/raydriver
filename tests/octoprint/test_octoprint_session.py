@@ -2,9 +2,10 @@
 emulator (raydriver.octoprint.emulator)."""
 
 import asyncio
+import json
 
 import pytest
-from conftest import EventRecorder
+from conftest import EventRecorder, wait_until
 
 from raydriver.core import DriverEvent
 from raydriver.driver import driver_info
@@ -126,6 +127,96 @@ class TestConnection:
             lambda event: event.state.status.name == "IDLE",
         )
 
+    async def test_websocket_authenticates_immediately(self, rig):
+        # ``/sockjs/websocket`` sends no ``o`` open frame; the auth
+        # message must go out right after connecting, or OctoPrint
+        # withholds status updates and the driver stays UNKNOWN.
+        _session, emulator, _events = rig
+        await wait_until(
+            lambda: any("auth" in msg for msg in emulator.ws_messages)
+        )
+        auth = json.loads(emulator.ws_messages[0])
+        assert auth == {"auth": "rayforge:emulator-session-key"}
+
+    async def test_state_updates_from_raw_json_frame(self, rig):
+        session, emulator, _events = rig
+        await wait_until(lambda: emulator.ws_messages)
+        emulator.send_frame(
+            json.dumps(
+                {
+                    "current": {
+                        "state": {
+                            "text": "Printing",
+                            "flags": {
+                                "operational": True,
+                                "printing": True,
+                            },
+                        }
+                    }
+                }
+            )
+        )
+        await wait_until(lambda: session.state.status.name == "RUN")
+
+    async def test_state_updates_from_sockjs_batch(self, rig):
+        session, emulator, _events = rig
+        await wait_until(lambda: emulator.ws_messages)
+        payload = json.dumps(
+            {
+                "current": {
+                    "state": {
+                        "text": "Paused",
+                        "flags": {
+                            "operational": True,
+                            "paused": True,
+                        },
+                    }
+                }
+            }
+        )
+        emulator.send_frame("a" + json.dumps([payload]))
+        await wait_until(lambda: session.state.status.name == "HOLD")
+
+    async def test_framed_transport_pushes_batches(self, events):
+        emu = OctoPrintEmulator(framed_ws=True)
+        await emu.start()
+        try:
+            session = make_session(events, emu)
+            await session.connect()
+            await events.wait_for(
+                DriverEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            emu.set_state_text(
+                "Printing",
+                operational=True,
+                printing=True,
+            )
+            await wait_until(lambda: session.state.status.name == "RUN")
+            await session.disconnect()
+        finally:
+            await emu.stop()
+
+
+class TestPathPrefix:
+    async def test_path_prefix_routes_api_and_websocket(self, events):
+        emu = OctoPrintEmulator(path_prefix="/octoprint")
+        await emu.start()
+        try:
+            session = make_session(events, emu, config={"path": "/octoprint"})
+            await session.connect()
+            await events.wait_for(
+                DriverEvent.ConnectionStatusChanged,
+                lambda event: event.status == "CONNECTED",
+            )
+            info = await session.probe_device()
+            assert info.server_version == "1.9.3"
+            await session.run_raw("M999")
+            assert {"command": "M999"} in emu.commands
+            await session.disconnect()
+        finally:
+            await emu.stop()
+
 
 class TestJobs:
     async def test_run_uploads_and_completes(self, rig):
@@ -166,6 +257,13 @@ class TestJobs:
         await session.cancel()
         await events.wait_for(DriverEvent.JobFinished)
         await run_task
+        assert {"command": "cancel"} in emulator.commands
+
+    async def test_cancel_without_a_job_is_a_noop(self, rig):
+        # OctoPrint answers 409 when nothing is printing; that must
+        # not surface as a device error.
+        session, emulator, _events = rig
+        await session.cancel()
         assert {"command": "cancel"} in emulator.commands
 
     async def test_busy_server_rejects_upload(self, emulator, events):

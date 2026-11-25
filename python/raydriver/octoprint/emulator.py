@@ -2,10 +2,15 @@
 
 Speaks the protocol the OctoPrint session expects: the authenticated
 REST API (login, version, printer state, job control, printer
-commands, file upload) and the SockJS WebSocket carrying push
+commands, file upload) and the raw SockJS WebSocket carrying push
 updates, both served on one port. The printer state model is
 simplified but faithful where the session observes it: state flags,
 job progress and the terminal print events.
+
+``/sockjs/websocket`` is the raw transport: it sends no ``o`` open
+frame, expects the auth message as plain JSON, and pushes plain JSON
+messages. Set ``framed_ws=True`` to emulate a SockJS-framed peer
+(``o`` open frame, ``a[...]`` batches) instead.
 
 Used by the test suite for hardware-free session coverage.
 """
@@ -48,6 +53,13 @@ def _parse_headers(raw: bytes) -> dict:
         if name.strip():
             headers[name.strip().lower()] = value.strip()
     return headers
+
+
+def _normalize_path_prefix(path: str) -> str:
+    prefix = (path or "/").strip()
+    while len(prefix) > 1 and prefix.endswith("/"):
+        prefix = prefix[:-1]
+    return "" if prefix == "/" else prefix
 
 
 def _parse_multipart(content_type: str, body: bytes) -> dict:
@@ -94,8 +106,12 @@ class OctoPrintEmulator:
         version=None,
         printer_info=None,
         require_auth=True,
+        path_prefix="/",
+        framed_ws=False,
     ):
         self.api_key = api_key
+        self.path_prefix = _normalize_path_prefix(path_prefix)
+        self.framed_ws = framed_ws
         self.version = dict(DEFAULT_VERSION)
         if version:
             self.version.update(version)
@@ -106,6 +122,7 @@ class OctoPrintEmulator:
         self.state = json.loads(json.dumps(DEFAULT_STATE))
         self.commands: list[dict] = []
         self.uploaded: list[bytes] = []
+        self.ws_messages: list[str] = []
         self.job_active = False
         self.job_completion: float | None = None
         self.fail_next_upload = False
@@ -170,12 +187,18 @@ class OctoPrintEmulator:
         self._push(json.dumps({"event": {"type": event_type}}))
 
     def _push(self, payload: str):
-        # SockJS data frames wrap the JSON-string messages in an
-        # ``a[...]`` array frame.
-        frame = "a" + json.dumps([payload])
+        frame = payload
+        if self.framed_ws:
+            # SockJS data frames wrap the JSON-string messages in an
+            # ``a[...]`` array frame.
+            frame = "a" + json.dumps([payload])
+        self.send_frame(frame)
+
+    def send_frame(self, text: str):
+        """Sends one raw text frame to every connected client."""
         for writer in list(self._ws_clients):
             try:
-                self._ws_send(writer, frame)
+                self._ws_send(writer, text)
             except (ConnectionError, OSError):
                 if writer in self._ws_clients:
                     self._ws_clients.remove(writer)
@@ -194,6 +217,20 @@ class OctoPrintEmulator:
             "utf-8", errors="replace"
         )
         if headers.get("upgrade", "").lower() == "websocket":
+            target = headers["__request_line__"].split(" ")[1]
+            path = target.split("?", 1)[0]
+            if self.path_prefix and not (
+                path == self.path_prefix
+                or path.startswith(self.path_prefix + "/")
+            ):
+                writer.write(
+                    b"HTTP/1.1 404 Not Found\r\n"
+                    b"Content-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n"
+                )
+                await writer.drain()
+                writer.close()
+                return
             await self._handle_ws(headers, reader, writer)
         else:
             await self._handle_http(headers, reader, writer)
@@ -204,7 +241,11 @@ class OctoPrintEmulator:
         # EOF.
         try:
             method, target, body = await self._read_request(headers, reader)
-            status, payload = self._route(method, target, headers, body)
+            target = self._strip_prefix(target)
+            if target is None:
+                status, payload = 404, {"error": "wrong path prefix"}
+            else:
+                status, payload = self._route(method, target, headers, body)
             data = json.dumps(payload).encode() if payload is not None else b""
             writer.write(
                 f"HTTP/1.1 {status} OK\r\n"
@@ -218,6 +259,15 @@ class OctoPrintEmulator:
             pass
         finally:
             writer.close()
+
+    def _strip_prefix(self, target: str):
+        if not self.path_prefix:
+            return target
+        if target == self.path_prefix:
+            return "/"
+        if target.startswith(self.path_prefix + "/"):
+            return target[len(self.path_prefix) :]
+        return None
 
     async def _read_request(self, headers, reader):
         method, target, _version = (
@@ -265,6 +315,8 @@ class OctoPrintEmulator:
             command = payload.get("command")
             self.commands.append(payload)
             if command == "cancel":
+                if not self.job_active:
+                    return 409, {"error": "no job to cancel"}
                 self.finish_print(success=True)
                 return 204, None
             if command == "pause":
@@ -319,22 +371,50 @@ class OctoPrintEmulator:
             await writer.drain()
             self._ws_clients.append(writer)
 
-            # SockJS open frame, then keep the connection open.
-            self._ws_send(writer, "o")
+            if self.framed_ws:
+                self._ws_send(writer, "o")
             while True:
                 opcode, payload = await self._ws_read_frame(reader)
                 if opcode is None or opcode == 0x8:
                     break
                 if opcode == 0x9:
                     self._ws_send_pong(writer, payload)
-                # Auth frames are accepted and ignored; the emulator
-                # serves updates to every connected client.
+                elif opcode == 0x1:
+                    text = payload.decode("utf-8", errors="replace")
+                    self.ws_messages.append(text)
+                    if self._is_auth_message(text):
+                        # Real OctoPrint sends the current state
+                        # right after authenticating the socket.
+                        self._push_current()
+                # Auth frames are recorded but not enforced; the
+                # emulator serves updates to every connected client.
         except (ConnectionError, OSError, asyncio.IncompleteReadError):
             pass
         finally:
             if writer in self._ws_clients:
                 self._ws_clients.remove(writer)
             writer.close()
+
+    @staticmethod
+    def _is_auth_message(text: str) -> bool:
+        def has_auth(value) -> bool:
+            return isinstance(value, dict) and "auth" in value
+
+        try:
+            parsed = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        if isinstance(parsed, list):
+            for item in parsed:
+                if isinstance(item, str):
+                    try:
+                        item = json.loads(item)
+                    except json.JSONDecodeError:
+                        continue
+                if has_auth(item):
+                    return True
+            return False
+        return has_auth(parsed)
 
     def _ws_send(self, writer, text: str):
         # Server-to-client frames are never masked (RFC 6455).

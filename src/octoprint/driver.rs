@@ -238,6 +238,16 @@ impl OctoPrintDriver {
         path: &str,
         body: Option<Value>,
     ) -> Result<Option<Value>, DriverError> {
+        self.api_request_allowing(method, path, body, &[]).await
+    }
+
+    async fn api_request_allowing(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+        allowed_statuses: &[u16],
+    ) -> Result<Option<Value>, DriverError> {
         let timeout = self.config.secs(self.config.request_timeout);
         let headers = [("X-Api-Key", self.api_key())];
         let headers: Vec<(&str, &str)> =
@@ -278,7 +288,9 @@ impl OctoPrintDriver {
                     .to_string(),
             ));
         }
-        if !(200..300).contains(&response.status) {
+        if !(200..300).contains(&response.status)
+            && !allowed_statuses.contains(&response.status)
+        {
             return Err(DriverError::Device(format!(
                 "unexpected HTTP status {} from {path}",
                 response.status
@@ -410,26 +422,18 @@ impl OctoPrintDriver {
         )
         .await?;
 
-        // SockJS opens with an "o" (open) frame; "c[...]" is a
-        // close frame. After the open frame, authenticate the
-        // socket when a passive login gave us credentials.
-        let first = ws.receive().await?;
-        if first.starts_with("c[") {
-            return Err(DriverError::Connection(
-                "server closed the WebSocket connection".to_string(),
-            ));
-        }
-        if first == "o" {
-            let auth = self.session_auth.lock().unwrap().clone();
-            if let Some((session_key, user_name)) = auth {
-                if !session_key.is_empty() && !user_name.is_empty() {
-                    let inner = json!({
-                        "auth": format!("{user_name}:{session_key}")
-                    });
-                    // SockJS array elements are JSON *strings*.
-                    ws.send_text(&json!([inner.to_string()]).to_string())
-                        .await?;
-                }
+        // ``/sockjs/websocket`` is SockJS's raw WebSocket
+        // transport: it sends no ``o`` open frame and uses no
+        // framing, so the auth message goes out right after
+        // connecting. Without it OctoPrint withholds status updates
+        // and the driver stays at UNKNOWN.
+        let auth = self.session_auth.lock().unwrap().clone();
+        if let Some((session_key, user_name)) = auth {
+            if !session_key.is_empty() && !user_name.is_empty() {
+                let message = json!({
+                    "auth": format!("{user_name}:{session_key}")
+                });
+                ws.send_text(&message.to_string()).await?;
             }
         }
 
@@ -438,6 +442,11 @@ impl OctoPrintDriver {
                 return Ok(());
             }
             let frame = ws.receive().await?;
+            if frame.starts_with("c[") {
+                return Err(DriverError::Connection(
+                    "server closed the WebSocket connection".to_string(),
+                ));
+            }
             for message in sockjs_payloads(&frame) {
                 self.process_push_message(&message);
             }
@@ -679,32 +688,32 @@ impl OctoPrintDriver {
     }
 }
 
-/// Extracts the JSON payloads of a SockJS data frame: "o"/"h" are
-/// protocol frames (no payload), "a[...]" wraps an array of
-/// JSON-string messages, "c[...]" closes the session.
+/// Extracts the JSON payloads of a push frame: "o"/"h" are protocol
+/// frames (no payload), "a[...]" wraps an array of JSON-string
+/// messages, and the raw transport delivers message objects as plain
+/// JSON text.
 fn sockjs_payloads(frame: &str) -> Vec<Value> {
     if frame == "o" || frame == "h" {
         return Vec::new();
     }
-    if frame.starts_with("c[") {
-        log::info!("SockJS close frame received");
-        return Vec::new();
+    if let Some(messages_json) = frame.strip_prefix("a[") {
+        let Ok(messages) =
+            serde_json::from_str::<Vec<Value>>(&format!("[{messages_json}"))
+        else {
+            return Vec::new();
+        };
+        return messages
+            .into_iter()
+            .filter_map(|raw_msg| match raw_msg {
+                Value::String(text) => serde_json::from_str(&text).ok(),
+                value => Some(value),
+            })
+            .collect();
     }
-    let Some(messages_json) = frame.strip_prefix("a[") else {
-        return Vec::new();
-    };
-    let Ok(messages) =
-        serde_json::from_str::<Vec<Value>>(&format!("[{messages_json}"))
-    else {
-        return Vec::new();
-    };
-    messages
-        .into_iter()
-        .filter_map(|raw_msg| match raw_msg {
-            Value::String(text) => serde_json::from_str(&text).ok(),
-            value => Some(value),
-        })
-        .collect()
+    serde_json::from_str::<Value>(frame)
+        .ok()
+        .map(|value| vec![value])
+        .unwrap_or_default()
 }
 
 /// The session's [`Driver`] impl: the single, real implementation
@@ -883,10 +892,13 @@ impl Driver for OctoPrintDriver {
     }
 
     async fn cancel(&self, _mode: CancelMode) -> Result<(), DriverError> {
-        self.api_request(
+        // OctoPrint answers 409 when there is no job to cancel; that
+        // is not an error.
+        self.api_request_allowing(
             "POST",
             "/api/job",
             Some(json!({"command": "cancel"})),
+            &[409],
         )
         .await?;
         self.finish_job(true);
