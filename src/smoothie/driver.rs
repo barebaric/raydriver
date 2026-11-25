@@ -394,7 +394,16 @@ impl Driver for SmoothieDriver {
         &self,
         command: &str,
     ) -> Result<Vec<String>, DriverError> {
-        line_driver::execute_command(self, command).await
+        // The acknowledgement and status reports are not reply
+        // lines; callers parse `version` and `config-get` values out
+        // of what remains.
+        let lines = line_driver::execute_command(self, command).await?;
+        Ok(lines
+            .into_iter()
+            .filter(|line| {
+                line != "ok" && !(line.starts_with('<') && line.ends_with('>'))
+            })
+            .collect())
     }
 
     async fn home(

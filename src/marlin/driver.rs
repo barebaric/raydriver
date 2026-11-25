@@ -475,7 +475,10 @@ impl Driver for MarlinSerialDriver {
         &self,
         command: &str,
     ) -> Result<Vec<String>, DriverError> {
-        line_driver::execute_command(self, command).await
+        // The terminating `ok` is the acknowledgement, not part of
+        // the reply callers parse (M115/M211/M503/M149).
+        let lines = line_driver::execute_command(self, command).await?;
+        Ok(lines.into_iter().filter(|line| line != "ok").collect())
     }
 
     async fn home(

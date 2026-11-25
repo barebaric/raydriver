@@ -252,6 +252,7 @@ class TestEmulatorJobs:
     async def test_m115_probing(self, marlin_rig):
         session, mock, emulator, events = marlin_rig
         lines = await session.execute_interactive_command("M115")
+        assert "ok" not in lines
         info = parse_m115_firmware_info(lines)
         assert info["firmware_name"].startswith("Marlin")
 

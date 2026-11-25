@@ -231,11 +231,11 @@ class TestEmulatorJobs:
         session, mock, emulator, events = smoothie_rig
         version = await session.execute_interactive_command("version")
         assert version[0].startswith("Build version:")
-        assert version[-1] == "ok"
+        assert "ok" not in version
         alpha_max = await session.execute_interactive_command(
             "config-get alpha_max"
         )
-        assert alpha_max == ["200.0000", "ok"]
+        assert alpha_max == ["200.0000"]
 
     async def test_cancel_aborts_job(self, smoothie_rig):
         session, mock, emulator, events = smoothie_rig
