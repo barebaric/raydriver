@@ -14,3 +14,4 @@
 pub mod epilog;
 pub mod gcode;
 pub mod gcode_types;
+pub mod ruida;

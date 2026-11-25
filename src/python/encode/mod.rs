@@ -20,6 +20,7 @@ use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 use crate::encode::epilog::EpilogSpec;
 use crate::encode::gcode::GcodeSpec;
 use crate::encode::gcode_types::GcodeDialectSpec;
+use crate::encode::ruida::RuidaSpec;
 use raygeo::ops::convert::{encoder_capsule_name, Encoder};
 
 /// Build the capsule that hands an encoder to raygeo.
@@ -245,6 +246,40 @@ impl PyEpilogSpec {
     }
 }
 
+/// Typed Python wrapper around the Rust ``RuidaSpec``.
+#[gen_stub_pyclass(module = "raydriver.encode")]
+#[pyclass(
+    module = "raydriver.encode",
+    name = "RuidaSpec",
+    frozen,
+    skip_from_py_object
+)]
+pub struct PyRuidaSpec {
+    #[pyo3(get)]
+    pub context_json: String,
+}
+
+#[gen_stub_pymethods]
+#[pymethods]
+impl PyRuidaSpec {
+    #[new]
+    fn new(context_json: String) -> Self {
+        PyRuidaSpec { context_json }
+    }
+
+    /// Hand this encoder to raygeo (capsule protocol).
+    #[gen_stub(skip)]
+    fn __raygeo_encoder__<'py>(
+        &self,
+        py: Python<'py>,
+    ) -> PyResult<Bound<'py, PyCapsule>> {
+        let encoder: Box<dyn Encoder> = Box::new(RuidaSpec {
+            context_json: self.context_json.clone(),
+        });
+        encoder_capsule(py, encoder)
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let py = m.py();
     let module = PyModule::new(py, "encode")?;
@@ -256,11 +291,12 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     )?;
     module.add(
         "__all__",
-        vec!["EpilogSpec", "GcodeDialectSpec", "GcodeSpec"],
+        vec!["EpilogSpec", "GcodeDialectSpec", "GcodeSpec", "RuidaSpec"],
     )?;
     module.add_class::<PyGcodeDialectSpec>()?;
     module.add_class::<PyGcodeSpec>()?;
     module.add_class::<PyEpilogSpec>()?;
+    module.add_class::<PyRuidaSpec>()?;
     crate::python::core::discovery::helpers::attach_submodule(
         m,
         &module,

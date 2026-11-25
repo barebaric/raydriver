@@ -7,6 +7,7 @@ __all__ = [
     "EpilogSpec",
     "GcodeDialectSpec",
     "GcodeSpec",
+    "RuidaSpec",
 ]
 
 @typing.final
@@ -43,4 +44,13 @@ class GcodeSpec:
     @property
     def context_json(self) -> builtins.str: ...
     def __new__(cls, dialect: GcodeDialectSpec, context_json: builtins.str) -> GcodeSpec: ...
+
+@typing.final
+class RuidaSpec:
+    r"""
+    Typed Python wrapper around the Rust ``RuidaSpec``.
+    """
+    @property
+    def context_json(self) -> builtins.str: ...
+    def __new__(cls, context_json: builtins.str) -> RuidaSpec: ...
 
