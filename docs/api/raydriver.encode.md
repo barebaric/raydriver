@@ -7,8 +7,8 @@ sidebar_label: raydriver.encode
 
 Parameters for the Epilog print-job encoder.
 
-`context_json` is a JSON-serialised `EpilogContext`: job title, resolution, frequency, bed size,
-speed reference, origin layout and the rotary flag.
+`context_json` is a JSON-serialised `EpilogContext`: model family, job title, resolution, frequency,
+autofocus, bed size, speed reference, origin layout and the rotary flag.
 
 ### `context_json`
 
