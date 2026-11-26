@@ -7,7 +7,13 @@ showing live progress while the job executes:
     raydriver run job.gcode --port /dev/ttyUSB0
     raydriver run job.gcode --port /dev/ttyUSB0 --log-file job.log
     raydriver run job.gcode --emulator
+    raydriver run job.rds --protocol ruida --host 192.168.1.50
+    raydriver run job.rds --protocol ruida --emulator --no-wait
     raydriver status --port /dev/ttyUSB0 --seconds 5
+
+Ruida controllers consume rpascript rather than G-code.  ``run``
+sends the whole script and, unless ``--no-wait`` is given, polls
+the controller until it reports idle again.
 
 Driver diagnostics (stall detection, liveness, unexpected device
 lines) go to stderr by default; ``--log-file`` redirects them to a
@@ -24,7 +30,11 @@ import time
 from collections.abc import Awaitable
 
 import raydriver.raydriver as _native
-from raydriver.cli.analyzer import add_analyzer_parser
+from raydriver.cli.analyzer import (
+    add_analyzer_parser,
+    add_protocol_arguments,
+    open_source_session,
+)
 from raydriver.cli.daemon import add_daemon_parser
 from raydriver.cli.debug import add_debug_parser
 from raydriver.core import DriverEvent
@@ -32,6 +42,7 @@ from raydriver.core.transport import MockTransport
 from raydriver.core.types import DeviceState
 from raydriver.grbl import GrblSerialDriver
 from raydriver.grbl.parser import strip_gcode_comments
+from raydriver.ruida import RuidaDriver
 
 
 def _fmt_seconds(seconds):
@@ -154,7 +165,126 @@ def _open_session(args, on_event):
     )
 
 
+#: How long to wait for the controller to report RUN before
+#: concluding that a script did not start a job.
+_RUIDA_START_GRACE = 3.0
+
+
+async def _wait_for_ruida_idle(session, timeout: float) -> bool:
+    """Wait until a sent Ruida job has finished.
+
+    Ruida has no job-complete event, so poll the machine status:
+    wait for RUN/HOLD, then for IDLE.  Scripts that only send live
+    commands never leave IDLE; treat them as done after a grace
+    period.  *timeout* <= 0 means no limit.
+    """
+    deadline = None if timeout <= 0 else time.monotonic() + timeout
+    start_deadline = time.monotonic() + _RUIDA_START_GRACE
+    started = False
+    while True:
+        if session.state.error is not None:
+            return False
+        status = session.state.status.name
+        if status in ("RUN", "HOLD"):
+            started = True
+        elif started and status == "IDLE":
+            return True
+        now = time.monotonic()
+        if not started and now >= start_deadline:
+            return True
+        if deadline is not None and now >= deadline:
+            return False
+        await asyncio.sleep(0.2)
+
+
+async def _run_ruida(args) -> int:
+    """Run an rpascript job on a Ruida controller."""
+    with open(args.file) as handle:
+        script = handle.read()
+    lines = [line for line in script.splitlines() if line.strip()]
+    if not lines:
+        print("error: no rpascript lines in file", file=sys.stderr)
+        return 2
+
+    connected = asyncio.get_running_loop().create_future()
+
+    def on_event(event: DriverEvent):
+        match event:
+            case DriverEvent.ConnectionStatusChanged(status="CONNECTED") if (
+                not connected.done()
+            ):
+                connected.set_result(True)
+            case DriverEvent.ConnectionStatusChanged(
+                status="ERROR", message=message
+            ) if not connected.done():
+                connected.set_exception(
+                    ConnectionError(message or "connection failed")
+                )
+
+    try:
+        session, device_task, source, cleanup = await open_source_session(
+            args, on_event
+        )
+    except ValueError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
+    assert isinstance(session, RuidaDriver)
+
+    print(f"Connecting to {source} ...")
+    try:
+        await session.connect()
+        try:
+            await asyncio.wait_for(connected, timeout=args.timeout)
+        except asyncio.TimeoutError:
+            print("error: controller did not respond", file=sys.stderr)
+            return 1
+        version = (
+            session.machine_status.get("mainboard_version")
+            or "Ruida controller"
+        )
+        print(f"Device: {version}")
+        print(
+            f"Job: {len(lines)} rpascript lines ({len(script.encode())} bytes)"
+        )
+        await session.run_raw(script)
+        if args.no_wait:
+            print("job sent")
+            return 0
+        print("waiting for the controller to become idle ...")
+        if await _wait_for_ruida_idle(session, args.wait_timeout):
+            print("done: controller idle")
+            return 0
+        error = session.state.error
+        if error is not None:
+            message = f"{error.title}: {error.description}"
+        else:
+            message = "controller did not become idle"
+        print(f"error: {message}", file=sys.stderr)
+        return 1
+    except asyncio.CancelledError:
+        print("\nInterrupted — stopping the job ...")
+        await asyncio.shield(session.cancel(emergency=True))
+        raise
+    except Exception as err:  # noqa: BLE001 - surfaced to the user
+        print(f"error: {err}", file=sys.stderr)
+        return 1
+    finally:
+        try:
+            await asyncio.shield(session.disconnect())
+        except Exception:  # noqa: BLE001 - teardown best effort
+            pass
+        if device_task is not None:
+            device_task.cancel()
+        if cleanup is not None:
+            try:
+                await cleanup()
+            except Exception:  # noqa: BLE001 - teardown best effort
+                pass
+
+
 async def cmd_run(args) -> int:
+    if getattr(args, "protocol", "grbl") == "ruida":
+        return await _run_ruida(args)
     with open(args.file) as handle:
         text = handle.read()
     lines = [raw for raw in text.splitlines() if strip_gcode_comments(raw)]
@@ -251,29 +381,29 @@ async def cmd_status(args) -> int:
 def build_parser():
     parser = argparse.ArgumentParser(
         prog="raydriver",
-        description="Test raydriver GRBL sessions against real "
-        "devices or the built-in firmware emulator.",
+        description="Test raydriver sessions against real devices "
+        "or the built-in firmware emulators.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def common(run_parser):
         run_parser.add_argument(
-            "--port", default="/dev/ttyUSB0", help="serial port"
+            "--port", default="/dev/ttyUSB0", help="serial port (GRBL)"
         )
         run_parser.add_argument(
-            "--baudrate", type=int, default=115200, help="baud rate"
+            "--baudrate", type=int, default=115200, help="baud rate (GRBL)"
         )
         run_parser.add_argument(
             "--emulator",
             action="store_true",
-            help="run against the built-in GRBL firmware emulator "
-            "instead of a serial port",
+            help="run against the built-in firmware emulator instead "
+            "of hardware",
         )
         run_parser.add_argument(
             "--speed-factor",
             type=float,
             default=2000.0,
-            help="emulator motion speed multiplier (emulator only)",
+            help="emulator motion speed multiplier (GRBL only)",
         )
         run_parser.add_argument(
             "--log-file",
@@ -284,10 +414,13 @@ def build_parser():
         )
 
     run_parser = subparsers.add_parser(
-        "run", help="stream a G-code file to the device"
+        "run", help="stream a G-code (GRBL) or rpascript (Ruida) file"
     )
     common(run_parser)
-    run_parser.add_argument("file", help="G-code file to execute")
+    add_protocol_arguments(run_parser, choices=["grbl", "ruida"])
+    run_parser.add_argument(
+        "file", help="G-code file (GRBL) or rpascript file (Ruida)"
+    )
     run_parser.add_argument(
         "--timeout",
         type=float,
@@ -297,7 +430,20 @@ def build_parser():
     run_parser.add_argument(
         "--no-poll",
         action="store_true",
-        help="disable status polling during the job",
+        help="disable status polling during the job (GRBL only)",
+    )
+    run_parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="return after sending; do not wait for the controller "
+        "to become idle (Ruida only)",
+    )
+    run_parser.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=0.0,
+        help="seconds to wait for the job to finish after sending "
+        "(0: no limit; Ruida only)",
     )
     run_parser.set_defaults(func=cmd_run)
 

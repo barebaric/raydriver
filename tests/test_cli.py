@@ -2,13 +2,23 @@
 
 import pytest
 
-from raydriver.cli.main import amain
+from raydriver.cli.main import amain, build_parser
 
 
 @pytest.fixture
 def gcode_file(tmp_path):
     def write(text):
         path = tmp_path / "job.gcode"
+        path.write_text(text)
+        return str(path)
+
+    return write
+
+
+@pytest.fixture
+def rpascript_file(tmp_path):
+    def write(text):
+        path = tmp_path / "job.rds"
         path.write_text(text)
         return str(path)
 
@@ -110,6 +120,94 @@ class TestRunCommand:
                     "0.3",
                 ]
             )
+
+
+class TestRunRuida:
+    async def test_job_sent_without_wait(self, rpascript_file, capsys):
+        path = rpascript_file("START_JOB\nEND_JOB\nEOF\n")
+        rc = await amain(
+            [
+                "run",
+                path,
+                "--protocol",
+                "ruida",
+                "--emulator",
+                "--no-wait",
+            ]
+        )
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "emulated Ruida controller" in out
+        assert "Device: RDC6442S" in out
+        assert "job sent" in out
+
+    async def test_job_waits_for_idle(
+        self, rpascript_file, capsys, monkeypatch
+    ):
+        import raydriver.cli.main as cli
+
+        monkeypatch.setattr(cli, "_RUIDA_START_GRACE", 0.05)
+        path = rpascript_file("START_JOB\nEND_JOB\nEOF\n")
+        rc = await amain(["run", path, "--protocol", "ruida", "--emulator"])
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "done: controller idle" in out
+
+    async def test_requires_a_source(self, rpascript_file, capsys):
+        path = rpascript_file("END_JOB\n")
+        rc = await amain(["run", path, "--protocol", "ruida"])
+        assert rc == 2
+        assert "Ruida needs" in capsys.readouterr().err
+
+    async def test_rejects_gcode_input(self, gcode_file, capsys):
+        path = gcode_file("G1 X10 F1000\n")
+        rc = await amain(
+            [
+                "run",
+                path,
+                "--protocol",
+                "ruida",
+                "--emulator",
+                "--no-wait",
+            ]
+        )
+        assert rc == 1
+        assert "unknown rpascript" in capsys.readouterr().err
+
+    async def test_empty_file_is_rejected(self, rpascript_file, capsys):
+        path = rpascript_file("\n   \n")
+        rc = await amain(["run", path, "--protocol", "ruida", "--emulator"])
+        assert rc == 2
+        assert "no rpascript lines" in capsys.readouterr().err
+
+
+def test_run_parser_accepts_ruida_options():
+    args = build_parser().parse_args(
+        [
+            "run",
+            "job.rds",
+            "--protocol",
+            "ruida",
+            "--host",
+            "192.168.1.50",
+            "--net-port",
+            "50201",
+            "--transport",
+            "tcp",
+            "--magic",
+            "0x99",
+            "--no-wait",
+            "--wait-timeout",
+            "30",
+        ]
+    )
+    assert args.protocol == "ruida"
+    assert args.host == "192.168.1.50"
+    assert args.net_port == 50201
+    assert args.transport == "tcp"
+    assert args.magic == 0x99
+    assert args.no_wait is True
+    assert args.wait_timeout == 30.0
 
 
 class TestStatusCommand:
