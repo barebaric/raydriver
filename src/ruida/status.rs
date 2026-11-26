@@ -3,8 +3,8 @@
 use crate::core::types::DeviceStatus;
 use crate::ruida::codec::{self, Reply};
 use crate::ruida::protocol::{
-    StatusRegister, MACHINE_STATUS_MOVING, MACHINE_STATUS_PAUSED,
-    MACHINE_STATUS_RUNNING,
+    MachineFeatures, StatusRegister, MACHINE_STATUS_MOVING,
+    MACHINE_STATUS_PAUSED, MACHINE_STATUS_RUNNING,
 };
 
 /// The machine state derived from the controller's status replies.
@@ -65,6 +65,11 @@ impl MachineStatus {
             }
         }
         *self != before
+    }
+
+    /// Decoded machine feature flags, when the controller reported them.
+    pub fn machine_features(&self) -> Option<MachineFeatures> {
+        self.features.map(MachineFeatures::from_bits)
     }
 
     /// The device status the UI should show.

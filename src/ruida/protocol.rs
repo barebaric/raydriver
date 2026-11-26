@@ -87,6 +87,13 @@ pub(crate) static COMMANDS: &[CommandDef] = &[
         inner: None,
         params: &[Param::Dim35],
     },
+    CommandDef {
+        mnemonic: "MOVE_FAR_U",
+        prefix: 0x80,
+        mid: Some(0x02),
+        inner: None,
+        params: &[Param::Dim35],
+    },
     // Prefix 0x88 — Move commands
     CommandDef {
         mnemonic: "MOVE_FAR_XY",
@@ -1311,6 +1318,34 @@ pub(crate) static COMMANDS: &[CommandDef] = &[
 pub const MACHINE_STATUS_RUNNING: u32 = 0x0000_0001;
 pub const MACHINE_STATUS_PAUSED: u32 = 0x0000_0002;
 pub const MACHINE_STATUS_MOVING: u32 = 0x0100_0000;
+
+/// Single-bit flags in ``MEM_MACHINE_FEATURES``.
+pub const MACHINE_FEATURE_FOCUS: u32 = 0x0001;
+pub const MACHINE_FEATURE_Z_RETURN_DOCKING: u32 = 0x0008;
+
+/// Multi-bit air-assist mode field in ``MEM_MACHINE_FEATURES``.
+pub const MACHINE_FEATURE_AIR_ASSIST_MASK: u32 = 0x0600;
+pub const MACHINE_FEATURE_AIR_ASSIST_SHIFT: u32 = 9;
+
+/// Decoded machine features.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MachineFeatures {
+    pub focus: bool,
+    pub z_return_docking: bool,
+    pub air_assist_mode: u8,
+}
+
+impl MachineFeatures {
+    pub fn from_bits(bits: u32) -> Self {
+        Self {
+            focus: bits & MACHINE_FEATURE_FOCUS != 0,
+            z_return_docking: bits & MACHINE_FEATURE_Z_RETURN_DOCKING != 0,
+            air_assist_mode: ((bits & MACHINE_FEATURE_AIR_ASSIST_MASK)
+                >> MACHINE_FEATURE_AIR_ASSIST_SHIFT)
+                as u8,
+        }
+    }
+}
 
 /// A controller register the session polls and decodes.
 #[repr(u16)]

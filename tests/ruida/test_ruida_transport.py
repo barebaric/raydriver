@@ -142,7 +142,8 @@ class TestReconnect:
 
 
 @pytest.mark.skipif(
-    sys.platform == "win32", reason="PTY USB emulation is POSIX-only"
+    sys.platform != "linux",
+    reason="PTY USB emulation is reliable on Linux only",
 )
 class TestInterfaceSwitch:
     @pytest.mark.asyncio
@@ -197,3 +198,40 @@ class TestInterfaceSwitch:
             await session.disconnect()
             await network.stop()
             usb.stop()
+
+
+class TestTcpStreamFraming:
+    @pytest.mark.asyncio
+    async def test_fragmented_tcp_reply_is_held_until_complete(self, events):
+        emulator = RuidaEmulator(protocol="tcp")
+        emulator.reply_chunk_size = 3
+        await emulator.start()
+        session = make_session(events, emulator, protocol="tcp")
+        try:
+            await connect(session, events)
+            await wait_until(
+                lambda: session.machine_status["card_id"] == emulator.card_id
+            )
+        finally:
+            await session.disconnect()
+            await emulator.stop()
+
+
+class TestDecodedMachineFeatures:
+    @pytest.mark.asyncio
+    async def test_features_are_decoded(self, events):
+        emulator = RuidaEmulator(protocol="tcp")
+        emulator.features = 0x0209
+        await emulator.start()
+        session = make_session(events, emulator)
+        try:
+            await connect(session, events)
+            await wait_until(
+                lambda: session.machine_status["feature_focus"] is True
+            )
+            status = session.machine_status
+            assert status["feature_z_return_docking"] is True
+            assert status["air_assist_mode"] == 1
+        finally:
+            await session.disconnect()
+            await emulator.stop()

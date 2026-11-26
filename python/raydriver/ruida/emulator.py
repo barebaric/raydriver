@@ -89,6 +89,7 @@ class RuidaEmulator:
         self.commands: list[str] = []
         self.fail_next_ack = False
         self.withhold_reply = False
+        self.reply_chunk_size: int | None = None
         self.port: int | None = None
         self._server: asyncio.AbstractServer | None = None
         self._udp_transport: asyncio.DatagramTransport | None = None
@@ -227,8 +228,16 @@ class RuidaEmulator:
         writer.write(ack)
         await writer.drain()
         if replies:
-            writer.write(replies)
-            await writer.drain()
+            if self.reply_chunk_size:
+                for index in range(0, len(replies), self.reply_chunk_size):
+                    writer.write(
+                        replies[index : index + self.reply_chunk_size]
+                    )
+                    await writer.drain()
+                    await asyncio.sleep(0.005)
+            else:
+                writer.write(replies)
+                await writer.drain()
 
     def _handle_packet(self, data: bytes) -> tuple[bytes | None, bytes]:
         """Applies one raw command packet and returns (ACK, replies)."""

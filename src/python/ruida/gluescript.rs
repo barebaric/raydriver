@@ -138,6 +138,48 @@ impl PyGlueScript {
         self.core.select_laser(laser);
     }
 
+    /// Pierce at the current position for a number of milliseconds.
+    fn pierce(&mut self, duration: f64) -> PyResult<()> {
+        self.core.pierce(duration).map_err(runtime_error)
+    }
+
+    /// Add a per-segment cut delay in milliseconds.
+    fn add_delay(&mut self, duration: f64) -> PyResult<()> {
+        self.core.add_delay(duration).map_err(runtime_error)
+    }
+
+    /// Set the delay before the laser fires.
+    fn laser_on_delay(&mut self, duration: f64) -> PyResult<()> {
+        self.core.laser_on_delay(duration).map_err(runtime_error)
+    }
+
+    /// Set the delay after the laser stops.
+    fn laser_off_delay(&mut self, duration: f64) -> PyResult<()> {
+        self.core.laser_off_delay(duration).map_err(runtime_error)
+    }
+
+    /// Append raw rpascript commands at the current position.
+    fn inline(&mut self, commands: Vec<String>) {
+        self.core.inline(&commands);
+    }
+
+    /// Add raw rpascript lines to a layer's action block.
+    fn add_layer_action(&mut self, layer: i64, lines: Vec<String>) {
+        self.core.add_layer_action(layer.max(0) as usize, &lines);
+    }
+
+    /// Sync tracked position from controller replies.
+    #[pyo3(signature = (x=None, y=None, z=None, u=None))]
+    fn update_position(
+        &mut self,
+        x: Option<f64>,
+        y: Option<f64>,
+        z: Option<f64>,
+        u: Option<f64>,
+    ) {
+        self.core.update_position(x, y, z, u);
+    }
+
     /// Enable air assist.
     fn air_assist_on(&mut self) {
         self.core.air_assist_on();
@@ -220,6 +262,23 @@ impl PyGlueScript {
     ) -> PyResult<String> {
         self.core
             .stage_gluescript(gluescript.as_deref(), require_complete)
+            .map_err(runtime_error)
+    }
+
+    /// Replay only appended transcript lines and compile.
+    #[pyo3(signature = (flushed_count, delta_lines, require_complete=true))]
+    fn stage_gluescript_delta(
+        &mut self,
+        flushed_count: usize,
+        delta_lines: Vec<String>,
+        require_complete: bool,
+    ) -> PyResult<String> {
+        self.core
+            .stage_gluescript_delta(
+                flushed_count,
+                &delta_lines,
+                require_complete,
+            )
             .map_err(runtime_error)
     }
 

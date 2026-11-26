@@ -141,6 +141,8 @@ pub struct RuidaDriver {
     connected: Arc<AtomicBool>,
     protect: AtomicBool,
     jog_speeds: Mutex<JogSpeeds>,
+    head_script: Mutex<String>,
+    tail_script: Mutex<String>,
 }
 
 impl RuidaDriver {
@@ -165,7 +167,13 @@ impl RuidaDriver {
                 xy: 100.0,
                 z: 100.0,
                 u: 100.0,
+                x_rel: 10.0,
+                y_rel: 10.0,
+                z_rel: 10.0,
+                u_rel: 10.0,
             }),
+            head_script: Mutex::new(String::new()),
+            tail_script: Mutex::new(String::new()),
         })
     }
 
@@ -360,16 +368,46 @@ impl RuidaDriver {
         x: Option<f64>,
         y: Option<f64>,
     ) -> Result<(), DriverError> {
-        let speed = self.jog_speeds.lock().unwrap().xy;
+        let (speed, x_rel, y_rel) = {
+            let speeds = self.jog_speeds.lock().unwrap();
+            (speeds.xy, speeds.x_rel, speeds.y_rel)
+        };
         self.send_lines(&[
             format!("SPEED_LASER_1 {speed}"),
             format!(
                 "JOG_XY Rel:CURRENT X={}mm Y={}mm",
-                x.unwrap_or(0.0),
-                y.unwrap_or(0.0)
+                x.unwrap_or(x_rel),
+                y.unwrap_or(y_rel)
             ),
         ])
         .await
+    }
+
+    /// Sets the default distances for relative jogs.
+    pub fn set_jog_rel_distances(&self, xy: f64, z: f64, u: f64) {
+        let mut speeds = self.jog_speeds.lock().unwrap();
+        speeds.x_rel = xy;
+        speeds.y_rel = xy;
+        speeds.z_rel = z;
+        speeds.u_rel = u;
+    }
+
+    /// Jogs one axis relatively using its configured default distance.
+    pub async fn jog_axis_rel_default(
+        &self,
+        axis: char,
+    ) -> Result<(), DriverError> {
+        let delta = {
+            let speeds = self.jog_speeds.lock().unwrap();
+            match axis.to_ascii_uppercase() {
+                'X' => speeds.x_rel,
+                'Y' => speeds.y_rel,
+                'Z' => speeds.z_rel,
+                'U' => speeds.u_rel,
+                _ => speeds.xy,
+            }
+        };
+        self.jog_axis_rel(axis, delta).await
     }
 
     /// Jogs one axis relatively in mm.
@@ -392,6 +430,44 @@ impl RuidaDriver {
             format!("JOG_{axis} Rel:CURRENT {axis}={delta}mm"),
         ])
         .await
+    }
+
+    /// Deprecated alias for the asynchronous connect operation.
+    pub async fn start(self: Arc<Self>) -> Result<(), DriverError> {
+        Driver::connect(self).await
+    }
+
+    /// Deprecated alias for cleanup.
+    pub async fn stop(&self) {
+        Driver::cleanup(self).await;
+    }
+
+    /// Sets the script prepended to every job.
+    pub fn set_head_script(&self, script: &str) {
+        *self.head_script.lock().unwrap() = script.to_string();
+    }
+
+    /// Returns the script prepended to every job.
+    pub fn get_head_script(&self) -> String {
+        self.head_script.lock().unwrap().clone()
+    }
+
+    /// Sets the script appended to every job.
+    pub fn set_tail_script(&self, script: &str) {
+        *self.tail_script.lock().unwrap() = script.to_string();
+    }
+
+    /// Returns the script appended to every job.
+    pub fn get_tail_script(&self) -> String {
+        self.tail_script.lock().unwrap().clone()
+    }
+
+    /// Runs a job wrapped in the configured head and tail scripts.
+    pub async fn run_job(&self, job: &str) -> Result<(), DriverError> {
+        let head = self.get_head_script();
+        let tail = self.get_tail_script();
+        let script = format!("{head}{job}{tail}");
+        self.send_script(&script).await
     }
 
     /// Pauses the running job.
@@ -662,6 +738,10 @@ struct JogSpeeds {
     xy: f64,
     z: f64,
     u: f64,
+    x_rel: f64,
+    y_rel: f64,
+    z_rel: f64,
+    u_rel: f64,
 }
 
 impl JogSpeeds {

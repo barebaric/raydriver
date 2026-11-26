@@ -296,6 +296,7 @@ impl DriverKind {
                 };
                 let ruida = RuidaConfig {
                     host: string(config, "host")
+                        .or_else(|| string(config, "udp_host"))
                         .filter(|value| !value.is_empty()),
                     usb_device: string(config, "usb_device")
                         .filter(|value| !value.is_empty()),

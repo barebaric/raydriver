@@ -18,13 +18,13 @@
 //! ReplyPending -> ACKed but no reply: Busy
 //! ```
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::core::driver::DriverError;
 use crate::ruida::codec;
 use crate::ruida::link::timed_out;
 pub use crate::ruida::link::{open_link, Link, TransportKind};
-use crate::ruida::protocol::{ERR, NAK};
+use crate::ruida::protocol::{ERR, NAK, SETTING_PREFIX};
 
 /// How a transport frames a command packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -279,10 +279,54 @@ impl RuidaTransport {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<Vec<u8>>, DriverError> {
-        if !self.rx.is_empty() {
-            return Ok(Some(std::mem::take(&mut self.rx)));
+        if self.kind != TransportKind::Tcp {
+            if !self.rx.is_empty() {
+                return Ok(Some(std::mem::take(&mut self.rx)));
+            }
+            return self.link.read(timeout).await;
         }
-        self.link.read(timeout).await
+
+        // TCP has no datagram boundaries. Re-frame the byte stream into
+        // ACK/reply units: split a coalesced ACK from its replies, and
+        // hold a 0xDA reply until at least the minimum frame length has
+        // arrived.
+        const MIN_REPLY_LEN: usize = 9;
+        let deadline = Instant::now() + timeout;
+        loop {
+            if !self.rx.is_empty() {
+                let first = codec::unswizzle_byte(self.rx[0], self.magic);
+                if first == codec::ACK {
+                    let ack = self.rx.drain(..1).collect();
+                    return Ok(Some(ack));
+                }
+                if first == SETTING_PREFIX
+                    && self.rx.len() < MIN_REPLY_LEN
+                    && Instant::now() < deadline
+                {
+                    // Incomplete reply; fall through and read more.
+                } else {
+                    return Ok(Some(std::mem::take(&mut self.rx)));
+                }
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Ok(if self.rx.is_empty() {
+                    None
+                } else {
+                    Some(std::mem::take(&mut self.rx))
+                });
+            }
+            let remaining = deadline.saturating_duration_since(now);
+            if let Some(more) = self.link.read(remaining).await? {
+                self.rx.extend(more);
+            }
+        }
+    }
+
+    /// Discards pending bytes and drains the underlying link.
+    pub async fn drain(&mut self) {
+        self.rx.clear();
+        self.link.drain().await;
     }
 
     /// Closes the underlying link.

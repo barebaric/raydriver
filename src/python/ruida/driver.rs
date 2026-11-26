@@ -22,10 +22,18 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
     let Some(dict) = dict else {
         return Ok(config);
     };
-    if let Some(v) = get_str(dict, "host").ok().flatten() {
-        if !v.is_empty() {
-            config.host = Some(v);
-        }
+    let host = get_str(dict, "host")
+        .ok()
+        .flatten()
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            get_str(dict, "udp_host")
+                .ok()
+                .flatten()
+                .filter(|value| !value.is_empty())
+        });
+    if let Some(host) = host {
+        config.host = Some(host);
     }
     if let Some(v) = get_str(dict, "usb_device").ok().flatten() {
         if !v.is_empty() {
@@ -299,6 +307,55 @@ impl PyRuidaDriver {
         self.core.set_jog_speeds(xy, z, u);
     }
 
+    /// Set the default relative jog distances in mm.
+    fn set_jog_rel_distances(&self, xy: f64, z: f64, u: f64) {
+        self.core.set_jog_rel_distances(xy, z, u);
+    }
+
+    /// Set one axis jog distance; ``None`` uses the default.
+    fn jog_axis_rel_default<'py>(
+        &self,
+        py: Python<'py>,
+        axis: char,
+    ) -> PyAwait<'py, ()> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            core.jog_axis_rel_default(axis).await?;
+            Ok(())
+        })
+        .expect("jog_axis_rel_default future")
+    }
+
+    /// Set the script prepended to jobs.
+    fn set_head_script(&self, script: String) {
+        self.core.set_head_script(&script);
+    }
+
+    /// Return the script prepended to jobs.
+    fn get_head_script(&self) -> String {
+        self.core.get_head_script()
+    }
+
+    /// Set the script appended to jobs.
+    fn set_tail_script(&self, script: String) {
+        self.core.set_tail_script(&script);
+    }
+
+    /// Return the script appended to jobs.
+    fn get_tail_script(&self) -> String {
+        self.core.get_tail_script()
+    }
+
+    /// Run a job wrapped in the configured head and tail scripts.
+    fn run_job<'py>(&self, py: Python<'py>, job: String) -> PyAwait<'py, ()> {
+        let core = self.core.clone();
+        spawn_future(py, async move {
+            core.run_job(&job).await?;
+            Ok(())
+        })
+        .expect("run_job future")
+    }
+
     /// Send one raw rpascript line.
     fn execute<'py>(&self, py: Python<'py>, line: String) -> PyAwait<'py, ()> {
         let core = self.core.clone();
@@ -380,8 +437,18 @@ impl PyRuidaDriver {
             "bed_size",
             status.bed_size.map(|value| value.unwrap_or(0.0)),
         )?;
-        dict.set_item("mainboard_version", status.mainboard_version)?;
+        dict.set_item("mainboard_version", status.mainboard_version.clone())?;
         dict.set_item("features", status.features)?;
+        let features = status.machine_features();
+        dict.set_item("feature_focus", features.map(|value| value.focus))?;
+        dict.set_item(
+            "feature_z_return_docking",
+            features.map(|value| value.z_return_docking),
+        )?;
+        dict.set_item(
+            "air_assist_mode",
+            features.map(|value| value.air_assist_mode),
+        )?;
         Ok(dict.unbind())
     }
 

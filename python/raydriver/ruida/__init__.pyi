@@ -88,6 +88,34 @@ class GlueScript:
         r"""
         Select a laser head.
         """
+    def pierce(self, duration: builtins.float) -> None:
+        r"""
+        Pierce at the current position for a number of milliseconds.
+        """
+    def add_delay(self, duration: builtins.float) -> None:
+        r"""
+        Add a per-segment cut delay in milliseconds.
+        """
+    def laser_on_delay(self, duration: builtins.float) -> None:
+        r"""
+        Set the delay before the laser fires.
+        """
+    def laser_off_delay(self, duration: builtins.float) -> None:
+        r"""
+        Set the delay after the laser stops.
+        """
+    def inline(self, commands: typing.Sequence[builtins.str]) -> None:
+        r"""
+        Append raw rpascript commands at the current position.
+        """
+    def add_layer_action(self, layer: builtins.int, lines: typing.Sequence[builtins.str]) -> None:
+        r"""
+        Add raw rpascript lines to a layer's action block.
+        """
+    def update_position(self, x: typing.Optional[builtins.float] = None, y: typing.Optional[builtins.float] = None, z: typing.Optional[builtins.float] = None, u: typing.Optional[builtins.float] = None) -> None:
+        r"""
+        Sync tracked position from controller replies.
+        """
     def air_assist_on(self) -> None:
         r"""
         Enable air assist.
@@ -143,6 +171,10 @@ class GlueScript:
     def stage_gluescript(self, gluescript: typing.Optional[typing.Sequence[builtins.str]] = None, require_complete: builtins.bool = True) -> builtins.str:
         r"""
         Compile the job, or replay a transcript and compile it.
+        """
+    def stage_gluescript_delta(self, flushed_count: builtins.int, delta_lines: typing.Sequence[builtins.str], require_complete: builtins.bool = True) -> builtins.str:
+        r"""
+        Replay only appended transcript lines and compile.
         """
 
 @typing.final
@@ -217,6 +249,34 @@ class RuidaDriver(driver.Driver):
     def set_jog_speeds(self, xy: builtins.float, z: builtins.float, u: builtins.float) -> None:
         r"""
         Set the jog speeds in mm/s.
+        """
+    def set_jog_rel_distances(self, xy: builtins.float, z: builtins.float, u: builtins.float) -> None:
+        r"""
+        Set the default relative jog distances in mm.
+        """
+    def jog_axis_rel_default(self, axis: builtins.str) -> collections.abc.Awaitable[None]:
+        r"""
+        Set one axis jog distance; ``None`` uses the default.
+        """
+    def set_head_script(self, script: builtins.str) -> None:
+        r"""
+        Set the script prepended to jobs.
+        """
+    def get_head_script(self) -> builtins.str:
+        r"""
+        Return the script prepended to jobs.
+        """
+    def set_tail_script(self, script: builtins.str) -> None:
+        r"""
+        Set the script appended to jobs.
+        """
+    def get_tail_script(self) -> builtins.str:
+        r"""
+        Return the script appended to jobs.
+        """
+    def run_job(self, job: builtins.str) -> collections.abc.Awaitable[None]:
+        r"""
+        Run a job wrapped in the configured head and tail scripts.
         """
     def execute(self, line: builtins.str) -> collections.abc.Awaitable[None]:
         r"""

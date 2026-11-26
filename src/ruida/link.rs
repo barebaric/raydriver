@@ -43,6 +43,7 @@ pub trait Link: Send {
         timeout: Duration,
     ) -> Result<Option<Vec<u8>>, DriverError>;
     async fn close(&mut self) {}
+    async fn drain(&mut self) {}
 }
 
 pub(crate) fn timed_out() -> DriverError {
@@ -103,6 +104,10 @@ impl Link for TappedLink {
 
     async fn close(&mut self) {
         self.link.close().await;
+    }
+
+    async fn drain(&mut self) {
+        self.link.drain().await;
     }
 }
 
@@ -176,6 +181,10 @@ mod net {
         }
 
         async fn close(&mut self) {}
+
+        async fn drain(&mut self) {
+            while let Ok(Some(_)) = self.read(Duration::from_millis(0)).await {}
+        }
     }
 
     pub struct TcpLink {
@@ -207,7 +216,13 @@ mod net {
     #[async_trait]
     impl Link for TcpLink {
         async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
-            self.stream.write_all(data).await.map_err(io_error)
+            tokio::time::timeout(
+                Duration::from_secs(2),
+                self.stream.write_all(data),
+            )
+            .await
+            .map_err(|_| timed_out())?
+            .map_err(io_error)
         }
 
         async fn read(
@@ -231,6 +246,10 @@ mod net {
 
         async fn close(&mut self) {
             let _ = self.stream.shutdown().await;
+        }
+
+        async fn drain(&mut self) {
+            while let Ok(Some(_)) = self.read(Duration::from_millis(0)).await {}
         }
     }
 }
@@ -256,7 +275,8 @@ mod serial {
     impl SerialLink {
         /// Opens a USB serial link at the Ruida baud rate.
         pub fn open(device: &str) -> Result<Self, DriverError> {
-            let port: SerialStream = tokio_serial::new(device, 115_200)
+            let device = resolve_serial_device(device);
+            let port: SerialStream = tokio_serial::new(&device, 115_200)
                 .open_native_async()
                 .map_err(|error| DriverError::Connection(error.to_string()))?;
             Ok(Self {
@@ -290,11 +310,40 @@ mod serial {
         }
 
         async fn close(&mut self) {}
+
+        async fn drain(&mut self) {
+            while let Ok(Some(_)) = self.read(Duration::from_millis(0)).await {}
+        }
     }
 }
 
 #[cfg(feature = "serial")]
 pub use serial::SerialLink;
+
+/// Resolves ``VID:PID`` and short POSIX device names like the Python
+/// transport does.
+#[cfg(feature = "serial")]
+fn resolve_serial_device(device: &str) -> String {
+    if device.contains(':') {
+        let wanted = device.to_ascii_lowercase();
+        if let Ok(ports) = serialport::available_ports() {
+            for port in ports {
+                if let serialport::SerialPortType::UsbPort(info) =
+                    port.port_type
+                {
+                    let vid_pid = format!("{:04x}:{:04x}", info.vid, info.pid);
+                    if vid_pid == wanted || port.port_name == device {
+                        return port.port_name;
+                    }
+                }
+            }
+        }
+    }
+    if cfg!(unix) && !device.contains('/') {
+        return format!("/dev/{device}");
+    }
+    device.to_string()
+}
 
 /// Opens a link for the given endpoint.
 pub async fn open_link(
