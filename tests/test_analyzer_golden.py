@@ -84,6 +84,11 @@ async def grbl_scenario():
             # connected; silent it so listings depend on the script,
             # not on how many polls fit into the scenario.
             "status_poll_interval": 60.0,
+            # Keep the handshake poll interval far above scheduler
+            # jitter: on a slow runner the first status report may
+            # not be dispatched within the 20 ms fast-test interval,
+            # so the handshake polls twice and shifts the fixture.
+            "handshake_poll_interval": 0.5,
         },
         dialect=DEFAULT_DIALECT,
         event_callback=recorder,
