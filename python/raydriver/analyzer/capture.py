@@ -164,10 +164,10 @@ class Recorder:
     """Driver event callback that records traffic into a Capture.
 
     Pass the recorder (it is callable) as the session's
-    ``event_callback``; every ``RawTx``/``RawRx`` event becomes a
-    frame.  *forward*, when given, still receives every event
-    unchanged, so the recorder can sit in front of an existing
-    callback.
+    ``event_callback``; every raw event (text lines or binary
+    chunks) becomes a frame.  *forward*, when given, still receives
+    every event unchanged, so the recorder can sit in front of an
+    existing callback.
     """
 
     def __init__(self, capture: Capture | None = None, forward=None):
@@ -180,5 +180,9 @@ class Recorder:
                 self.capture.append(TX, text=line)
             case DriverEvent.RawRx(line=line):
                 self.capture.append(RX, text=line)
+            case DriverEvent.RawTxBytes(data=data):
+                self.capture.append(TX, data=bytes(data))
+            case DriverEvent.RawRxBytes(data=data):
+                self.capture.append(RX, data=bytes(data))
         if self.forward is not None:
             self.forward(event)

@@ -116,13 +116,18 @@ The analyzer captures device traffic, decodes it to a readable
 listing, and replays or proxies it — the workflow for developing
 protocols without hardware and for characterizing real controllers.
 Captures are editable JSONL (text lines or base64 for binary
-protocols), and decoders plug in per protocol (`grbl` ships first;
-`raw` and `hex` cover the rest).
+protocols), and decoders plug in per protocol (`grbl` and `ruida`
+ship; `raw` and `hex` cover the rest).
 
 ```bash
 # Record a session (or --emulator for a hardware-free dry run)
 raydriver analyzer record --port /dev/ttyUSB0 --out cap.jsonl
 raydriver analyzer tui --port /dev/ttyUSB0     # interactive monitor
+
+# Ruida: network, USB or the built-in controller emulator
+raydriver analyzer record --protocol ruida --host 192.168.1.50 --out ruida.jsonl
+raydriver analyzer record --protocol ruida --usb-device /dev/ttyUSB0 --out ruida.jsonl
+raydriver analyzer tui --protocol ruida --emulator
 
 # Print a capture as a decoded listing
 raydriver analyzer decode cap.jsonl

@@ -154,6 +154,8 @@ def all_events():
         DriverEvent.ConfigChanged("rx_buffer_size", 128),
         DriverEvent.RawRx("ok"),
         DriverEvent.RawTx("G0 X1"),
+        DriverEvent.RawRxBytes([0x88, 0xDA, 0x01]),
+        DriverEvent.RawTxBytes([0xCC]),
     ]
 
 

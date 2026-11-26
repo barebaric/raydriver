@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from conftest import wait_until
+from conftest import EventRecorder, wait_until
 
+from raydriver.analyzer.capture import RX, TX, Recorder
 from raydriver.core import DriverEvent
 from raydriver.driver import driver_info
 from raydriver.ruida import RuidaDriver, encode_script
-from raydriver.ruida.emulator import RuidaEmulator
+from raydriver.ruida.emulator import RuidaEmulator, swizzle_byte
 
 GOLDEN = Path(__file__).parent / "golden"
 FAST = {
@@ -23,6 +24,7 @@ FAST = {
 
 
 def make_session(events, emulator, **config):
+    callback = events.callback if hasattr(events, "callback") else events
     return RuidaDriver(
         config={
             "host": "127.0.0.1",
@@ -31,7 +33,7 @@ def make_session(events, emulator, **config):
             **FAST,
             **config,
         },
-        event_callback=events.callback,
+        event_callback=callback,
     )
 
 
@@ -233,6 +235,39 @@ class TestLiveCommands:
         await session.set_hold(False)
         await session.cancel()
         assert any("d801" in command for command in emulator.commands)
+
+
+class TestRawTraffic:
+    async def test_raw_bytes_are_reported(self, rig):
+        session, emulator, events = rig
+        events.events.clear()
+        await session.jog_x_to(5.0)
+        tx = await events.wait_for(DriverEvent.RawTxBytes)
+        assert bytes(tx.data)
+        ack = bytes([swizzle_byte(0xCC, emulator.magic)])
+        await events.wait_for(
+            DriverEvent.RawRxBytes,
+            lambda event: bytes(event.data) == ack,
+        )
+
+    async def test_analyzer_recorder_captures_wire_frames(self, emulator):
+        events = EventRecorder()
+        recorder = Recorder(forward=events.callback)
+        session = make_session(recorder, emulator)
+        await session.connect()
+        await events.wait_for(
+            DriverEvent.ConnectionStatusChanged,
+            lambda event: event.status == "CONNECTED",
+        )
+        try:
+            await session.jog_x_to(5.0)
+            await events.wait_for(DriverEvent.RawRxBytes)
+        finally:
+            await session.disconnect()
+        directions = {frame.direction for frame in recorder.capture.frames}
+        assert directions == {TX, RX}
+        assert all(frame.data is not None for frame in recorder.capture.frames)
+        assert all(frame.text is None for frame in recorder.capture.frames)
 
 
 class TestMemory:

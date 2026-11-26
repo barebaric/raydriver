@@ -55,6 +55,12 @@ pub enum DriverEvent {
     RawTx {
         line: String,
     },
+    RawRxBytes {
+        data: Vec<u8>,
+    },
+    RawTxBytes {
+        data: Vec<u8>,
+    },
 }
 
 /// One queued event: session events go to the event callback, a
@@ -96,7 +102,10 @@ impl EventQueue {
                 matches!(
                     event,
                     QueuedEvent::Driver(
-                        DriverEvent::RawRx { .. } | DriverEvent::RawTx { .. }
+                        DriverEvent::RawRx { .. }
+                            | DriverEvent::RawTx { .. }
+                            | DriverEvent::RawRxBytes { .. }
+                            | DriverEvent::RawTxBytes { .. }
                     )
                 )
             });
@@ -343,6 +352,12 @@ impl DriverEvents for PyEvents {
             }
             CoreEvent::RawTx(line) => {
                 self.schedule(DriverEvent::RawTx { line });
+            }
+            CoreEvent::RawRxBytes(data) => {
+                self.schedule(DriverEvent::RawRxBytes { data });
+            }
+            CoreEvent::RawTxBytes(data) => {
+                self.schedule(DriverEvent::RawTxBytes { data });
             }
         }
     }

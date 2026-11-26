@@ -1,13 +1,20 @@
 """Tests for the raydriver analyzer CLI."""
 
 import asyncio
+import inspect
 import json
 from pathlib import Path
 
+import pytest
+
+from raydriver.analyzer.capture import Capture
+from raydriver.analyzer.decode import render_listing
 from raydriver.cli.analyzer import (
     _parse_endpoint,
+    _validate_source,
     cmd_decode,
     cmd_replay,
+    cmd_tui,
 )
 from raydriver.cli.main import build_parser
 
@@ -109,3 +116,100 @@ async def test_replay_command_against_fake_device(tmp_path):
     finally:
         device.close()
         await device.wait_closed()
+
+
+def test_parser_wires_ruida_analyzer_options():
+    args = build_parser().parse_args(
+        [
+            "analyzer",
+            "record",
+            "--protocol",
+            "ruida",
+            "--host",
+            "192.168.1.50",
+            "--net-port",
+            "50201",
+            "--transport",
+            "tcp",
+            "--magic",
+            "0x99",
+        ]
+    )
+    assert args.protocol == "ruida"
+    assert args.host == "192.168.1.50"
+    assert args.net_port == 50201
+    assert args.transport == "tcp"
+    assert args.magic == 0x99
+
+
+def test_ruida_source_validation():
+    args = build_parser().parse_args(
+        ["analyzer", "record", "--protocol", "ruida"]
+    )
+    with pytest.raises(ValueError, match="--host"):
+        _validate_source(args)
+    args = build_parser().parse_args(
+        [
+            "analyzer",
+            "record",
+            "--protocol",
+            "ruida",
+            "--host",
+            "h",
+            "--usb-device",
+            "/dev/ttyUSB0",
+        ]
+    )
+    with pytest.raises(ValueError, match="either"):
+        _validate_source(args)
+    args = build_parser().parse_args(
+        ["analyzer", "record", "--protocol", "ruida", "--emulator"]
+    )
+    _validate_source(args)
+
+
+def test_record_ruida_emulator_writes_binary_capture(tmp_path):
+    out = tmp_path / "ruida.jsonl"
+    code = run_cli(
+        [
+            "analyzer",
+            "record",
+            "--protocol",
+            "ruida",
+            "--emulator",
+            "--seconds",
+            "0.8",
+            "--out",
+            str(out),
+        ]
+    )
+    assert code == 0
+    capture = Capture.load(out)
+    assert capture.protocol == "ruida"
+    assert capture.source == "emulated Ruida controller"
+    assert {frame.direction for frame in capture.frames} == {"tx", "rx"}
+    assert any(frame.data is not None for frame in capture.frames)
+    listing = render_listing(capture, with_times=False)
+    assert "get 0x057e (card id)" in listing
+    assert "ack" in listing
+
+
+def test_tui_is_synchronous_and_uses_a_work_factory(monkeypatch):
+    assert not inspect.iscoroutinefunction(cmd_tui)
+    seen = {}
+
+    def fake_run_tui(recorder, decoder, *, source, save_path, work):
+        seen["source"] = source
+        seen["save_path"] = save_path
+        seen["work"] = work
+
+    import raydriver.analyzer.tui as tui
+
+    monkeypatch.setattr(tui, "run_tui", fake_run_tui)
+    args = build_parser().parse_args(
+        ["analyzer", "tui", "--protocol", "ruida", "--emulator"]
+    )
+    assert cmd_tui(args) == 0
+    assert seen["source"] == "emulated Ruida controller"
+    assert seen["save_path"] is None
+    assert callable(seen["work"])
