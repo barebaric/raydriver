@@ -220,9 +220,12 @@ impl RuidaTransport {
                         };
                         continue;
                     }
+                    let code = codec::unswizzle_byte(first, self.magic);
                     if data.len() == 1
                         && self.profile.learn_magic
                         && !magic_retried
+                        && code != ERR
+                        && code != NAK
                     {
                         let magic = self.ack_table[usize::from(first)];
                         if magic != 0 {
@@ -235,7 +238,6 @@ impl RuidaTransport {
                     if data.len() > 1 {
                         self.rx.extend_from_slice(&data[1..]);
                     }
-                    let code = codec::unswizzle_byte(first, self.magic);
                     let detail = match code {
                         ERR => "controller reported an error",
                         NAK => "controller reported a checksum error",
