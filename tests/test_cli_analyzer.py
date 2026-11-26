@@ -195,6 +195,7 @@ def test_record_ruida_emulator_writes_binary_capture(tmp_path):
 
 
 def test_tui_is_synchronous_and_uses_a_work_factory(monkeypatch):
+    pytest.importorskip("curses")
     assert not inspect.iscoroutinefunction(cmd_tui)
     seen = {}
 
