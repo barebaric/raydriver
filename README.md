@@ -27,9 +27,19 @@ raydriver run job.gcode --emulator          # no hardware needed
 raydriver status --port /dev/ttyUSB0 --seconds 5
 ```
 
-While a job runs, `raydriver run` shows acknowledged lines, a
+Ruida controllers consume rpascript instead of G-code; `run` sends
+the whole script and waits for the controller to report idle:
+
+```bash
+raydriver run job.rds --protocol ruida --host 192.168.1.50
+raydriver run job.rds --protocol ruida --usb-device /dev/ttyUSB0
+raydriver run job.rds --protocol ruida --emulator --no-wait
+```
+
+While a GRBL job runs, `raydriver run` shows acknowledged lines, a
 progress bar, the device state, machine position, feed rate and ETA;
-`Ctrl-C` cancels the job and runs the safety shutdown.
+`Ctrl-C` cancels the job and runs the safety shutdown.  The same
+cancel path sends `STOP_JOB` to a Ruida controller.
 
 ## API reference
 

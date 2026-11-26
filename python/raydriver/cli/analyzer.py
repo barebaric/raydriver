@@ -100,8 +100,8 @@ def _validate_source(args) -> None:
         raise ValueError("Ruida needs --host, --usb-device, or --emulator")
 
 
-async def _open_recording_session(args, recorder):
-    """A driver with the recorder attached, against the selected
+async def open_source_session(args, event_callback):
+    """A driver with *event_callback* attached, against the selected
     source.  Returns ``(session, device_task, source label,
     cleanup)``."""
     _validate_source(args)
@@ -118,11 +118,11 @@ async def _open_recording_session(args, recorder):
                     "protocol": "tcp",
                     **_RUIDA_EMULATOR_TIMINGS,
                 },
-                event_callback=recorder,
+                event_callback=event_callback,
             )
             return session, None, _source_label(args), emulator.stop
         session = RuidaDriver(
-            config=_ruida_config(args), event_callback=recorder
+            config=_ruida_config(args), event_callback=event_callback
         )
         return session, None, _source_label(args), None
     config = {"poll_status_while_running": not args.no_poll}
@@ -132,7 +132,7 @@ async def _open_recording_session(args, recorder):
         mock = MockTransport()
         emulator = GrblEmulator(mock, speed_factor=args.speed_factor)
         session = GrblSerialDriver.with_transport(
-            mock, config=config, dialect={}, event_callback=recorder
+            mock, config=config, dialect={}, event_callback=event_callback
         )
         return (
             session,
@@ -147,7 +147,7 @@ async def _open_recording_session(args, recorder):
             **config,
         },
         dialect={},
-        event_callback=recorder,
+        event_callback=event_callback,
     )
     return session, None, _source_label(args), None
 
@@ -172,7 +172,7 @@ async def cmd_record(args) -> int:
     recorder = Recorder()
     decoder = get_decoder(args.protocol)
     try:
-        session, device_task, source, cleanup = await _open_recording_session(
+        session, device_task, source, cleanup = await open_source_session(
             args, recorder
         )
     except ValueError as err:
@@ -236,7 +236,7 @@ def cmd_tui(args) -> int:
         device_task = None
         cleanup = None
         try:
-            opened = await _open_recording_session(args, recorder)
+            opened = await open_source_session(args, recorder)
             session, device_task, _source, cleanup = opened
             await session.connect()
             while True:
@@ -358,6 +358,56 @@ async def cmd_proxy(args) -> int:
     return 0
 
 
+def add_protocol_arguments(
+    parser, *, choices=None, decoder_help: bool = False
+) -> None:
+    """Add the protocol/source options shared by ``run`` and the
+    analyzer."""
+    if decoder_help:
+        protocol_help = (
+            "decoder used for live annotations and captures; "
+            "ruida also selects the Ruida driver"
+        )
+    else:
+        protocol_help = (
+            "device protocol; ruida reads rpascript and uses the Ruida driver"
+        )
+    parser.add_argument(
+        "--protocol",
+        default="grbl",
+        choices=choices or decoder_names(),
+        help=protocol_help,
+    )
+    parser.add_argument(
+        "--host",
+        default=None,
+        help="Ruida network host (--protocol ruida)",
+    )
+    parser.add_argument(
+        "--net-port",
+        type=int,
+        default=50200,
+        help="Ruida network port (--protocol ruida; default 50200)",
+    )
+    parser.add_argument(
+        "--transport",
+        default="udp",
+        choices=["udp", "tcp"],
+        help="Ruida network transport (--protocol ruida)",
+    )
+    parser.add_argument(
+        "--usb-device",
+        default=None,
+        help="Ruida USB device path (--protocol ruida)",
+    )
+    parser.add_argument(
+        "--magic",
+        type=lambda value: int(value, 0),
+        default=0x88,
+        help="Ruida swizzle key (--protocol ruida; default 0x88)",
+    )
+
+
 def add_analyzer_parser(subparsers) -> None:
     parser = subparsers.add_parser(
         "analyzer",
@@ -391,41 +441,7 @@ def add_analyzer_parser(subparsers) -> None:
             action="store_true",
             help="disable status polling while jobs run (GRBL only)",
         )
-        record_parser.add_argument(
-            "--protocol",
-            default="grbl",
-            choices=decoder_names(),
-            help="decoder used for live annotations and captures; "
-            "ruida also selects the Ruida driver",
-        )
-        record_parser.add_argument(
-            "--host",
-            default=None,
-            help="Ruida network host (--protocol ruida)",
-        )
-        record_parser.add_argument(
-            "--net-port",
-            type=int,
-            default=50200,
-            help="Ruida network port (--protocol ruida; default 50200)",
-        )
-        record_parser.add_argument(
-            "--transport",
-            default="udp",
-            choices=["udp", "tcp"],
-            help="Ruida network transport (--protocol ruida)",
-        )
-        record_parser.add_argument(
-            "--usb-device",
-            default=None,
-            help="Ruida USB device path (--protocol ruida)",
-        )
-        record_parser.add_argument(
-            "--magic",
-            type=lambda value: int(value, 0),
-            default=0x88,
-            help="Ruida swizzle key (--protocol ruida; default 0x88)",
-        )
+        add_protocol_arguments(record_parser, decoder_help=True)
         record_parser.add_argument(
             "--out", default=None, help="save the capture as JSONL"
         )
