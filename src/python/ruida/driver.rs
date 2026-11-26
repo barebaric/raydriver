@@ -66,6 +66,17 @@ fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
     if let Some(v) = get_f64(dict, "ping_delay")? {
         config.ping_delay = Duration::from_secs_f64(v.max(0.0));
     }
+    if let Ok(Some(value)) = dict.get_item("query_retries") {
+        if let Ok(retries) = value.extract::<u32>() {
+            config.query_retries = retries;
+        }
+    }
+    if let Some(v) = get_f64(dict, "query_retry_delay")? {
+        config.query_retry_delay = Duration::from_secs_f64(v.max(0.0));
+    }
+    if let Some(v) = get_f64(dict, "reconnect_delay")? {
+        config.reconnect_delay = Duration::from_secs_f64(v.max(0.0));
+    }
     Ok(config)
 }
 

@@ -1,120 +1,107 @@
-//! Byte links and the packet handshake of the Ruida protocol.
+//! The Ruida packet transport and ACK handshake.
 //!
-//! USB links carry raw swizzled bytes and are not acknowledged. UDP
-//! and TCP links acknowledge every packet with a single byte; packets
-//! that carry a ``GET_SETTING`` command are followed by one or more
-//! replies. Replies are framed by the high bit of their leading
-//! ``0xDA`` byte and reassembled across reads until an inter-packet
-//! gap.
+//! This layer mirrors ``ruida_pa.ruidadriver.rd_transport``. USB links
+//! carry raw swizzled bytes and are not acknowledged. UDP and TCP
+//! links acknowledge every packet with a single byte; query packets
+//! are followed by one or more replies.
+//!
+//! The packet state machine is explicit:
+//!
+//! ```text
+//! Idle -> Send
+//! Send -> USB: ReplyPending if query else Idle
+//! Send -> UDP/TCP: AckPending
+//! AckPending -> ACK: ReplyPending if query else Idle
+//! AckPending -> reject byte: learn magic and retry once, else fail
+//! AckPending -> timeout: Timeout
+//! ReplyPending -> replies arrived: Idle
+//! ReplyPending -> ACKed but no reply: Busy
+//! ```
 
-use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
-
-use crate::core::driver::{DriverError, DriverEvents};
+use crate::core::driver::DriverError;
 use crate::ruida::codec;
+use crate::ruida::link::timed_out;
+pub use crate::ruida::link::{open_link, Link, TransportKind};
+use crate::ruida::protocol::{ERR, NAK};
 
-/// The physical link a session runs over.
+/// How a transport frames a command packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TransportKind {
-    Usb,
-    Udp,
-    Tcp,
+enum Framing {
+    Raw,
+    UdpChecksum,
 }
 
-impl TransportKind {
-    pub fn is_udp(self) -> bool {
-        self == Self::Udp
-    }
-
-    pub fn is_usb(self) -> bool {
-        self == Self::Usb
-    }
+/// Whether a transport acknowledges packets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AckMode {
+    None,
+    SingleByte,
 }
 
-/// A byte link to the controller.
-#[async_trait]
-pub trait Link: Send {
-    async fn write(&mut self, data: &[u8]) -> Result<(), DriverError>;
-    async fn read(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<Vec<u8>>, DriverError>;
-    async fn close(&mut self) {}
+/// The wire behavior of one transport.
+#[derive(Debug, Clone, Copy)]
+struct WireProfile {
+    framing: Framing,
+    ack: AckMode,
+    learn_magic: bool,
 }
 
-fn timed_out() -> DriverError {
-    DriverError::Timeout("controller did not answer".to_string())
-}
-
-/// Wraps a link and mirrors every wire chunk into raw driver events,
-/// so the protocol analyzer can record binary traffic.  Chunks stay
-/// swizzled: they are exactly what crossed the wire.
-pub(crate) struct TappedLink {
-    link: Box<dyn Link>,
-    events: Arc<dyn DriverEvents>,
-}
-
-/// Upper bound for one raw event, so a large USB job cannot create
-/// an oversized event (or remote wire frame).
-const RAW_EVENT_CHUNK: usize = 64 * 1024;
-
-impl TappedLink {
-    pub(crate) fn new(
-        link: Box<dyn Link>,
-        events: Arc<dyn DriverEvents>,
-    ) -> Self {
-        Self { link, events }
-    }
-
-    fn report_tx(&self, data: &[u8]) {
-        for chunk in data.chunks(RAW_EVENT_CHUNK) {
-            self.events.raw_tx_bytes(chunk);
+impl WireProfile {
+    fn for_kind(kind: TransportKind) -> Self {
+        match kind {
+            TransportKind::Usb => Self {
+                framing: Framing::Raw,
+                ack: AckMode::None,
+                learn_magic: false,
+            },
+            TransportKind::Udp => Self {
+                framing: Framing::UdpChecksum,
+                ack: AckMode::SingleByte,
+                learn_magic: true,
+            },
+            TransportKind::Tcp => Self {
+                framing: Framing::Raw,
+                ack: AckMode::SingleByte,
+                learn_magic: true,
+            },
         }
     }
 
-    fn report_rx(&self, data: &[u8]) {
-        for chunk in data.chunks(RAW_EVENT_CHUNK) {
-            self.events.raw_rx_bytes(chunk);
-        }
+    fn frames_with_checksum(self) -> bool {
+        self.framing == Framing::UdpChecksum
     }
 }
 
-#[async_trait]
-impl Link for TappedLink {
-    async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
-        self.link.write(data).await?;
-        self.report_tx(data);
-        Ok(())
-    }
+/// One state of the per-packet handshake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PacketState {
+    Idle,
+    Send,
+    AckPending,
+    ReplyPending,
+}
 
-    async fn read(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<Vec<u8>>, DriverError> {
-        let data = self.link.read(timeout).await?;
-        if let Some(bytes) = data.as_deref() {
-            self.report_rx(bytes);
-        }
-        Ok(data)
-    }
-
-    async fn close(&mut self) {
-        self.link.close().await;
-    }
+/// The result of a query packet.
+#[derive(Debug)]
+pub(crate) enum QueryOutcome {
+    Replied(Vec<codec::Reply>),
+    /// The controller acknowledged the packet but returned no reply.
+    Busy,
 }
 
 /// A link plus the Ruida packet handshake.
 pub struct RuidaTransport {
     link: Box<dyn Link>,
     kind: TransportKind,
+    profile: WireProfile,
     magic: u8,
     ack_table: [u8; 256],
     rx: Vec<u8>,
+    replies: Vec<codec::Reply>,
     pub timeout: Duration,
     pub inter_packet_timeout: Duration,
-    pub replies: Vec<codec::Reply>,
 }
 
 impl RuidaTransport {
@@ -123,12 +110,13 @@ impl RuidaTransport {
         Self {
             link,
             kind,
+            profile: WireProfile::for_kind(kind),
             magic,
             ack_table: codec::ack_magic_table(),
             rx: Vec::new(),
+            replies: Vec::new(),
             timeout: Duration::from_millis(500),
             inter_packet_timeout: Duration::from_millis(50),
-            replies: Vec::new(),
         }
     }
 
@@ -141,73 +129,135 @@ impl RuidaTransport {
     }
 
     /// Sends raw (unswizzled) command bytes, chunking them into
-    /// packets and acknowledging each one.
+    /// packets and acknowledging each one. No replies are expected.
     pub async fn send(&mut self, raw: &[u8]) -> Result<(), DriverError> {
-        const CHUNK_SIZE: usize = 1024;
-        for chunk in raw.chunks(CHUNK_SIZE) {
-            let packet = codec::package(chunk, self.magic, self.kind.is_udp());
-            self.send_packet(&packet).await?;
+        for packet in self.packets(raw) {
+            self.run_packet(&packet, false).await?;
         }
         Ok(())
     }
 
-    /// Sends one raw command as a single packet.
-    pub async fn send_command(
+    /// Sends one query packet and returns its replies.
+    pub async fn query(
         &mut self,
         raw: &[u8],
-    ) -> Result<(), DriverError> {
-        let packet = codec::package(raw, self.magic, self.kind.is_udp());
-        self.send_packet(&packet).await
+    ) -> Result<Vec<codec::Reply>, DriverError> {
+        match self.query_outcome(raw).await? {
+            QueryOutcome::Replied(replies) => Ok(replies),
+            QueryOutcome::Busy => Err(DriverError::Timeout(
+                "controller acknowledged the query but did not reply"
+                    .to_string(),
+            )),
+        }
     }
 
-    async fn send_packet(&mut self, packet: &[u8]) -> Result<(), DriverError> {
-        self.link.write(packet).await?;
-        if self.kind.is_usb() {
-            if self.has_get_setting(packet) {
-                self.collect_replies().await?;
+    /// Sends one query packet and distinguishes Busy from failure.
+    pub(crate) async fn query_outcome(
+        &mut self,
+        raw: &[u8],
+    ) -> Result<QueryOutcome, DriverError> {
+        let packet = self.pack(raw);
+        match self.run_packet(&packet, true).await? {
+            true => {
+                Ok(QueryOutcome::Replied(std::mem::take(&mut self.replies)))
             }
-            return Ok(());
+            false => Ok(QueryOutcome::Busy),
         }
-        let Some(data) = self.read_unit(self.timeout).await? else {
-            return Err(timed_out());
-        };
-        let Some(first) = data.first().copied() else {
-            return Err(timed_out());
-        };
-        if codec::unswizzle_byte(first, self.magic) == codec::ACK {
-            if data.len() > 1 {
-                self.rx.extend_from_slice(&data[1..]);
-            }
-            if self.has_get_setting(packet) {
-                self.collect_replies().await?;
-            }
-            return Ok(());
-        }
-        if data.len() == 1 {
-            let magic = self.ack_table[usize::from(first)];
-            if magic != 0 {
-                self.magic = magic;
-            }
-        }
-        if data.len() > 1 {
-            self.rx.extend_from_slice(&data[1..]);
-        }
-        Err(DriverError::Connection(
-            "controller rejected the packet".to_string(),
-        ))
     }
 
-    fn has_get_setting(&self, packet: &[u8]) -> bool {
-        let offset = usize::from(self.kind.is_udp()) * 2;
-        let marker = codec::swizzle_byte(0xDA, self.magic);
-        packet[offset..].contains(&marker)
+    fn packets(&self, raw: &[u8]) -> Vec<Vec<u8>> {
+        const CHUNK_SIZE: usize = 1024;
+        raw.chunks(CHUNK_SIZE)
+            .map(|chunk| self.pack(chunk))
+            .collect()
+    }
+
+    fn pack(&self, raw: &[u8]) -> Vec<u8> {
+        codec::package(raw, self.magic, self.profile.frames_with_checksum())
+    }
+
+    /// Runs one packet through the handshake state machine.
+    ///
+    /// Returns ``true`` when a query produced replies and ``false``
+    /// when it was acknowledged without a reply (Busy).
+    async fn run_packet(
+        &mut self,
+        packet: &[u8],
+        expects_replies: bool,
+    ) -> Result<bool, DriverError> {
+        let mut state = PacketState::Send;
+        let mut magic_retried = false;
+        loop {
+            match state {
+                PacketState::Idle => return Ok(false),
+                PacketState::Send => {
+                    self.link.write(packet).await?;
+                    state = if self.profile.ack == AckMode::None {
+                        if expects_replies {
+                            PacketState::ReplyPending
+                        } else {
+                            PacketState::Idle
+                        }
+                    } else {
+                        PacketState::AckPending
+                    };
+                }
+                PacketState::AckPending => {
+                    let Some(data) = self.read_unit(self.timeout).await? else {
+                        return Err(timed_out());
+                    };
+                    let Some(first) = data.first().copied() else {
+                        return Err(timed_out());
+                    };
+                    if codec::unswizzle_byte(first, self.magic) == codec::ACK {
+                        if data.len() > 1 {
+                            self.rx.extend_from_slice(&data[1..]);
+                        }
+                        state = if expects_replies {
+                            PacketState::ReplyPending
+                        } else {
+                            PacketState::Idle
+                        };
+                        continue;
+                    }
+                    if data.len() == 1
+                        && self.profile.learn_magic
+                        && !magic_retried
+                    {
+                        let magic = self.ack_table[usize::from(first)];
+                        if magic != 0 {
+                            self.magic = magic;
+                            magic_retried = true;
+                            state = PacketState::Send;
+                            continue;
+                        }
+                    }
+                    if data.len() > 1 {
+                        self.rx.extend_from_slice(&data[1..]);
+                    }
+                    let code = codec::unswizzle_byte(first, self.magic);
+                    let detail = match code {
+                        ERR => "controller reported an error",
+                        NAK => "controller reported a checksum error",
+                        _ => "controller rejected the packet",
+                    };
+                    return Err(DriverError::Connection(format!(
+                        "{detail} (0x{code:02X})"
+                    )));
+                }
+                PacketState::ReplyPending => {
+                    let count = self.collect_replies().await?;
+                    return Ok(count > 0);
+                }
+            }
+        }
     }
 
     /// Reads replies until no more data arrives within the
     /// inter-packet gap.
-    async fn collect_replies(&mut self) -> Result<(), DriverError> {
+    async fn collect_replies(&mut self) -> Result<usize, DriverError> {
         let Some(mut data) = self.read_unit(self.timeout).await? else {
-            return Ok(());
+            return Ok(0);
         };
         loop {
             match self.link.read(self.inter_packet_timeout).await {
@@ -217,8 +267,10 @@ impl RuidaTransport {
             }
         }
         let raw = codec::unswizzle(&data, self.magic);
-        self.replies.extend(codec::unpack_replies(&raw));
-        Ok(())
+        let replies = codec::unpack_replies(&raw);
+        let count = replies.len();
+        self.replies.extend(replies);
+        Ok(count)
     }
 
     async fn read_unit(
@@ -231,249 +283,9 @@ impl RuidaTransport {
         self.link.read(timeout).await
     }
 
-    /// Takes the replies collected so far.
-    pub fn take_replies(&mut self) -> Vec<codec::Reply> {
-        std::mem::take(&mut self.replies)
-    }
-
     /// Closes the underlying link.
     pub async fn close(&mut self) {
         self.link.close().await;
         self.rx.clear();
-    }
-}
-
-#[cfg(feature = "net")]
-mod net {
-    use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::{TcpStream, UdpSocket};
-
-    fn io_error(error: std::io::Error) -> DriverError {
-        DriverError::Connection(error.to_string())
-    }
-
-    pub struct UdpLink {
-        socket: UdpSocket,
-        buffer: Vec<u8>,
-    }
-
-    impl UdpLink {
-        /// Binds the host's Ruida port and connects to the controller.
-        pub async fn connect(
-            host: &str,
-            port: u16,
-        ) -> Result<Self, DriverError> {
-            let probe = UdpSocket::bind("0.0.0.0:0").await.map_err(io_error)?;
-            probe.connect((host, port)).await.map_err(io_error)?;
-            let local = probe.local_addr().map_err(io_error)?;
-            let socket = UdpSocket::bind((local.ip(), 40200))
-                .await
-                .map_err(io_error)?;
-            socket.connect((host, port)).await.map_err(io_error)?;
-            Ok(Self {
-                socket,
-                buffer: vec![0; 64 * 1024],
-            })
-        }
-    }
-
-    #[async_trait]
-    impl Link for UdpLink {
-        async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
-            self.socket.send(data).await.map_err(io_error)?;
-            Ok(())
-        }
-
-        async fn read(
-            &mut self,
-            timeout: Duration,
-        ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(
-                timeout,
-                self.socket.recv(&mut self.buffer),
-            )
-            .await
-            {
-                Ok(Ok(length)) => Ok(Some(self.buffer[..length].to_vec())),
-                Ok(Err(error)) => {
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::WouldBlock
-                            | std::io::ErrorKind::ConnectionReset
-                            | std::io::ErrorKind::Interrupted
-                    ) {
-                        Ok(None)
-                    } else {
-                        Err(io_error(error))
-                    }
-                }
-                Err(_) => Ok(None),
-            }
-        }
-
-        async fn close(&mut self) {}
-    }
-
-    pub struct TcpLink {
-        stream: TcpStream,
-        buffer: Vec<u8>,
-    }
-
-    impl TcpLink {
-        /// Connects to the controller's Ruida port.
-        pub async fn connect(
-            host: &str,
-            port: u16,
-        ) -> Result<Self, DriverError> {
-            let stream = tokio::time::timeout(
-                Duration::from_secs(3),
-                TcpStream::connect((host, port)),
-            )
-            .await
-            .map_err(|_| timed_out())?
-            .map_err(io_error)?;
-            let _ = stream.set_nodelay(true);
-            Ok(Self {
-                stream,
-                buffer: vec![0; 4096],
-            })
-        }
-    }
-
-    #[async_trait]
-    impl Link for TcpLink {
-        async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
-            self.stream.write_all(data).await.map_err(io_error)
-        }
-
-        async fn read(
-            &mut self,
-            timeout: Duration,
-        ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(
-                timeout,
-                self.stream.read(&mut self.buffer),
-            )
-            .await
-            {
-                Ok(Ok(0)) => Err(DriverError::Connection(
-                    "controller closed the connection".to_string(),
-                )),
-                Ok(Ok(length)) => Ok(Some(self.buffer[..length].to_vec())),
-                Ok(Err(error)) => Err(io_error(error)),
-                Err(_) => Ok(None),
-            }
-        }
-
-        async fn close(&mut self) {
-            let _ = self.stream.shutdown().await;
-        }
-    }
-}
-
-#[cfg(feature = "net")]
-pub use net::{TcpLink, UdpLink};
-
-#[cfg(feature = "serial")]
-mod serial {
-    use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio_serial::{SerialPortBuilderExt, SerialStream};
-
-    fn io_error(error: std::io::Error) -> DriverError {
-        DriverError::Connection(error.to_string())
-    }
-
-    pub struct SerialLink {
-        port: SerialStream,
-        buffer: Vec<u8>,
-    }
-
-    impl SerialLink {
-        /// Opens a USB serial link at the Ruida baud rate.
-        pub fn open(device: &str) -> Result<Self, DriverError> {
-            let port: SerialStream = tokio_serial::new(device, 115_200)
-                .open_native_async()
-                .map_err(|error| DriverError::Connection(error.to_string()))?;
-            Ok(Self {
-                port,
-                buffer: vec![0; 4096],
-            })
-        }
-    }
-
-    #[async_trait]
-    impl Link for SerialLink {
-        async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
-            self.port.write_all(data).await.map_err(io_error)
-        }
-
-        async fn read(
-            &mut self,
-            timeout: Duration,
-        ) -> Result<Option<Vec<u8>>, DriverError> {
-            match tokio::time::timeout(
-                timeout,
-                self.port.read(&mut self.buffer),
-            )
-            .await
-            {
-                Ok(Ok(0)) => Ok(None),
-                Ok(Ok(length)) => Ok(Some(self.buffer[..length].to_vec())),
-                Ok(Err(error)) => Err(io_error(error)),
-                Err(_) => Ok(None),
-            }
-        }
-
-        async fn close(&mut self) {}
-    }
-}
-
-#[cfg(feature = "serial")]
-pub use serial::SerialLink;
-
-/// Opens a link for the given endpoint.
-pub async fn open_link(
-    kind: TransportKind,
-    host: Option<&str>,
-    device: Option<&str>,
-    port: u16,
-) -> Result<Box<dyn Link>, DriverError> {
-    let _ = (host, device, port);
-    match kind {
-        #[cfg(feature = "serial")]
-        TransportKind::Usb => {
-            let device = device.ok_or_else(|| {
-                DriverError::Device("no USB device configured".to_string())
-            })?;
-            Ok(Box::new(SerialLink::open(device)?))
-        }
-        #[cfg(not(feature = "serial"))]
-        TransportKind::Usb => Err(DriverError::Unsupported(
-            "serial support is not compiled in".to_string(),
-        )),
-        #[cfg(feature = "net")]
-        TransportKind::Udp => {
-            let host = host.ok_or_else(|| {
-                DriverError::Device("no controller host configured".to_string())
-            })?;
-            Ok(Box::new(UdpLink::connect(host, port).await?))
-        }
-        #[cfg(not(feature = "net"))]
-        TransportKind::Udp => Err(DriverError::Unsupported(
-            "network support is not compiled in".to_string(),
-        )),
-        #[cfg(feature = "net")]
-        TransportKind::Tcp => {
-            let host = host.ok_or_else(|| {
-                DriverError::Device("no controller host configured".to_string())
-            })?;
-            Ok(Box::new(TcpLink::connect(host, port).await?))
-        }
-        #[cfg(not(feature = "net"))]
-        TransportKind::Tcp => Err(DriverError::Unsupported(
-            "network support is not compiled in".to_string(),
-        )),
     }
 }

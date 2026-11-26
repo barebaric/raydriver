@@ -15,19 +15,16 @@ use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
 use crate::ruida::codec::{self};
+use crate::ruida::link::{open_link, Link, TappedLink, TransportKind};
+use crate::ruida::monitor::{ConnectionMonitor, ConnectionState};
+use crate::ruida::protocol::StatusRegister;
 use crate::ruida::status::MachineStatus;
-use crate::ruida::transport::{
-    open_link, Link, RuidaTransport, TappedLink, TransportKind,
-};
+use crate::ruida::transport::{QueryOutcome, RuidaTransport};
 
 /// The controller's Ruida network port.
 pub const DEFAULT_PORT: u16 = 50200;
 /// The usual controller swizzle key.
 pub const DEFAULT_MAGIC: u8 = 0x88;
-/// The memory address of the machine status word.
-const ADDRESS_MACHINE_STATUS: u16 = 0x0400;
-/// The memory address of the controller card ID.
-const ADDRESS_CARD_ID: u16 = 0x057E;
 
 /// Connection parameters for a Ruida controller.
 #[derive(Debug, Clone)]
@@ -42,6 +39,8 @@ pub struct RuidaConfig {
     pub protect: bool,
     pub timeout: Duration,
     pub query_interval: Duration,
+    pub query_retries: u32,
+    pub query_retry_delay: Duration,
     pub reconnect_delay: Duration,
     pub ping_retries: u32,
     pub ping_delay: Duration,
@@ -58,6 +57,8 @@ impl Default for RuidaConfig {
             protect: true,
             timeout: Duration::from_millis(500),
             query_interval: Duration::from_secs(1),
+            query_retries: 3,
+            query_retry_delay: Duration::from_secs(1),
             reconnect_delay: Duration::from_secs(1),
             ping_retries: 10,
             ping_delay: Duration::from_secs(1),
@@ -66,14 +67,31 @@ impl Default for RuidaConfig {
 }
 
 impl RuidaConfig {
-    /// The link this configuration connects over. USB wins when a
-    /// device is configured.
-    pub fn transport(&self) -> TransportKind {
+    /// The link candidates in preference order.
+    ///
+    /// USB comes first when a device is configured; the configured
+    /// network protocol is the fallback. A configuration without an
+    /// explicit endpoint still yields the network kind so opening it
+    /// reports the useful missing-host error.
+    pub fn transport_candidates(&self) -> Vec<TransportKind> {
+        let mut candidates = Vec::new();
         if self.usb_device.is_some() {
-            TransportKind::Usb
-        } else {
-            self.protocol
+            candidates.push(TransportKind::Usb);
         }
+        if (self.host.is_some() || candidates.is_empty())
+            && !candidates.contains(&self.protocol)
+        {
+            candidates.push(self.protocol);
+        }
+        candidates
+    }
+
+    /// The preferred link, used before a connection is established.
+    pub fn transport(&self) -> TransportKind {
+        self.transport_candidates()
+            .first()
+            .copied()
+            .unwrap_or(self.protocol)
     }
 }
 
@@ -117,6 +135,7 @@ pub struct RuidaDriver {
     state: Mutex<DeviceState>,
     status: Mutex<MachineStatus>,
     transport: Arc<AsyncMutex<Option<RuidaTransport>>>,
+    active_kind: Mutex<Option<TransportKind>>,
     connection_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     keep_running: Arc<AtomicBool>,
     connected: Arc<AtomicBool>,
@@ -137,6 +156,7 @@ impl RuidaDriver {
             state: Mutex::new(DeviceState::default()),
             status: Mutex::new(MachineStatus::default()),
             transport: Arc::new(AsyncMutex::new(None)),
+            active_kind: Mutex::new(None),
             connection_task: Mutex::new(None),
             keep_running: Arc::new(AtomicBool::new(false)),
             connected: Arc::new(AtomicBool::new(false)),
@@ -214,9 +234,7 @@ impl RuidaDriver {
             DriverError::Connection("controller is not connected".to_string())
         })?;
         transport.send(raw).await?;
-        let replies = transport.take_replies();
         drop(guard);
-        self.apply_replies(replies);
         Ok(())
     }
 
@@ -404,8 +422,7 @@ impl RuidaDriver {
         let transport = guard.as_mut().ok_or_else(|| {
             DriverError::Connection("controller is not connected".to_string())
         })?;
-        transport.send(&codec::get_setting(address)).await?;
-        let replies = transport.take_replies();
+        let replies = transport.query(&codec::get_setting(address)).await?;
         drop(guard);
         self.apply_replies(replies.clone());
         Ok(replies)
@@ -434,16 +451,56 @@ impl RuidaDriver {
         self.publish();
     }
 
+    fn link_label(&self, kind: TransportKind) -> String {
+        match kind {
+            TransportKind::Usb => format!(
+                "USB {}",
+                self.config.usb_device.as_deref().unwrap_or("<unset>")
+            ),
+            TransportKind::Udp => format!(
+                "UDP {}:{}",
+                self.config.host.as_deref().unwrap_or("<unset>"),
+                self.config.port
+            ),
+            TransportKind::Tcp => format!(
+                "TCP {}:{}",
+                self.config.host.as_deref().unwrap_or("<unset>"),
+                self.config.port
+            ),
+        }
+    }
+
+    fn set_active_kind(&self, kind: Option<TransportKind>) {
+        *self.active_kind.lock().unwrap() = kind;
+    }
+
     async fn connection_loop(self: Arc<Self>) {
         while self.keep_running.load(Ordering::SeqCst) {
-            self.set_connection(TransportStatus::Connecting, None);
-            if let Err(error) = self.clone().open_and_monitor().await {
-                self.set_connection(
-                    TransportStatus::Error,
-                    Some(&error.to_string()),
-                );
+            let mut monitor =
+                ConnectionMonitor::new(self.config.transport_candidates());
+            while let Some(kind) = monitor.current_candidate() {
+                if !self.keep_running.load(Ordering::SeqCst) {
+                    break;
+                }
+                let label = self.link_label(kind);
+                self.set_connection(TransportStatus::Connecting, Some(&label));
+                if let Err(error) =
+                    self.clone().open_and_monitor(kind, &mut monitor).await
+                {
+                    self.set_connection(
+                        TransportStatus::Error,
+                        Some(&format!("{label}: {error}")),
+                    );
+                }
+                self.connected.store(false, Ordering::SeqCst);
+                self.set_active_kind(None);
+                if !self.keep_running.load(Ordering::SeqCst) {
+                    break;
+                }
+                if !monitor.advance_candidate() {
+                    break;
+                }
             }
-            self.connected.store(false, Ordering::SeqCst);
             if !self.keep_running.load(Ordering::SeqCst) {
                 break;
             }
@@ -451,12 +508,18 @@ impl RuidaDriver {
             tokio::time::sleep(self.config.reconnect_delay).await;
         }
         self.connected.store(false, Ordering::SeqCst);
+        self.set_active_kind(None);
         self.set_connection(TransportStatus::Disconnected, None);
     }
 
-    async fn open_and_monitor(self: Arc<Self>) -> Result<(), DriverError> {
+    async fn open_and_monitor(
+        self: Arc<Self>,
+        kind: TransportKind,
+        monitor: &mut ConnectionMonitor,
+    ) -> Result<(), DriverError> {
+        monitor.set_state(ConnectionState::Connecting);
         let link = open_link(
-            self.config.transport(),
+            kind,
             self.config.host.as_deref(),
             self.config.usb_device.as_deref(),
             self.config.port,
@@ -464,14 +527,12 @@ impl RuidaDriver {
         .await?;
         let link: Box<dyn Link> =
             Box::new(TappedLink::new(link, self.events.clone()));
-        let mut transport = RuidaTransport::new(
-            link,
-            self.config.transport(),
-            self.config.magic,
-        );
+        let mut transport = RuidaTransport::new(link, kind, self.config.magic);
         transport.timeout = self.config.timeout;
-        self.handshake(&mut transport).await?;
+        monitor.set_state(ConnectionState::WaitToPing);
+        self.handshake(&mut transport, monitor).await?;
         *self.transport.lock().await = Some(transport);
+        self.set_active_kind(Some(kind));
         if let Err(error) = self.query_identity().await {
             log::debug!("Ruida identity query failed: {error}");
         }
@@ -481,25 +542,34 @@ impl RuidaDriver {
             state.status = DeviceStatus::Idle;
             state.error = None;
         }
-        self.set_connection(TransportStatus::Connected, None);
+        self.set_connection(
+            TransportStatus::Connected,
+            Some(&self.link_label(kind)),
+        );
         self.publish();
-        self.query_loop().await
+        monitor.set_state(ConnectionState::WaitToPoll);
+        self.query_loop(monitor).await
     }
 
     async fn handshake(
         &self,
         transport: &mut RuidaTransport,
+        monitor: &mut ConnectionMonitor,
     ) -> Result<(), DriverError> {
-        for _ in 0..self.config.ping_retries.max(1) {
+        let ping = codec::get_setting(StatusRegister::CardId.address());
+        let max_attempts = self.config.ping_retries.max(1);
+        for attempt in 0..max_attempts {
             if !self.keep_running.load(Ordering::SeqCst) {
                 return Err(DriverError::Connection(
                     "connection closed".to_string(),
                 ));
             }
-            let ping = codec::get_setting(ADDRESS_CARD_ID);
-            if transport.send_command(&ping).await.is_ok() {
-                let replies = transport.take_replies();
+            monitor.set_state(ConnectionState::SendPing);
+            if let Ok(QueryOutcome::Replied(replies)) =
+                transport.query_outcome(&ping).await
+            {
                 if !replies.is_empty() {
+                    monitor.set_state(ConnectionState::PingReply);
                     let mut status = self.status.lock().unwrap();
                     for reply in &replies {
                         status.apply(reply);
@@ -507,7 +577,10 @@ impl RuidaDriver {
                     return Ok(());
                 }
             }
-            tokio::time::sleep(self.config.ping_delay).await;
+            if attempt + 1 < max_attempts {
+                monitor.set_state(ConnectionState::WaitToPing);
+                tokio::time::sleep(self.config.ping_delay).await;
+            }
         }
         Err(DriverError::Timeout(
             "controller did not answer the status ping".to_string(),
@@ -516,33 +589,70 @@ impl RuidaDriver {
 
     async fn query_identity(&self) -> Result<(), DriverError> {
         let mut raw = Vec::new();
-        for address in [0x0026u16, 0x0036, 0x030F, 0x057F] {
-            raw.extend(codec::get_setting(address));
+        for register in StatusRegister::IDENTITY {
+            raw.extend(codec::get_setting(register.address()));
         }
-        self.send_raw(&raw).await
+        let mut guard = self.transport.lock().await;
+        let transport = guard.as_mut().ok_or_else(|| {
+            DriverError::Connection("controller is not connected".to_string())
+        })?;
+        let replies = transport.query(&raw).await?;
+        drop(guard);
+        self.apply_replies(replies);
+        Ok(())
     }
 
-    async fn query_loop(self: Arc<Self>) -> Result<(), DriverError> {
+    async fn query_loop(
+        self: Arc<Self>,
+        monitor: &mut ConnectionMonitor,
+    ) -> Result<(), DriverError> {
         loop {
             if !self.keep_running.load(Ordering::SeqCst) {
                 return Ok(());
             }
+            monitor.set_state(ConnectionState::WaitToPoll);
             tokio::time::sleep(self.config.query_interval).await;
-            let mut guard = self.transport.lock().await;
-            let Some(transport) = guard.as_mut() else {
-                return Err(DriverError::Connection(
-                    "controller is not connected".to_string(),
-                ));
-            };
-            let mut raw = codec::get_setting(ADDRESS_MACHINE_STATUS);
-            for address in [0x0421u16, 0x0431, 0x0441, 0x0451] {
-                raw.extend(codec::get_setting(address));
+            let max_attempts = self.config.query_retries.max(1);
+            let mut attempts = 0;
+            loop {
+                if !self.keep_running.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                monitor.set_state(ConnectionState::SendQuery);
+                let mut raw =
+                    codec::get_setting(StatusRegister::MachineStatus.address());
+                for register in &StatusRegister::STATUS_POLL[1..] {
+                    raw.extend(codec::get_setting(register.address()));
+                }
+                let mut guard = self.transport.lock().await;
+                let Some(transport) = guard.as_mut() else {
+                    return Err(DriverError::Connection(
+                        "controller is not connected".to_string(),
+                    ));
+                };
+                let result = transport.query_outcome(&raw).await;
+                drop(guard);
+                match result {
+                    Ok(QueryOutcome::Replied(replies)) => {
+                        monitor.set_state(ConnectionState::WaitToPoll);
+                        self.apply_replies(replies);
+                        break;
+                    }
+                    Ok(QueryOutcome::Busy) => {
+                        monitor.set_state(ConnectionState::ReplyPending);
+                        continue;
+                    }
+                    Err(error) => {
+                        attempts += 1;
+                        if attempts >= max_attempts {
+                            monitor.set_state(ConnectionState::Resync);
+                            return Err(error);
+                        }
+                        monitor.set_state(ConnectionState::ReplyPending);
+                        tokio::time::sleep(self.config.query_retry_delay).await;
+                    }
+                }
             }
-            let result = transport.send(&raw).await;
-            let replies = transport.take_replies();
-            drop(guard);
-            result?;
-            self.apply_replies(replies);
         }
     }
 }
@@ -581,18 +691,27 @@ impl Driver for RuidaDriver {
     }
 
     fn resource_uri(&self) -> Option<String> {
-        if let Some(device) = &self.config.usb_device {
-            return Some(format!("serial://{device}"));
-        }
-        let host = self.config.host.as_deref()?;
-        match self.config.protocol {
-            TransportKind::Udp => {
-                Some(format!("udp://{host}:{}", self.config.port))
-            }
-            TransportKind::Tcp => {
-                Some(format!("tcp://{host}:{}", self.config.port))
-            }
-            TransportKind::Usb => Some(format!("serial://{host}")),
+        let kind = self
+            .active_kind
+            .lock()
+            .unwrap()
+            .unwrap_or_else(|| self.config.transport());
+        match kind {
+            TransportKind::Usb => self
+                .config
+                .usb_device
+                .as_ref()
+                .map(|device| format!("serial://{device}")),
+            TransportKind::Udp => self
+                .config
+                .host
+                .as_ref()
+                .map(|host| format!("udp://{host}:{}", self.config.port)),
+            TransportKind::Tcp => self
+                .config
+                .host
+                .as_ref()
+                .map(|host| format!("tcp://{host}:{}", self.config.port)),
         }
     }
 

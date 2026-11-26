@@ -1,11 +1,20 @@
 """A Ruida controller emulator (not a mock) for tests.
 
-Speaks the controller's binary protocol over TCP: it acknowledges
-every packet, answers ``GET_SETTING`` queries with typed replies and
-tracks the job state commanded by ``START_JOB``/``STOP_JOB``/
-``PAUSE_JOB``/``RESUME_JOB``/``END_JOB``. Tests inspect ``commands``
-(the unswizzled command bytes, as hex) and drive the reported state
-through ``set_job_running``, ``set_paused`` and ``set_position``.
+Speaks the controller's binary protocol over TCP or UDP: it
+acknowledges every packet, answers ``GET_SETTING`` queries with typed
+replies and tracks the job state commanded by ``START_JOB``/
+``STOP_JOB``/``PAUSE_JOB``/``RESUME_JOB``/``END_JOB``. Tests inspect
+``commands`` (the unswizzled command bytes, as hex) and drive the
+reported state through ``set_job_running``, ``set_paused`` and
+``set_position``.
+
+Fault controls:
+
+- ``fail_next_ack``: drop the next packet without acknowledging it.
+- ``withhold_reply``: acknowledge the next query but send no reply,
+  exercising the transport's Busy path.
+- ``disconnect_clients()``: close active TCP sessions to force a
+  reconnect.
 
 Used by the test suite for hardware-free session coverage.
 """
@@ -61,7 +70,15 @@ def int35(value: int) -> bytes:
 class RuidaEmulator:
     """A firmware-faithful Ruida controller for tests."""
 
-    def __init__(self, magic: int = 0x88, card_id: int = 0x65106510):
+    def __init__(
+        self,
+        magic: int = 0x88,
+        card_id: int = 0x65106510,
+        protocol: str = "tcp",
+    ):
+        if protocol not in ("tcp", "udp"):
+            raise ValueError(f"unsupported protocol: {protocol}")
+        self.protocol = protocol
         self.magic = magic
         self.card_id = card_id
         self.mainboard_version = "RDC6442S"
@@ -71,11 +88,22 @@ class RuidaEmulator:
         self.status = 0
         self.commands: list[str] = []
         self.fail_next_ack = False
+        self.withhold_reply = False
         self.port: int | None = None
         self._server: asyncio.AbstractServer | None = None
+        self._udp_transport: asyncio.DatagramTransport | None = None
         self._clients: set = set()
 
     async def start(self) -> None:
+        if self.protocol == "udp":
+            loop = asyncio.get_running_loop()
+            transport, _ = await loop.create_datagram_endpoint(
+                lambda: _UdpProtocol(self),
+                local_addr=("127.0.0.1", 0),
+            )
+            self._udp_transport = transport
+            self.port = transport.get_extra_info("sockname")[1]
+            return
         self._server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
         self.port = self._server.sockets[0].getsockname()[1]
 
@@ -83,6 +111,12 @@ class RuidaEmulator:
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
+        if self._udp_transport is not None:
+            self._udp_transport.close()
+        self.disconnect_clients()
+
+    def disconnect_clients(self) -> None:
+        """Closes active TCP sessions; harmless for UDP."""
         for writer in list(self._clients):
             writer.close()
 
@@ -187,14 +221,27 @@ class RuidaEmulator:
             writer.close()
 
     async def _process(self, data: bytes, writer) -> None:
+        ack, replies = self._handle_packet(data)
+        if ack is None:
+            return
+        writer.write(ack)
+        await writer.drain()
+        if replies:
+            writer.write(replies)
+            await writer.drain()
+
+    def _handle_packet(self, data: bytes) -> tuple[bytes | None, bytes]:
+        """Applies one raw command packet and returns (ACK, replies)."""
         raw = self._unswizzle(data)
         self.commands.append(raw.hex())
         self._apply_commands(raw)
         if self.fail_next_ack:
             self.fail_next_ack = False
-            return
-        writer.write(self._swizzle(bytes([ACK])))
-        await writer.drain()
+            return None, b""
+        ack = self._swizzle(bytes([ACK]))
+        if self.withhold_reply:
+            self.withhold_reply = False
+            return ack, b""
         index = 0
         replies = bytearray()
         while index + 3 < len(raw):
@@ -204,6 +251,118 @@ class RuidaEmulator:
                 index += 4
             else:
                 index += 1
+        return ack, bytes(replies)
+
+
+class _UdpProtocol(asyncio.DatagramProtocol):
+    """Routes UDP datagrams through the same controller logic as TCP."""
+
+    def __init__(self, emulator: RuidaEmulator):
+        self.emulator = emulator
+        self.transport: asyncio.DatagramTransport | None = None
+        self.addr = None
+
+    def connection_made(self, transport) -> None:
+        self.transport = transport
+
+    def datagram_received(self, data: bytes, addr) -> None:
+        if len(data) < 2 or self.transport is None:
+            return
+        checksum = (data[0] << 8) | data[1]
+        payload = data[2:]
+        if sum(payload) & 0xFFFF != checksum:
+            return
+        ack, replies = self.emulator._handle_packet(payload)
+        if ack is None:
+            return
+        self.transport.sendto(ack, addr)
         if replies:
-            writer.write(bytes(replies))
-            await writer.drain()
+            self.transport.sendto(replies, addr)
+
+
+class RuidaPtyEmulator:
+    """A USB Ruida controller on a pseudo-terminal (POSIX tests only).
+
+    USB carries raw swizzled bytes and no per-packet ACK. ``path`` is a
+    stable symlink that can be removed to simulate an unplugged cable
+    and recreated after ``plug()``; the driver keeps using the same
+    configured device path.
+    """
+
+    def __init__(self, magic: int = 0x88, card_id: int = 0x65106510):
+        import sys
+
+        if sys.platform == "win32":
+            raise RuntimeError("PTY emulation is not available on Windows")
+        self.controller = RuidaEmulator(magic=magic, card_id=card_id)
+        self._master_fd = -1
+        self._slave_fd = -1
+        self._directory = None
+        self.path = ""
+        self._loop = None
+        self._plug()
+
+    def _plug(self) -> None:
+        import os
+        import pty
+        import tempfile
+        import tty
+
+        if self._directory is None:
+            self._directory = tempfile.mkdtemp(prefix="raydriver-ruida-")
+            self.path = os.path.join(self._directory, "ttyUSB0")
+        master, slave = pty.openpty()
+        tty.setraw(slave)
+        os.set_blocking(master, False)
+        if os.path.lexists(self.path):
+            os.unlink(self.path)
+        os.symlink(os.ttyname(slave), self.path)
+        self._master_fd = master
+        self._slave_fd = slave
+        self._loop = asyncio.get_running_loop()
+        self._loop.add_reader(master, self._on_readable)
+
+    def unplug(self) -> None:
+        """Removes the device path and closes the PTY."""
+        import os
+
+        if self._loop is not None and self._master_fd >= 0:
+            self._loop.remove_reader(self._master_fd)
+        if os.path.lexists(self.path):
+            os.unlink(self.path)
+        for fd in (self._master_fd, self._slave_fd):
+            if fd >= 0:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self._master_fd = -1
+        self._slave_fd = -1
+
+    def plug(self) -> None:
+        """Recreates the device path with a fresh PTY."""
+        self._plug()
+
+    def stop(self) -> None:
+        import shutil
+
+        self.unplug()
+        if self._directory:
+            shutil.rmtree(self._directory, ignore_errors=True)
+            self._directory = None
+
+    def _on_readable(self) -> None:
+        import os
+
+        while True:
+            try:
+                data = os.read(self._master_fd, 4096)
+            except BlockingIOError:
+                return
+            except OSError:
+                return
+            if not data:
+                return
+            _, replies = self.controller._handle_packet(data)
+            if replies:
+                os.write(self._master_fd, replies)

@@ -2,6 +2,10 @@
 
 use crate::core::types::DeviceStatus;
 use crate::ruida::codec::{self, Reply};
+use crate::ruida::protocol::{
+    StatusRegister, MACHINE_STATUS_MOVING, MACHINE_STATUS_PAUSED,
+    MACHINE_STATUS_RUNNING,
+};
 
 /// The machine state derived from the controller's status replies.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -22,23 +26,43 @@ impl MachineStatus {
     /// Applies one reply. Returns whether anything changed.
     pub fn apply(&mut self, reply: &Reply) -> bool {
         let before = self.clone();
-        match reply.address {
-            0x0400 => {
+        let Some(register) = StatusRegister::from_address(reply.address) else {
+            return false;
+        };
+        match register {
+            StatusRegister::MachineStatus => {
                 let value = codec::to_uint(&reply.data) as u32;
-                self.running = value & 0x0000_0001 != 0;
-                self.paused = value & 0x0000_0002 != 0;
-                self.moving = value & 0x0100_0000 != 0;
+                self.running = value & MACHINE_STATUS_RUNNING != 0;
+                self.paused = value & MACHINE_STATUS_PAUSED != 0;
+                self.moving = value & MACHINE_STATUS_MOVING != 0;
             }
-            0x0421 => self.position[0] = decode_position(&reply.data),
-            0x0431 => self.position[1] = decode_position(&reply.data),
-            0x0441 => self.position[2] = decode_position(&reply.data),
-            0x0451 => self.position[3] = decode_position(&reply.data),
-            0x057E => self.card_id = Some(codec::to_uint(&reply.data) as u32),
-            0x057F => self.mainboard_version = Some(decode_string(&reply.data)),
-            0x0026 => self.bed_size[0] = decode_position(&reply.data),
-            0x0036 => self.bed_size[1] = decode_position(&reply.data),
-            0x030F => self.features = Some(codec::to_uint(&reply.data) as u32),
-            _ => return false,
+            StatusRegister::PositionX => {
+                self.position[0] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionY => {
+                self.position[1] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionZ => {
+                self.position[2] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionU => {
+                self.position[3] = decode_position(&reply.data)
+            }
+            StatusRegister::CardId => {
+                self.card_id = Some(codec::to_uint(&reply.data) as u32)
+            }
+            StatusRegister::MainboardVersion => {
+                self.mainboard_version = Some(decode_string(&reply.data))
+            }
+            StatusRegister::BedSizeX => {
+                self.bed_size[0] = decode_position(&reply.data)
+            }
+            StatusRegister::BedSizeY => {
+                self.bed_size[1] = decode_position(&reply.data)
+            }
+            StatusRegister::MachineFeatures => {
+                self.features = Some(codec::to_uint(&reply.data) as u32)
+            }
         }
         *self != before
     }

@@ -312,20 +312,31 @@ impl DriverKind {
                                 (value * 1000.0) as u64,
                             )
                         })
-                        .unwrap_or_default(),
+                        .unwrap_or(std::time::Duration::from_millis(500)),
                     query_interval: float(config, "query_interval")
                         .map(|value| {
                             std::time::Duration::from_secs_f64(value.max(0.05))
                         })
-                        .unwrap_or_default(),
+                        .unwrap_or(std::time::Duration::from_secs(1)),
+                    query_retries: uint(config, "query_retries").unwrap_or(3)
+                        as u32,
+                    query_retry_delay: float(config, "query_retry_delay")
+                        .map(|value| {
+                            std::time::Duration::from_secs_f64(value.max(0.0))
+                        })
+                        .unwrap_or(std::time::Duration::from_secs(1)),
+                    reconnect_delay: float(config, "reconnect_delay")
+                        .map(|value| {
+                            std::time::Duration::from_secs_f64(value.max(0.0))
+                        })
+                        .unwrap_or(std::time::Duration::from_secs(1)),
                     ping_retries: uint(config, "ping_retries").unwrap_or(10)
                         as u32,
                     ping_delay: float(config, "ping_delay")
                         .map(|value| {
                             std::time::Duration::from_secs_f64(value.max(0.0))
                         })
-                        .unwrap_or_default(),
-                    ..RuidaConfig::default()
+                        .unwrap_or(std::time::Duration::from_secs(1)),
                 };
                 Ok(RuidaDriver::new(ruida, events))
             }
