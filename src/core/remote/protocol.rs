@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use base64::Engine as _;
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -361,6 +362,12 @@ pub enum WireEvent {
     RawTx {
         line: String,
     },
+    RawRxBytes {
+        data: Vec<u8>,
+    },
+    RawTxBytes {
+        data: Vec<u8>,
+    },
     Progress {
         op: i64,
     },
@@ -411,6 +418,16 @@ impl WireEvent {
             Self::RawTx { line } => {
                 json!({"kind": "raw_tx", "line": line})
             }
+            Self::RawRxBytes { data } => json!({
+                "kind": "raw_rx_bytes",
+                "data": base64::engine::general_purpose::STANDARD
+                    .encode(data),
+            }),
+            Self::RawTxBytes { data } => json!({
+                "kind": "raw_tx_bytes",
+                "data": base64::engine::general_purpose::STANDARD
+                    .encode(data),
+            }),
             Self::Progress { op } => {
                 json!({"kind": KIND_PROGRESS, "op": op})
             }
@@ -488,6 +505,16 @@ impl WireEvent {
             }),
             "raw_tx" => Some(Self::RawTx {
                 line: payload.get("line")?.as_str()?.to_string(),
+            }),
+            "raw_rx_bytes" => Some(Self::RawRxBytes {
+                data: base64::engine::general_purpose::STANDARD
+                    .decode(payload.get("data")?.as_str()?)
+                    .ok()?,
+            }),
+            "raw_tx_bytes" => Some(Self::RawTxBytes {
+                data: base64::engine::general_purpose::STANDARD
+                    .decode(payload.get("data")?.as_str()?)
+                    .ok()?,
             }),
             KIND_PROGRESS => Some(Self::Progress {
                 op: payload.get("op").and_then(Value::as_i64).unwrap_or(0),

@@ -54,3 +54,18 @@ def test_recorder_records_raw_events_and_forwards():
     assert len(forwarded) == 2
     assert forwarded[0].line == "$I"
     assert forwarded[1].line == "ok"
+
+
+def test_recorder_records_binary_events_and_forwards():
+    forwarded = []
+    recorder = Recorder(forward=forwarded.append)
+    recorder(DriverEvent.RawTxBytes(data=b"\x88\x01"))
+    recorder(DriverEvent.RawRxBytes(data=[0x88, 0x02]))
+    directions = [f.direction for f in recorder.capture.frames]
+    assert directions == ["tx", "rx"]
+    assert recorder.capture.frames[0].data == b"\x88\x01"
+    assert recorder.capture.frames[1].data == b"\x88\x02"
+    assert all(frame.text is None for frame in recorder.capture.frames)
+    assert len(forwarded) == 2
+    assert bytes(forwarded[0].data) == b"\x88\x01"
+    assert bytes(forwarded[1].data) == b"\x88\x02"

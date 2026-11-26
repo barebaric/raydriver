@@ -24,7 +24,11 @@ One typed session event, delivered to `event_callback`.
 
 ### RawRx
 
+### RawRxBytes
+
 ### RawTx
+
+### RawTxBytes
 
 ### StateChanged
 

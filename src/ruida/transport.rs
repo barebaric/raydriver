@@ -7,11 +7,12 @@
 //! ``0xDA`` byte and reassembled across reads until an inter-packet
 //! gap.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::core::driver::DriverError;
+use crate::core::driver::{DriverError, DriverEvents};
 use crate::ruida::codec;
 
 /// The physical link a session runs over.
@@ -45,6 +46,63 @@ pub trait Link: Send {
 
 fn timed_out() -> DriverError {
     DriverError::Timeout("controller did not answer".to_string())
+}
+
+/// Wraps a link and mirrors every wire chunk into raw driver events,
+/// so the protocol analyzer can record binary traffic.  Chunks stay
+/// swizzled: they are exactly what crossed the wire.
+pub(crate) struct TappedLink {
+    link: Box<dyn Link>,
+    events: Arc<dyn DriverEvents>,
+}
+
+/// Upper bound for one raw event, so a large USB job cannot create
+/// an oversized event (or remote wire frame).
+const RAW_EVENT_CHUNK: usize = 64 * 1024;
+
+impl TappedLink {
+    pub(crate) fn new(
+        link: Box<dyn Link>,
+        events: Arc<dyn DriverEvents>,
+    ) -> Self {
+        Self { link, events }
+    }
+
+    fn report_tx(&self, data: &[u8]) {
+        for chunk in data.chunks(RAW_EVENT_CHUNK) {
+            self.events.raw_tx_bytes(chunk);
+        }
+    }
+
+    fn report_rx(&self, data: &[u8]) {
+        for chunk in data.chunks(RAW_EVENT_CHUNK) {
+            self.events.raw_rx_bytes(chunk);
+        }
+    }
+}
+
+#[async_trait]
+impl Link for TappedLink {
+    async fn write(&mut self, data: &[u8]) -> Result<(), DriverError> {
+        self.link.write(data).await?;
+        self.report_tx(data);
+        Ok(())
+    }
+
+    async fn read(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<Vec<u8>>, DriverError> {
+        let data = self.link.read(timeout).await?;
+        if let Some(bytes) = data.as_deref() {
+            self.report_rx(bytes);
+        }
+        Ok(data)
+    }
+
+    async fn close(&mut self) {
+        self.link.close().await;
+    }
 }
 
 /// A link plus the Ruida packet handshake.

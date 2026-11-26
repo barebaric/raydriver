@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import curses
+from collections.abc import Awaitable, Callable
 
 from raydriver.analyzer.capture import RX, TX, Recorder
 from raydriver.analyzer.decode import Decoder, format_frame
@@ -35,6 +36,7 @@ class AnalyzerTui:
     ):
         self.recorder = recorder
         self.decoder = decoder
+        self.decoder.reset()
         self.source = source
         self.save_path = save_path
         self.paused = False
@@ -133,13 +135,25 @@ class AnalyzerTui:
         stdscr.addnstr(height - 1, 0, footer, width - 1, curses.A_REVERSE)
         stdscr.refresh()
 
-    async def run(self, stdscr, *, work=None, refresh: float = 0.05):
+    async def run(
+        self,
+        stdscr,
+        *,
+        work: (
+            Awaitable[object] | Callable[[], Awaitable[object]] | None
+        ) = None,
+        refresh: float = 0.05,
+    ):
         """Run the monitor until quit.
 
-        *work* is an optional coroutine to run alongside (the
-        session's connect/job); it is cancelled on quit."""
+        *work* is an optional coroutine (or zero-argument callable
+        returning one) to run alongside; it is cancelled and awaited
+        on quit, so the session tears down before the loop closes."""
         stdscr.nodelay(True)
-        task = asyncio.ensure_future(work) if work is not None else None
+        task = None
+        if work is not None:
+            coroutine = work() if callable(work) else work
+            task = asyncio.ensure_future(coroutine)
         try:
             while True:
                 height, _ = stdscr.getmaxyx()
@@ -156,6 +170,7 @@ class AnalyzerTui:
         finally:
             if task is not None:
                 task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
 
 def run_tui(
@@ -164,7 +179,7 @@ def run_tui(
     *,
     source: str = "",
     save_path: str | None = None,
-    work=None,
+    work: (Awaitable[object] | Callable[[], Awaitable[object]] | None) = None,
 ) -> None:
     """Run :class:`AnalyzerTui` under curses (needs a terminal)."""
     tui = AnalyzerTui(recorder, decoder, source=source, save_path=save_path)

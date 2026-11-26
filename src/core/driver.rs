@@ -61,6 +61,12 @@ pub enum DriverEvent {
     /// A complete line sent to the device (interactive commands and
     /// realtime bytes; not bulk job streaming).
     RawTx(String),
+    /// A chunk of raw bytes received from the device (binary
+    /// protocols such as Ruida).
+    RawRxBytes(Vec<u8>),
+    /// A chunk of raw bytes sent to the device (binary protocols
+    /// such as Ruida).
+    RawTxBytes(Vec<u8>),
 }
 
 /// Notifications emitted by a device session, implemented by the
@@ -132,6 +138,14 @@ pub trait DriverEvents: Send + Sync {
 
     fn raw_tx(&self, line: &str) {
         self.emit(DriverEvent::RawTx(line.to_string()));
+    }
+
+    fn raw_rx_bytes(&self, data: &[u8]) {
+        self.emit(DriverEvent::RawRxBytes(data.to_vec()));
+    }
+
+    fn raw_tx_bytes(&self, data: &[u8]) {
+        self.emit(DriverEvent::RawTxBytes(data.to_vec()));
     }
 }
 

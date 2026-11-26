@@ -17,9 +17,11 @@ Verbosity follows ``RUST_LOG`` (e.g. ``RUST_LOG=debug``).
 
 import argparse
 import asyncio
+import inspect
 import os
 import sys
 import time
+from collections.abc import Awaitable
 
 import raydriver.raydriver as _native
 from raydriver.cli.analyzer import add_analyzer_parser
@@ -314,8 +316,7 @@ def build_parser():
     return parser
 
 
-async def amain(argv) -> int:
-    args = build_parser().parse_args(argv)
+def _configure_logging(args) -> None:
     # Not every subcommand defines --log-file (e.g. the debug
     # commands); default to stderr logging when it is absent.
     log_file = getattr(args, "log_file", None)
@@ -323,12 +324,32 @@ async def amain(argv) -> int:
         # Diagnostics belong in the log file; info level by default.
         os.environ["RUST_LOG"] = "info"
     _native.init_logging(path=log_file)
-    return await args.func(args)
+
+
+async def _await_result(result: Awaitable[int]) -> int:
+    return await result
+
+
+async def amain(argv) -> int:
+    args = build_parser().parse_args(argv)
+    _configure_logging(args)
+    result = args.func(args)
+    if inspect.isawaitable(result):
+        return await _await_result(result)
+    return result
 
 
 def main() -> None:
     try:
-        sys.exit(asyncio.run(amain(sys.argv[1:])))
+        # The TUI subcommand owns its event loop (curses needs the
+        # main thread), so dispatch outside asyncio.run when the
+        # command is synchronous.
+        args = build_parser().parse_args(sys.argv[1:])
+        _configure_logging(args)
+        result = args.func(args)
+        if inspect.isawaitable(result):
+            result = asyncio.run(_await_result(result))
+        sys.exit(result)
     except KeyboardInterrupt:
         sys.exit(130)
 

@@ -39,6 +39,12 @@ pub(crate) fn event_to_wire(event: &DriverEvent) -> WireEvent {
         },
         DriverEvent::RawRx { line } => WireEvent::RawRx { line: line.clone() },
         DriverEvent::RawTx { line } => WireEvent::RawTx { line: line.clone() },
+        DriverEvent::RawRxBytes { data } => {
+            WireEvent::RawRxBytes { data: data.clone() }
+        }
+        DriverEvent::RawTxBytes { data } => {
+            WireEvent::RawTxBytes { data: data.clone() }
+        }
     }
 }
 
@@ -90,6 +96,12 @@ pub(crate) fn extract_event(
             }
             DriverEvent::RawTx { line } => {
                 DriverEvent::RawTx { line: line.clone() }
+            }
+            DriverEvent::RawRxBytes { data } => {
+                DriverEvent::RawRxBytes { data: data.clone() }
+            }
+            DriverEvent::RawTxBytes { data } => {
+                DriverEvent::RawTxBytes { data: data.clone() }
             }
         })
 }
@@ -145,6 +157,16 @@ pub(crate) fn wire_to_py_event(
         WireEvent::RawTx { line } => {
             let cls = base.getattr("RawTx")?;
             Ok(Some(cls.call1((line.clone(),))?.unbind()))
+        }
+        WireEvent::RawRxBytes { data } => {
+            let cls = base.getattr("RawRxBytes")?;
+            let data = pyo3::types::PyBytes::new(py, data);
+            Ok(Some(cls.call1((data,))?.unbind()))
+        }
+        WireEvent::RawTxBytes { data } => {
+            let cls = base.getattr("RawTxBytes")?;
+            let data = pyo3::types::PyBytes::new(py, data);
+            Ok(Some(cls.call1((data,))?.unbind()))
         }
         _ => Ok(None),
     }

@@ -16,7 +16,9 @@ use crate::core::types::{
 };
 use crate::ruida::codec::{self};
 use crate::ruida::status::MachineStatus;
-use crate::ruida::transport::{open_link, RuidaTransport, TransportKind};
+use crate::ruida::transport::{
+    open_link, Link, RuidaTransport, TappedLink, TransportKind,
+};
 
 /// The controller's Ruida network port.
 pub const DEFAULT_PORT: u16 = 50200;
@@ -460,6 +462,8 @@ impl RuidaDriver {
             self.config.port,
         )
         .await?;
+        let link: Box<dyn Link> =
+            Box::new(TappedLink::new(link, self.events.clone()));
         let mut transport = RuidaTransport::new(
             link,
             self.config.transport(),

@@ -3,16 +3,18 @@
     raydriver analyzer record --port /dev/ttyUSB0 --out cap.jsonl
     raydriver analyzer record --emulator            # hardware-free
     raydriver analyzer tui --port /dev/ttyUSB0      # live monitor
+    raydriver analyzer record --protocol ruida --host 192.168.1.50
+    raydriver analyzer tui --protocol ruida --emulator
     raydriver analyzer decode cap.jsonl
     raydriver analyzer replay cap.jsonl --to 192.168.1.50:23
     raydriver analyzer proxy --upstream 192.168.1.50:23 --out mitm.jsonl
 
-Recording attaches to a GRBL session and logs every line both
-ways; the proxy instead sits between a network application and a
-TCP device (the man-in-the-middle workflow for characterizing
-controllers and other applications).  Network endpoints follow the
-analyzer security policy: loopback by default, token and TLS
-required for exposed listeners.
+Recording attaches to a GRBL or Ruida session and logs every line
+or wire chunk both ways; the proxy instead sits between a network
+application and a TCP device (the man-in-the-middle workflow for
+characterizing controllers and other applications).  Network
+endpoints follow the analyzer security policy: loopback by default,
+token and TLS required for exposed listeners.
 """
 
 import argparse
@@ -36,6 +38,16 @@ from raydriver.analyzer.proxy import (
 from raydriver.analyzer.replay import replay_capture
 from raydriver.core.transport import MockTransport
 from raydriver.grbl import GrblSerialDriver
+from raydriver.ruida import RuidaDriver
+
+#: Short timeouts so the hardware-free Ruida emulator shows live
+#: traffic instead of waiting out the production query interval.
+_RUIDA_EMULATOR_TIMINGS = {
+    "timeout": 0.5,
+    "query_interval": 0.2,
+    "ping_retries": 3,
+    "ping_delay": 0.05,
+}
 
 
 def _parse_endpoint(value: str) -> tuple[str, int]:
@@ -45,10 +57,74 @@ def _parse_endpoint(value: str) -> tuple[str, int]:
     return host, int(port)
 
 
-def _open_recording_session(args, recorder):
-    """A GrblSerialDriver with the recorder attached, against the
-    emulator or a serial port.  Returns (session, device_task,
-    source label)."""
+def _ruida_config(args) -> dict:
+    """Ruida connection parameters from the CLI."""
+    config = {
+        "port": args.net_port,
+        "protocol": args.transport,
+        "magic_number": f"0x{args.magic:02x}",
+    }
+    if args.usb_device:
+        config["usb_device"] = args.usb_device
+    else:
+        config["host"] = args.host
+    return config
+
+
+def _source_label(args) -> str:
+    """A human-readable source name for the listing header."""
+    if args.protocol == "ruida":
+        if args.emulator:
+            return "emulated Ruida controller"
+        if args.usb_device:
+            return f"Ruida USB {args.usb_device}"
+        return f"Ruida {args.transport}://{args.host}:{args.net_port}"
+    if args.emulator:
+        return "emulated GRBL device"
+    return f"{args.port} @ {args.baudrate}"
+
+
+def _validate_source(args) -> None:
+    """Reject source combinations that cannot connect."""
+    if args.protocol != "ruida":
+        return
+    if args.emulator:
+        if args.host or args.usb_device:
+            raise ValueError(
+                "--emulator cannot be combined with --host or --usb-device"
+            )
+        return
+    if args.host and args.usb_device:
+        raise ValueError("use either --host or --usb-device, not both")
+    if not args.host and not args.usb_device:
+        raise ValueError("Ruida needs --host, --usb-device, or --emulator")
+
+
+async def _open_recording_session(args, recorder):
+    """A driver with the recorder attached, against the selected
+    source.  Returns ``(session, device_task, source label,
+    cleanup)``."""
+    _validate_source(args)
+    if args.protocol == "ruida":
+        if args.emulator:
+            from raydriver.ruida.emulator import RuidaEmulator
+
+            emulator = RuidaEmulator()
+            await emulator.start()
+            session = RuidaDriver(
+                config={
+                    "host": "127.0.0.1",
+                    "port": emulator.port,
+                    "protocol": "tcp",
+                    **_RUIDA_EMULATOR_TIMINGS,
+                },
+                event_callback=recorder,
+            )
+            return session, None, _source_label(args), emulator.stop
+        session = RuidaDriver(
+            config=_ruida_config(args), event_callback=recorder
+        )
+        return session, None, _source_label(args), None
     config = {"poll_status_while_running": not args.no_poll}
     if args.emulator:
         from raydriver.grbl.emulator import GrblEmulator
@@ -61,7 +137,8 @@ def _open_recording_session(args, recorder):
         return (
             session,
             asyncio.ensure_future(emulator.run()),
-            "emulated GRBL device",
+            _source_label(args),
+            None,
         )
     session = GrblSerialDriver(
         config={
@@ -72,7 +149,7 @@ def _open_recording_session(args, recorder):
         dialect={},
         event_callback=recorder,
     )
-    return session, None, f"{args.port} @ {args.baudrate}"
+    return session, None, _source_label(args), None
 
 
 async def _print_new_frames(recorder, decoder, printed: int) -> int:
@@ -94,7 +171,13 @@ def _finish(recorder, args) -> None:
 async def cmd_record(args) -> int:
     recorder = Recorder()
     decoder = get_decoder(args.protocol)
-    session, device_task, source = _open_recording_session(args, recorder)
+    try:
+        session, device_task, source, cleanup = await _open_recording_session(
+            args, recorder
+        )
+    except ValueError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     recorder.capture.protocol = args.protocol
     recorder.capture.source = source
     printed = 0
@@ -116,41 +199,70 @@ async def cmd_record(args) -> int:
             pass
         if device_task is not None:
             device_task.cancel()
+        if cleanup is not None:
+            try:
+                await cleanup()
+            except Exception:  # noqa: BLE001 - teardown best effort
+                pass
         _finish(recorder, args)
     return 0
 
 
-async def cmd_tui(args) -> int:
+def cmd_tui(args) -> int:
+    """Run the interactive monitor.
+
+    This command is synchronous on purpose: curses needs the main
+    thread, and the TUI's own ``asyncio.run`` cannot nest inside the
+    CLI's event loop.
+    """
     try:
         from raydriver.analyzer.tui import run_tui
     except ImportError as err:
         print(f"error: TUI unavailable: {err}", file=sys.stderr)
         return 2
+    try:
+        _validate_source(args)
+    except ValueError as err:
+        print(f"error: {err}", file=sys.stderr)
+        return 2
     recorder = Recorder()
     decoder = get_decoder(args.protocol)
-    session, device_task, source = _open_recording_session(args, recorder)
+    source = _source_label(args)
     recorder.capture.protocol = args.protocol
     recorder.capture.source = source
 
     async def work():
+        session = None
+        device_task = None
+        cleanup = None
         try:
+            opened = await _open_recording_session(args, recorder)
+            session, device_task, _source, cleanup = opened
             await session.connect()
             while True:
                 await asyncio.sleep(1.0)
+        except Exception as err:  # noqa: BLE001 - shown in the view
+            recorder.capture.append_note(f"session error: {err}")
         finally:
-            try:
-                await session.disconnect()
-            except Exception:  # noqa: BLE001 - teardown best effort
-                pass
+            if session is not None:
+                try:
+                    await session.disconnect()
+                except Exception:  # noqa: BLE001 - teardown best effort
+                    pass
             if device_task is not None:
                 device_task.cancel()
+            if cleanup is not None:
+                try:
+                    await cleanup()
+                except Exception:  # noqa: BLE001 - teardown best effort
+                    pass
 
     run_tui(
         recorder,
         decoder,
         source=source,
         save_path=args.out,
-        work=work(),
+        work=work,
     )
     return 0
 
@@ -265,25 +377,54 @@ def add_analyzer_parser(subparsers) -> None:
         record_parser.add_argument(
             "--emulator",
             action="store_true",
-            help="record the built-in GRBL firmware emulator "
-            "instead of a serial port",
+            help="use the built-in firmware emulator instead of "
+            "hardware (GRBL or Ruida, according to --protocol)",
         )
         record_parser.add_argument(
             "--speed-factor",
             type=float,
             default=2000.0,
-            help="emulator motion speed multiplier (emulator only)",
+            help="emulator motion speed multiplier (GRBL only)",
         )
         record_parser.add_argument(
             "--no-poll",
             action="store_true",
-            help="disable status polling while jobs run",
+            help="disable status polling while jobs run (GRBL only)",
         )
         record_parser.add_argument(
             "--protocol",
             default="grbl",
             choices=decoder_names(),
-            help="decoder used for live annotations and captures",
+            help="decoder used for live annotations and captures; "
+            "ruida also selects the Ruida driver",
+        )
+        record_parser.add_argument(
+            "--host",
+            default=None,
+            help="Ruida network host (--protocol ruida)",
+        )
+        record_parser.add_argument(
+            "--net-port",
+            type=int,
+            default=50200,
+            help="Ruida network port (--protocol ruida; default 50200)",
+        )
+        record_parser.add_argument(
+            "--transport",
+            default="udp",
+            choices=["udp", "tcp"],
+            help="Ruida network transport (--protocol ruida)",
+        )
+        record_parser.add_argument(
+            "--usb-device",
+            default=None,
+            help="Ruida USB device path (--protocol ruida)",
+        )
+        record_parser.add_argument(
+            "--magic",
+            type=lambda value: int(value, 0),
+            default=0x88,
+            help="Ruida swizzle key (--protocol ruida; default 0x88)",
         )
         record_parser.add_argument(
             "--out", default=None, help="save the capture as JSONL"
