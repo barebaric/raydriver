@@ -190,6 +190,31 @@ def test_vector_coordinates_use_device_dots():
     assert "PU0,0;" in _text(out)
 
 
+def test_vector_job_starts_with_dummy_raster_and_hpgl_entry():
+    out = _encode_part(_square_part(), ContourSpec())
+    payload = bytes(_payload(out))
+    assert b"\x1b*t500R\x1b*r0F\x1b&y0P\x1b&z1S\x1b&y0A" in payload
+    assert (
+        b"\x1b*b2M\x1b&y0O\x1b*r1A\x1b*rC"
+        b"\x1b%1BIN;WF0;XR1000;YP000;" in payload
+    )
+    assert payload.index(b"\x1b%1B") < payload.index(b"PU0,0;")
+
+
+def test_vector_frequency_is_emitted():
+    out = _encode_part(_square_part(), ContourSpec(), _ctx(frequency=400))
+    assert b"XR0400;" in bytes(_payload(out))
+
+
+def test_raster_job_has_no_startup_raster():
+    spec = RasterSpec(mode="dither", line_interval_mm=1.0, step_power=0.5)
+    out = _encode_part(_raster_part(255), spec)
+    payload = bytes(_payload(out))
+    # The startup block runs at 1 % speed; the real raster runs at 10 %.
+    assert b"\x1b&z1S" not in payload
+    assert b"\x1b%1BIN;WF0;XR1000;YP000;" in payload
+
+
 def test_power_and_speed_percentages():
     out = _encode_part(_square_part(), ContourSpec())
     # 0.5 power is 50 %; 600 mm/min of a 6000 reference is 10 %.

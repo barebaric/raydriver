@@ -21,14 +21,20 @@
 //! ```text
 //! \e%-12345X@PJL JOB NAME=<title>
 //! \eE@PJL ENTER LANGUAGE=PCL
-//! <PCL raster setup>
+//! <PCL raster setup>          (real raster, or the empty startup block)
 //! <PCL raster rows>          (optional)
 //! \e*rC
-//! \e%1BIN;WF0;<HPGL vector>
+//! \e%1BIN;WF0;XR<n>;YP000;
+//! <HPGL vector>
 //! PU;YP000;WF0;
 //! \eE\e%-12345X@PJL EOJ
 //! <4096 zero bytes>
 //! ```
+//!
+//! A job whose first output is vector data starts with an empty PCL
+//! raster block and an explicit HP-GL/2 entry (`\e%1BIN;`) before the
+//! first move.  The controllers stall on a vector stream that begins
+//! without that preamble.
 //!
 //! Raster engraving uses 1-bit rows for dithered or thresholded
 //! rasters (`*b2M`, one bit per dot, most significant bit first), and
@@ -246,6 +252,10 @@ struct JobEncoder<'a> {
     has_cut: bool,
     /// At least one raster row was emitted.
     has_raster: bool,
+    /// A raster section (real or the startup block) was opened.
+    raster_seen: bool,
+    /// The HP-GL/2 vector mode was entered.
+    vectors_started: bool,
     /// Raster mode of the section being encoded.
     raster_mode: Option<RasterMode>,
     /// Rows collected in the current raster section.
@@ -309,6 +319,8 @@ impl<'a> JobEncoder<'a> {
             air_assist_requested: false,
             has_cut: false,
             has_raster: false,
+            raster_seen: false,
+            vectors_started: false,
             raster_mode: None,
             rows: Vec::new(),
             current_op: None,
@@ -459,10 +471,12 @@ impl<'a> JobEncoder<'a> {
 
             CommandType::MoveTo if self.raster_mode.is_some() => Ok(()),
             CommandType::MoveTo => {
+                self.ensure_vectors()?;
                 let end = ops.endpoint(idx);
                 self.move_to(end, false)
             }
             CommandType::LineTo => {
+                self.ensure_vectors()?;
                 let end = ops.endpoint(idx);
                 self.move_to(end, true)
             }
@@ -471,6 +485,7 @@ impl<'a> JobEncoder<'a> {
             CommandType::ArcTo
             | CommandType::BezierTo
             | CommandType::QuadraticBezierTo => {
+                self.ensure_vectors()?;
                 let start = self.last_end;
                 let linear = ops.linearize(idx, start);
                 for sub in 0..linear.len() {
@@ -690,6 +705,7 @@ impl<'a> JobEncoder<'a> {
     /// uses the `*b<7>MLT` compression selector, which the machine
     /// reads as one byte per dot.
     fn begin_raster(&mut self) -> Result<(), String> {
+        self.raster_seen = true;
         let power = self.current_power_percent()?;
         let speed = self.speed_percent()?;
         let dpi = self.ctx.resolution;
@@ -730,12 +746,50 @@ impl<'a> JobEncoder<'a> {
             self.has_raster = true;
             self.write_raster_row(&row, eight_bit);
         }
-        if self.has_raster {
-            self.emit(b"\x1b*rC");
-            self.emit(b"\x1b%1BIN;WF0;");
-        }
+        self.emit(b"\x1b*rC");
+        self.begin_vectors()?;
         self.raster_mode = None;
         Ok(())
+    }
+
+    /// Enter HP-GL/2 and select the vector frequency.
+    ///
+    /// A job whose first output is vector data gets an empty PCL raster
+    /// block first; the controllers otherwise stall on a job that
+    /// starts with HPGL.
+    fn begin_vectors(&mut self) -> Result<(), String> {
+        if !self.raster_seen {
+            self.emit_dummy_raster();
+        }
+        self.emit(b"\x1b%1BIN;WF0;");
+        self.emit(
+            format!("XR{:04};YP000;", self.settings.frequency).as_bytes(),
+        );
+        self.vectors_started = true;
+        Ok(())
+    }
+
+    fn ensure_vectors(&mut self) -> Result<(), String> {
+        if !self.vectors_started {
+            self.begin_vectors()?;
+        }
+        Ok(())
+    }
+
+    /// The empty PCL raster block the reference driver puts before a
+    /// vector-first job.  No rows follow it; it only initializes the
+    /// raster plane and ends it again.
+    fn emit_dummy_raster(&mut self) {
+        let dpi = self.ctx.resolution;
+        let (width_dots, height_dots) = self.bed_dots();
+        self.emit(
+            format!(
+                "\x1b*t{dpi}R\x1b*r0F\x1b&y0P\x1b&z1S\x1b&y0A\
+                 \x1b*r{height_dots}T\x1b*r{width_dots}S\
+                 \x1b*b2M\x1b&y0O\x1b*r1A\x1b*rC"
+            )
+            .as_bytes(),
+        );
     }
 
     /// Write one raster row.
