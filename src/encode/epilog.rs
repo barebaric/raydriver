@@ -12,11 +12,11 @@
 //! Epilog does not document the wire format.  The `@PJL` text is the
 //! framing these machines accept, not a documented one:
 //!
-//! Deliberately not emitted, because no documentation covers them for
-//! these models: autofocus (the header selects manual focus with
-//! `&y0A`), and vector software focus (`WF` other than the `WF0`
-//! reset).  A step that requests air assist is rejected rather than
-//! silently ignored.
+//! Autofocus is requested with `&y1A` in the header when the job
+//! context enables it; otherwise the header selects manual focus with
+//! `&y0A`. Vector software focus (`WF` other than the `WF0` reset) is
+//! not emitted. A step that requests air assist is rejected rather
+//! than silently ignored.
 //!
 //! ```text
 //! \e%-12345X@PJL JOB NAME=<title>
@@ -136,6 +136,9 @@ pub struct EpilogContext {
     /// Vector frequency in Hz.
     #[serde(default = "default_frequency")]
     pub frequency: i32,
+    /// Enable the machine's hardware autofocus at the start of the job.
+    #[serde(default)]
+    pub autofocus: bool,
     /// Machine bed `(width, height)` in millimetres.
     pub bed_mm: (f64, f64),
     /// Cutting speed that the machine reaches at 100 %, in mm/min.
@@ -422,9 +425,15 @@ impl<'a> JobEncoder<'a> {
         self.emit(PJL_ENTER_PCL);
 
         let dpi = self.ctx.resolution;
-        // Media handling only; each raster part sets its own
+        // Autofocus is a header choice; each raster part sets its own
         // resolution, power, speed, size and start (see begin_raster).
-        self.emit(b"\x1b&y0A\x1b&y0C\x1b&y0Z\x1b&l0U\x1b&l0Z");
+        let focus = if self.ctx.autofocus {
+            "\x1b&y1A"
+        } else {
+            "\x1b&y0A"
+        };
+        self.emit(focus.as_bytes());
+        self.emit(b"\x1b&y0C\x1b&y0Z\x1b&l0U\x1b&l0Z");
         self.emit(format!("\x1b&u{dpi}D\x1b*p0X\x1b*p0Y").as_bytes());
     }
 
