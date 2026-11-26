@@ -9,9 +9,9 @@
 //!
 //! The model is a port of the Ruida Protocol Analyzer's GlueScript.
 
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fmt;
-use std::hash::{Hash, Hasher};
 
 /// A transcript parse or replay error.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,6 +147,8 @@ pub struct GlueScript {
     doc_bl_y: f64,
     current_x: f64,
     current_y: f64,
+    current_z: f64,
+    current_u: f64,
     abs_xy: [f64; 2],
     layer: usize,
     current_layer_mode: String,
@@ -202,6 +204,8 @@ impl GlueScript {
             doc_bl_y: 0.0,
             current_x: 0.0,
             current_y: 0.0,
+            current_z: 0.0,
+            current_u: 0.0,
             abs_xy: [0.0, 0.0],
             layer: 0,
             current_layer_mode: "VECTOR".to_string(),
@@ -282,6 +286,71 @@ impl GlueScript {
     fn record(&mut self, name: &str, args: &[Literal]) {
         let rendered = format_call(name, args);
         self.gluescript.extend(rendered);
+    }
+
+    /// Routes a generated line to the position-aware buffer.
+    fn route_positional(&mut self, line: &str) {
+        if self.job_complete {
+            self.inline_epilogue.push(line.to_string());
+        } else if self.layer >= 1 {
+            self.layer_actions
+                .entry(self.layer)
+                .or_default()
+                .push(line.to_string());
+        } else {
+            self.inline_prelude.push(line.to_string());
+        }
+    }
+
+    /// Appends raw rpascript commands at the current authoring position.
+    pub fn inline(&mut self, commands: &[String]) {
+        if commands.is_empty() {
+            return;
+        }
+        self.inline_used = true;
+        for command in commands {
+            self.record(
+                "inline",
+                &[Literal::List(vec![Literal::Str(command.clone())])],
+            );
+            self.route_positional(command);
+        }
+    }
+
+    /// Adds raw rpascript lines to a layer's action block.
+    pub fn add_layer_action(&mut self, layer: usize, lines: &[String]) {
+        self.layer_actions
+            .entry(layer)
+            .or_default()
+            .extend(lines.iter().cloned());
+    }
+
+    /// Syncs the tracked XY position from controller replies.
+    ///
+    /// Ignored while assembling, where the position is the trajectory
+    /// cursor and replies must not overwrite it.
+    pub fn update_position(
+        &mut self,
+        x: Option<f64>,
+        y: Option<f64>,
+        z: Option<f64>,
+        u: Option<f64>,
+    ) {
+        if self.assembling {
+            return;
+        }
+        if let Some(x) = x {
+            self.current_x = x;
+        }
+        if let Some(y) = y {
+            self.current_y = y;
+        }
+        if let Some(z) = z {
+            self.current_z = z;
+        }
+        if let Some(u) = u {
+            self.current_u = u;
+        }
     }
 
     /// Appends comment lines to the job header.
@@ -785,6 +854,65 @@ impl GlueScript {
     }
 
     /// Moves to an absolute XY position.
+    /// Z movement is not supported by the Ruida job model.
+    pub fn move_z_to(&mut self, _z: f64) -> Result<(), GlueError> {
+        Err(error("move_z_to is not implemented".to_string()))
+    }
+
+    /// U movement is not supported by the Ruida job model.
+    pub fn move_u_to(&mut self, _u: f64) -> Result<(), GlueError> {
+        Err(error("move_u_to is not implemented".to_string()))
+    }
+
+    /// Z cuts are not supported by the Ruida job model.
+    pub fn cut_z_to(&mut self, _z: f64) -> Result<(), GlueError> {
+        Err(error("cut_z_to is not implemented".to_string()))
+    }
+
+    /// U cuts are not supported by the Ruida job model.
+    pub fn cut_u_to(&mut self, _u: f64) -> Result<(), GlueError> {
+        Err(error("cut_u_to is not implemented".to_string()))
+    }
+
+    /// Pierces at the current position for ``duration`` milliseconds.
+    pub fn pierce(&mut self, duration: f64) -> Result<(), GlueError> {
+        self.emit_delay_action("pierce", "CUT_PIERCE", duration)
+    }
+
+    /// Adds a per-segment cut delay in milliseconds.
+    pub fn add_delay(&mut self, duration: f64) -> Result<(), GlueError> {
+        self.emit_delay_action("add_delay", "ADD_CUT_DELAY", duration)
+    }
+
+    /// Sets the delay before the laser fires.
+    pub fn laser_on_delay(&mut self, duration: f64) -> Result<(), GlueError> {
+        self.emit_delay_action("laser_on_delay", "LASER_ON_DELAY", duration)
+    }
+
+    /// Sets the delay after the laser stops.
+    pub fn laser_off_delay(&mut self, duration: f64) -> Result<(), GlueError> {
+        self.emit_delay_action("laser_off_delay", "LASER_OFF_DELAY", duration)
+    }
+
+    fn emit_delay_action(
+        &mut self,
+        method: &str,
+        mnemonic: &str,
+        duration: f64,
+    ) -> Result<(), GlueError> {
+        if !duration.is_finite() || duration < 0.0 {
+            return Err(error(format!(
+                "{method} duration must be >= 0, got {duration}"
+            )));
+        }
+        self.record(method, &[Literal::Float(duration)]);
+        self.layer_actions
+            .entry(self.layer)
+            .or_default()
+            .push(format!("{mnemonic} {duration:.3}mS"));
+        Ok(())
+    }
+
     pub fn move_xy_to(&mut self, x: f64, y: f64) {
         self.record("move_xy_to", &[Literal::Float(x), Literal::Float(y)]);
         self.emit_move_xy(x, y);
@@ -1011,6 +1139,35 @@ impl GlueScript {
         Ok(self.signature())
     }
 
+    /// Replays only newly appended transcript lines.
+    pub fn stage_gluescript_delta(
+        &mut self,
+        flushed_count: usize,
+        lines: &[String],
+        require_complete: bool,
+    ) -> Result<String, GlueError> {
+        if self.gluescript.len() != flushed_count {
+            return Err(error(format!(
+                "server gluescript has {} lines but flushed_count is {}",
+                self.gluescript.len(),
+                flushed_count
+            )));
+        }
+        self.inline_used = false;
+        self.comment_only_used = false;
+        self.assembling = true;
+        let result = self.replay(lines);
+        self.assembling = false;
+        result?;
+        if require_complete && !self.job_complete {
+            return Err(error(
+                "re-staged gluescript is missing end_job".to_string(),
+            ));
+        }
+        self.assemble_rpascript();
+        Ok(self.signature())
+    }
+
     fn replay(&mut self, lines: &[String]) -> Result<(), GlueError> {
         for line in join_continuation_lines(lines) {
             if line.trim().is_empty() || line.trim_start().starts_with('#') {
@@ -1074,6 +1231,33 @@ impl GlueScript {
             "frequency" => self.frequency(float_arg(args, 0).unwrap_or(20.0)),
             "pwm" => self.pwm(float_arg(args, 0).unwrap_or(0.0)),
             "select_laser" => self.select_laser(int_arg(args, 0).unwrap_or(1)),
+            "pierce" => self.pierce(float_arg(args, 0).unwrap_or(0.0))?,
+            "add_delay" => self.add_delay(float_arg(args, 0).unwrap_or(0.0))?,
+            "laser_on_delay" => {
+                self.laser_on_delay(float_arg(args, 0).unwrap_or(0.0))?
+            }
+            "laser_off_delay" => {
+                self.laser_off_delay(float_arg(args, 0).unwrap_or(0.0))?
+            }
+            "inline" => {
+                if let Some(items) = args.first().and_then(Literal::as_list) {
+                    let commands: Vec<String> = items
+                        .iter()
+                        .filter_map(|item| item.as_string().map(str::to_string))
+                        .collect();
+                    self.inline(&commands);
+                }
+            }
+            "add_layer_action" => {
+                let layer = int_arg(args, 0).unwrap_or(0).max(0) as usize;
+                if let Some(items) = args.get(1).and_then(Literal::as_list) {
+                    let lines: Vec<String> = items
+                        .iter()
+                        .filter_map(|item| item.as_string().map(str::to_string))
+                        .collect();
+                    self.add_layer_action(layer, &lines);
+                }
+            }
             "air_assist_on" => self.air_assist_on(),
             "air_assist_off" => self.air_assist_off(),
             "set_mode" => self.set_mode(string_arg(args, 0)?)?,
@@ -1098,7 +1282,11 @@ impl GlueScript {
             }
             "cut_x_to" => self.cut_x_to(float_arg(args, 0).unwrap_or(0.0))?,
             "cut_y_to" => self.cut_y_to(float_arg(args, 0).unwrap_or(0.0))?,
-            "stage_gluescript" | "stage_gluescript_delta" => {}
+            "move_z_to" => self.move_z_to(float_arg(args, 0).unwrap_or(0.0))?,
+            "move_u_to" => self.move_u_to(float_arg(args, 0).unwrap_or(0.0))?,
+            "cut_z_to" => self.cut_z_to(float_arg(args, 0).unwrap_or(0.0))?,
+            "cut_u_to" => self.cut_u_to(float_arg(args, 0).unwrap_or(0.0))?,
+            "stage_gluescript" => {}
             _ => {
                 return Err(error(format!(
                     "unknown gluescript command: {name:?}"
@@ -1147,9 +1335,12 @@ impl GlueScript {
     }
 
     fn signature(&self) -> String {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.gluescript.hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
+        let mut hasher = Sha256::new();
+        hasher.update(format!("{}\n", self.gluescript.len()));
+        for line in &self.gluescript {
+            hasher.update(format!("{}\n{line}\n", line.chars().count()));
+        }
+        format!("{:x}", hasher.finalize())
     }
 }
 

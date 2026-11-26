@@ -1512,6 +1512,7 @@ dependencies = [
  "serde_json",
  "serialport",
  "sha1 0.10.7",
+ "sha2",
  "thiserror",
  "tokio",
  "tokio-rustls",
@@ -1980,6 +1981,17 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "digest 0.11.3",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
 ]
 
 [[package]]

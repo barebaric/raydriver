@@ -199,6 +199,18 @@ class TestJobs:
         assert len(emulator.commands) == before
 
 
+class TestJobWrapping:
+    async def test_head_and_tail_scripts_wrap_run_job(self, rig):
+        session, emulator, events = rig
+        session.set_head_script("# head\n")
+        session.set_tail_script("# tail\n")
+        assert session.get_head_script() == "# head\n"
+        assert session.get_tail_script() == "# tail\n"
+        await session.run_job("END_JOB\nEOF\n")
+        await events.wait_for(DriverEvent.JobFinished)
+        assert any("e505" in command for command in emulator.commands)
+
+
 class TestLiveCommands:
     async def test_home_and_jog(self, rig):
         session, emulator, _events = rig
@@ -219,6 +231,15 @@ class TestLiveCommands:
         await session.jog_u_to(4.0)
         assert any("d82c" in command for command in emulator.commands)
         assert any("d82e" in command for command in emulator.commands)
+
+    async def test_relative_jog_defaults(self, rig):
+        session, emulator, _events = rig
+        session.set_jog_rel_distances(7.0, 8.0, 9.0)
+        before = len(emulator.commands)
+        await session.jog_xy_rel(None, None)
+        await session.jog_axis_rel_default("X")
+        await session.jog_axis_rel_default("Z")
+        assert len(emulator.commands) >= before + 3
 
     async def test_jog_z_and_u_axes(self, rig):
         session, emulator, _events = rig

@@ -2,6 +2,7 @@
 must reproduce the Ruida Protocol Analyzer's transcript and compiled
 rpascript byte-for-byte."""
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -186,3 +187,58 @@ class TestValidation:
         script = GlueScript()
         with pytest.raises(RuntimeError, match="unknown gluescript"):
             script.stage_gluescript(["not_a_command(1)"])
+
+
+class TestDistributionParity:
+    def test_signature_matches_python_sha256_contract(self):
+        script = GlueScript()
+        signature = script.stage_gluescript(load("transcript.cglu"))
+        digest = hashlib.sha256()
+        lines = script.gluescript
+        digest.update(f"{len(lines)}\n".encode())
+        for line in lines:
+            digest.update(f"{len(line)}\n{line}\n".encode())
+        assert signature == digest.hexdigest()
+
+    def test_delta_stage_matches_full_stage(self):
+        transcript = load("transcript.cglu")
+        full = GlueScript()
+        expected = full.stage_gluescript(transcript)
+
+        split = 25
+        partial = GlueScript()
+        partial.stage_gluescript(transcript[:split], require_complete=False)
+        actual = partial.stage_gluescript_delta(
+            split, transcript[split:], require_complete=True
+        )
+        assert actual == expected
+        assert partial.rpascript == full.rpascript
+
+    def test_delta_rejects_a_broken_contiguous_prefix(self):
+        script = GlueScript()
+        script.stage_gluescript(
+            load("transcript.cglu")[:10], require_complete=False
+        )
+        with pytest.raises(RuntimeError, match="flushed_count"):
+            script.stage_gluescript_delta(
+                9, load("transcript.cglu")[10:], require_complete=False
+            )
+
+    def test_inline_and_delay_actions_are_positioned(self):
+        script = GlueScript()
+        script.declare_job("inline")
+        script.declare_layer("Cut", "#ff0000")
+        script.inline(["CUSTOM_PRE_LAYER"])
+        script.pierce(12.5)
+        script.add_delay(3.0)
+        script.laser_on_delay(4.0)
+        script.laser_off_delay(5.0)
+        script.end_job()
+        script.stage_gluescript()
+        text = "\n".join(script.rpascript)
+        assert "CUSTOM_PRE_LAYER" in text
+        assert "CUT_PIERCE 12.500mS" in text
+        assert "ADD_CUT_DELAY 3.000mS" in text
+        assert "LASER_ON_DELAY 4.000mS" in text
+        assert "LASER_OFF_DELAY 5.000mS" in text
+        assert "inline(['CUSTOM_PRE_LAYER'])" in script.gluescript

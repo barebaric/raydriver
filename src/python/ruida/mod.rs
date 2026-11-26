@@ -45,6 +45,6 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
 #[gen_stub_pyfunction(module = "raydriver.ruida")]
 #[pyfunction]
 fn encode_script(lines: Vec<String>) -> PyResult<Vec<u8>> {
-    crate::ruida::codec::encode_script(&lines)
+    crate::ruida::rpascript::encoding::encode_script(&lines)
         .map_err(|error| PyValueError::new_err(error.to_string()))
 }
