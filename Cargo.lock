@@ -1307,9 +1307,9 @@ dependencies = [
 
 [[package]]
 name = "prof-macros"
-version = "1.102.0"
+version = "1.102.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1a714a3895ed0a2a05701a83217d1a6b6fd675a4b98c4e445718caffd937a5e"
+checksum = "9a677e56e5a1265a78b6cc0cc0525e297fdf3b07ed3e3750fde9113b3148a037"
 dependencies = [
  "quote",
  "syn 2.0.119",
@@ -1524,9 +1524,9 @@ dependencies = [
 
 [[package]]
 name = "raygeo"
-version = "1.102.0"
+version = "1.102.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77032b67e7bde6b742e8bd876c65e5d0d764364eb515310805cb805e91b1dcca"
+checksum = "9ed2e05c1b6f9add6dc39aada8f739d3ea654da3e706e9ecf0c5a2fbab342472"
 dependencies = [
  "bitflags 2.13.2",
  "clipper2-rs",
