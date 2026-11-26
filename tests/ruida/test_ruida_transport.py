@@ -157,19 +157,21 @@ class TestInterfaceSwitch:
                 "protocol": "tcp",
                 "usb_device": usb.path,
                 **FAST,
+                "timeout": 1.0,
+                "ping_retries": 5,
+                "ping_delay": 0.1,
             },
             event_callback=events.callback,
         )
         try:
             await session.connect()
             await wait_until(
-                lambda: (session.resource_uri or "").startswith("serial://")
-            )
-            await wait_until(
                 lambda: (
                     session.machine_status["card_id"] == usb.controller.card_id
-                )
+                ),
+                timeout=8.0,
             )
+            assert (session.resource_uri or "").startswith("serial://")
 
             usb.unplug()
             await wait_until(
