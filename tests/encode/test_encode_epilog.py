@@ -182,6 +182,18 @@ def test_text_is_printable_and_escaped():
     assert "@PJL ENTER LANGUAGE=PCL" in _text(out)
 
 
+def test_autofocus_is_off_by_default():
+    out = _encode_part(_square_part(), ContourSpec())
+    payload = bytes(_payload(out))
+    assert JOB_ENTER_PCL + b"\x1b&y0A" in payload
+
+
+def test_autofocus_is_requested():
+    out = _encode_part(_square_part(), ContourSpec(), _ctx(autofocus=True))
+    payload = bytes(_payload(out))
+    assert JOB_ENTER_PCL + b"\x1b&y1A" in payload
+
+
 def test_vector_coordinates_use_device_dots():
     out = _encode_part(_square_part(), ContourSpec())
     # 10 mm at 500 DPI is 197 dots.
