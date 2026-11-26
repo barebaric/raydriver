@@ -25,7 +25,7 @@ use raygeo::ops::enums::{CommandType, RasterMode, SectionType};
 use raygeo::ops::state::{AirAssistMode, CoolantMode, PowerMode, State};
 use raygeo::ops::types::{MarkerCmd, OpCategory, StateCmd};
 
-use crate::ruida::gluescript::GlueScript;
+use crate::ruida::ruidadriver::rd_gluescript::GlueScript;
 
 const OVERSCAN_ANGLE_TOLERANCE_DEG: f64 = 0.01;
 const OVERSCAN_ANGLE_EPSILON: f64 = 1e-6;

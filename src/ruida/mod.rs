@@ -5,23 +5,16 @@
 //! written as rpascript command streams; live motion and job control
 //! use the same commands outside a job.
 //!
-//! The layers mirror the Python ``ruida-pa`` implementation:
+//! The module tree mirrors the Python ``ruida-pa`` package:
 //!
-//! - :mod:`protocol` — command/memory tables, handshake bytes and status bits.
-//! - :mod:`codec` — 7-bit packing, swizzle, checksums and rpascript encoding.
-//! - :mod:`link` — raw USB/UDP/TCP byte links.
-//! - :mod:`transport` — packet framing and the ACK state machine.
-//! - :mod:`monitor` — connection, ping, poll and link-candidate state machine.
-//! - :mod:`status` — typed ``GET_SETTING`` reply decoding.
-//! - :mod:`driver` — session facade and job/live-motion commands.
+//! - :mod:`protocols` — protocol tables and parser definitions.
+//! - :mod:`rpalib` — swizzling and transcoding primitives.
+//! - :mod:`rpascript` — rpascript parsing and encoding.
+//! - :mod:`ruidadriver` — transport, session/status and driver layers.
 //!
 //! The protocol layers here are pure Rust and do not depend on PyO3.
 
-pub mod codec;
-pub mod driver;
-pub mod gluescript;
-pub mod link;
-mod monitor;
-pub mod protocol;
-pub mod status;
-pub mod transport;
+pub mod protocols;
+pub mod rpalib;
+pub mod rpascript;
+pub mod ruidadriver;

@@ -20,8 +20,8 @@ use crate::grbl::stream::GrblStreamConfig;
 use crate::grbl::telnet::GrblTelnetDriver;
 use crate::marlin::driver::{MarlinConfig, MarlinSerialDriver};
 use crate::octoprint::driver::{OctoPrintConfig, OctoPrintDriver};
-use crate::ruida::driver::{RuidaConfig, RuidaDriver};
-use crate::ruida::transport::TransportKind as RuidaTransportKind;
+use crate::ruida::ruidadriver::ruida_driver::{RuidaConfig, RuidaDriver};
+use crate::ruida::ruidadriver::transport::base::TransportKind as RuidaTransportKind;
 use crate::simulator::{NoDeviceConfig, NoDeviceDriver};
 use crate::smoothie::driver::{SmoothieConfig, SmoothieDriver};
 use crate::xtool::driver::{XtoolConfig, XtoolNetworkDriver};
@@ -97,7 +97,7 @@ impl DriverKind {
             Self::XtoolNetwork => &crate::xtool::driver::INFO,
             Self::OctoPrint => &crate::octoprint::driver::INFO,
             Self::Epilog => &crate::epilog::driver::INFO,
-            Self::Ruida => &crate::ruida::driver::INFO,
+            Self::Ruida => &crate::ruida::ruidadriver::ruida_driver::INFO,
             Self::NoDevice => &crate::simulator::INFO,
         }
     }
@@ -292,7 +292,9 @@ impl DriverKind {
             Self::Ruida => {
                 let magic = match string(config, "magic_number") {
                     Some(raw) => parse_magic(&raw)?,
-                    None => crate::ruida::driver::DEFAULT_MAGIC,
+                    None => {
+                        crate::ruida::ruidadriver::ruida_driver::DEFAULT_MAGIC
+                    }
                 };
                 let ruida = RuidaConfig {
                     host: string(config, "host")

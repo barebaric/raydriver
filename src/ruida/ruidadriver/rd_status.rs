@@ -14,7 +14,7 @@
 //! any link error -> Connecting
 //! ```
 
-use crate::ruida::link::TransportKind;
+use crate::ruida::ruidadriver::transport::base::TransportKind;
 
 /// One state of the connection supervisor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,13 +34,13 @@ pub(crate) enum ConnectionState {
 /// USB is preferred when configured; the network candidate is the
 /// fallback. This ordering is what makes an unplugged USB cable move
 /// the session to Ethernet on the next reconnect attempt.
-pub(crate) struct ConnectionMonitor {
+pub(crate) struct RdStatus {
     candidates: Vec<TransportKind>,
     index: usize,
     state: ConnectionState,
 }
 
-impl ConnectionMonitor {
+impl RdStatus {
     pub(crate) fn new(candidates: Vec<TransportKind>) -> Self {
         Self {
             candidates,

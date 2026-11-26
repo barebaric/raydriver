@@ -8,7 +8,7 @@
 //!
 //! The command table is grouped by prefix family, matching the nested
 //! dictionaries of the Python table. Lookup order is established by
-//! :func:`crate::ruida::codec::lookup`, so the source order can remain
+//! :func:`crate::ruida::rpascript::interpreter::lookup`, so the source order can remain
 //! protocol-oriented.
 
 /// Controller accepted a packet.

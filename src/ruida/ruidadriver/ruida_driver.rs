@@ -14,12 +14,21 @@ use crate::core::driver::{
 use crate::core::types::{
     DeviceState, DeviceStatus, TransportStatus, UnitSystem,
 };
-use crate::ruida::codec::{self};
-use crate::ruida::link::{open_link, Link, TappedLink, TransportKind};
-use crate::ruida::monitor::{ConnectionMonitor, ConnectionState};
-use crate::ruida::protocol::StatusRegister;
-use crate::ruida::status::MachineStatus;
-use crate::ruida::transport::{QueryOutcome, RuidaTransport};
+use crate::ruida::protocols::ruida::ruida_protocol::{
+    MachineFeatures, StatusRegister, MACHINE_STATUS_MOVING,
+    MACHINE_STATUS_PAUSED, MACHINE_STATUS_RUNNING,
+};
+use crate::ruida::rpalib::ruida_transcoder::{to_int, to_uint};
+use crate::ruida::rpascript::encoding::{
+    encode_commands, get_setting, set_setting, CodecError,
+};
+use crate::ruida::rpascript::interpreter::parse_script;
+use crate::ruida::ruidadriver::rd_status::{ConnectionState, RdStatus};
+use crate::ruida::ruidadriver::rd_transport::{
+    QueryOutcome, RdTransport, Reply,
+};
+use crate::ruida::ruidadriver::transport::base::{Transport, TransportKind};
+use crate::ruida::ruidadriver::transport::{open_transport, TappedTransport};
 
 /// The controller's Ruida network port.
 pub const DEFAULT_PORT: u16 = 50200;
@@ -134,7 +143,7 @@ pub struct RuidaDriver {
     events: Arc<dyn DriverEvents>,
     state: Mutex<DeviceState>,
     status: Mutex<MachineStatus>,
-    transport: Arc<AsyncMutex<Option<RuidaTransport>>>,
+    transport: Arc<AsyncMutex<Option<RdTransport>>>,
     active_kind: Mutex<Option<TransportKind>>,
     connection_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
     keep_running: Arc<AtomicBool>,
@@ -224,7 +233,7 @@ impl RuidaDriver {
         }
     }
 
-    fn apply_replies(&self, replies: Vec<codec::Reply>) {
+    fn apply_replies(&self, replies: Vec<Reply>) {
         let mut status = self.status.lock().unwrap();
         let mut changed = false;
         for reply in &replies {
@@ -247,14 +256,14 @@ impl RuidaDriver {
     }
 
     async fn send_lines(&self, lines: &[String]) -> Result<(), DriverError> {
-        let commands = codec::parse_script(lines).map_err(codec_error)?;
+        let commands = parse_script(lines).map_err(codec_error)?;
         let commands: Vec<_> = commands
             .into_iter()
             .filter(|command| {
                 !(self.protect_enabled() && command.mnemonic == "SET_SETTING")
             })
             .collect();
-        let raw = codec::encode_commands(&commands).map_err(codec_error)?;
+        let raw = encode_commands(&commands).map_err(codec_error)?;
         self.send_raw(&raw).await
     }
 
@@ -493,12 +502,12 @@ impl RuidaDriver {
     pub async fn get_setting(
         &self,
         address: u16,
-    ) -> Result<Vec<codec::Reply>, DriverError> {
+    ) -> Result<Vec<Reply>, DriverError> {
         let mut guard = self.transport.lock().await;
         let transport = guard.as_mut().ok_or_else(|| {
             DriverError::Connection("controller is not connected".to_string())
         })?;
-        let replies = transport.query(&codec::get_setting(address)).await?;
+        let replies = transport.query(&get_setting(address)).await?;
         drop(guard);
         self.apply_replies(replies.clone());
         Ok(replies)
@@ -517,7 +526,7 @@ impl RuidaDriver {
                 "SET_SETTING is blocked by protect mode".to_string(),
             ));
         }
-        self.send_raw(&codec::set_setting(address, a, b)).await
+        self.send_raw(&set_setting(address, a, b)).await
     }
 
     fn set_paused(&self, paused: bool) {
@@ -552,8 +561,7 @@ impl RuidaDriver {
 
     async fn connection_loop(self: Arc<Self>) {
         while self.keep_running.load(Ordering::SeqCst) {
-            let mut monitor =
-                ConnectionMonitor::new(self.config.transport_candidates());
+            let mut monitor = RdStatus::new(self.config.transport_candidates());
             while let Some(kind) = monitor.current_candidate() {
                 if !self.keep_running.load(Ordering::SeqCst) {
                     break;
@@ -591,19 +599,19 @@ impl RuidaDriver {
     async fn open_and_monitor(
         self: Arc<Self>,
         kind: TransportKind,
-        monitor: &mut ConnectionMonitor,
+        monitor: &mut RdStatus,
     ) -> Result<(), DriverError> {
         monitor.set_state(ConnectionState::Connecting);
-        let link = open_link(
+        let link = open_transport(
             kind,
             self.config.host.as_deref(),
             self.config.usb_device.as_deref(),
             self.config.port,
         )
         .await?;
-        let link: Box<dyn Link> =
-            Box::new(TappedLink::new(link, self.events.clone()));
-        let mut transport = RuidaTransport::new(link, kind, self.config.magic);
+        let link: Box<dyn Transport> =
+            Box::new(TappedTransport::new(link, self.events.clone()));
+        let mut transport = RdTransport::new(link, kind, self.config.magic);
         transport.timeout = self.config.timeout;
         monitor.set_state(ConnectionState::WaitToPing);
         self.handshake(&mut transport, monitor).await?;
@@ -629,10 +637,10 @@ impl RuidaDriver {
 
     async fn handshake(
         &self,
-        transport: &mut RuidaTransport,
-        monitor: &mut ConnectionMonitor,
+        transport: &mut RdTransport,
+        monitor: &mut RdStatus,
     ) -> Result<(), DriverError> {
-        let ping = codec::get_setting(StatusRegister::CardId.address());
+        let ping = get_setting(StatusRegister::CardId.address());
         let max_attempts = self.config.ping_retries.max(1);
         for attempt in 0..max_attempts {
             if !self.keep_running.load(Ordering::SeqCst) {
@@ -666,7 +674,7 @@ impl RuidaDriver {
     async fn query_identity(&self) -> Result<(), DriverError> {
         let mut raw = Vec::new();
         for register in StatusRegister::IDENTITY {
-            raw.extend(codec::get_setting(register.address()));
+            raw.extend(get_setting(register.address()));
         }
         let mut guard = self.transport.lock().await;
         let transport = guard.as_mut().ok_or_else(|| {
@@ -680,7 +688,7 @@ impl RuidaDriver {
 
     async fn query_loop(
         self: Arc<Self>,
-        monitor: &mut ConnectionMonitor,
+        monitor: &mut RdStatus,
     ) -> Result<(), DriverError> {
         loop {
             if !self.keep_running.load(Ordering::SeqCst) {
@@ -696,9 +704,9 @@ impl RuidaDriver {
                 }
                 monitor.set_state(ConnectionState::SendQuery);
                 let mut raw =
-                    codec::get_setting(StatusRegister::MachineStatus.address());
+                    get_setting(StatusRegister::MachineStatus.address());
                 for register in &StatusRegister::STATUS_POLL[1..] {
-                    raw.extend(codec::get_setting(register.address()));
+                    raw.extend(get_setting(register.address()));
                 }
                 let mut guard = self.transport.lock().await;
                 let Some(transport) = guard.as_mut() else {
@@ -752,7 +760,7 @@ impl JogSpeeds {
     }
 }
 
-fn codec_error(error: codec::CodecError) -> DriverError {
+fn codec_error(error: CodecError) -> DriverError {
     DriverError::Device(error.to_string())
 }
 
@@ -952,4 +960,93 @@ impl Driver for RuidaDriver {
             task.abort();
         }
     }
+}
+
+/// The machine state derived from the controller's status replies.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MachineStatus {
+    pub running: bool,
+    pub paused: bool,
+    pub moving: bool,
+    /// X, Y, Z and U positions in millimetres.
+    pub position: [Option<f64>; 4],
+    pub card_id: Option<u32>,
+    /// Bed size in millimetres.
+    pub bed_size: [Option<f64>; 2],
+    pub mainboard_version: Option<String>,
+    pub features: Option<u32>,
+}
+
+impl MachineStatus {
+    /// Applies one reply. Returns whether anything changed.
+    pub fn apply(&mut self, reply: &Reply) -> bool {
+        let before = self.clone();
+        let Some(register) = StatusRegister::from_address(reply.address) else {
+            return false;
+        };
+        match register {
+            StatusRegister::MachineStatus => {
+                let value = to_uint(&reply.data) as u32;
+                self.running = value & MACHINE_STATUS_RUNNING != 0;
+                self.paused = value & MACHINE_STATUS_PAUSED != 0;
+                self.moving = value & MACHINE_STATUS_MOVING != 0;
+            }
+            StatusRegister::PositionX => {
+                self.position[0] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionY => {
+                self.position[1] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionZ => {
+                self.position[2] = decode_position(&reply.data)
+            }
+            StatusRegister::PositionU => {
+                self.position[3] = decode_position(&reply.data)
+            }
+            StatusRegister::CardId => {
+                self.card_id = Some(to_uint(&reply.data) as u32)
+            }
+            StatusRegister::MainboardVersion => {
+                self.mainboard_version = Some(decode_string(&reply.data))
+            }
+            StatusRegister::BedSizeX => {
+                self.bed_size[0] = decode_position(&reply.data)
+            }
+            StatusRegister::BedSizeY => {
+                self.bed_size[1] = decode_position(&reply.data)
+            }
+            StatusRegister::MachineFeatures => {
+                self.features = Some(to_uint(&reply.data) as u32)
+            }
+        }
+        *self != before
+    }
+
+    /// Decoded machine feature flags, when the controller reported them.
+    pub fn machine_features(&self) -> Option<MachineFeatures> {
+        self.features.map(MachineFeatures::from_bits)
+    }
+
+    /// The device status the UI should show.
+    pub fn device_status(&self) -> DeviceStatus {
+        if self.paused {
+            DeviceStatus::Hold
+        } else if self.running {
+            DeviceStatus::Run
+        } else {
+            DeviceStatus::Idle
+        }
+    }
+}
+
+fn decode_position(data: &[u8]) -> Option<f64> {
+    (!data.is_empty()).then(|| to_int(data) as f64 / 1000.0)
+}
+
+fn decode_string(data: &[u8]) -> String {
+    let end = data
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(data.len());
+    String::from_utf8_lossy(&data[..end]).into_owned()
 }

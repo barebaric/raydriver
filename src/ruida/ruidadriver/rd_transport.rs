@@ -21,10 +21,72 @@
 use std::time::{Duration, Instant};
 
 use crate::core::driver::DriverError;
-use crate::ruida::codec;
-use crate::ruida::link::timed_out;
-pub use crate::ruida::link::{open_link, Link, TransportKind};
-use crate::ruida::protocol::{ERR, NAK, SETTING_PREFIX};
+use crate::ruida::protocols::ruida::ruida_protocol::{
+    ACK, ERR, NAK, SETTING_PREFIX,
+};
+use crate::ruida::rpalib::rpa_swizzler::{
+    ack_magic_table, swizzle, unswizzle, unswizzle_byte,
+};
+use crate::ruida::ruidadriver::transport::base::{
+    timed_out, Transport, TransportKind,
+};
+pub use crate::ruida::ruidadriver::transport::open_transport;
+
+pub fn package(payload: &[u8], magic: u8, udp: bool) -> Vec<u8> {
+    let swizzled = swizzle(payload, magic);
+    if !udp {
+        return swizzled;
+    }
+    let checksum: u16 = swizzled
+        .iter()
+        .fold(0u16, |sum, byte| sum.wrapping_add(u16::from(*byte)));
+    let mut packet = Vec::with_capacity(swizzled.len() + 2);
+    packet.push((checksum >> 8) as u8);
+    packet.push((checksum & 0xFF) as u8);
+    packet.extend(swizzled);
+    packet
+}
+
+/// A decoded ``GET_SETTING`` reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reply {
+    pub address: u16,
+    pub data: Vec<u8>,
+}
+
+/// Splits unswizzled reply bytes into replies.
+///
+/// A reply starts with ``0xDA`` and ends at the next byte with bit 7
+/// set, because every value byte is 7-bit. Chunks shorter than nine
+/// bytes are malformed and skipped; scanning continues.
+pub fn unpack_replies(raw: &[u8]) -> Vec<Reply> {
+    const MIN_REPLY_LEN: usize = 9;
+    let mut replies = Vec::new();
+    let mut index = 0;
+    while index < raw.len() {
+        if raw[index] != 0xDA {
+            break;
+        }
+        let mut end = index + 1;
+        while end < raw.len() && raw[end] & 0x80 == 0 {
+            end += 1;
+        }
+        let chunk = &raw[index..end];
+        if chunk.len() < MIN_REPLY_LEN {
+            index = end;
+            continue;
+        }
+        if chunk[1] != 0x01 {
+            break;
+        }
+        replies.push(Reply {
+            address: (u16::from(chunk[2]) << 8) | u16::from(chunk[3]),
+            data: chunk[4..].to_vec(),
+        });
+        index = end;
+    }
+    replies
+}
 
 /// How a transport frames a command packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,33 +148,37 @@ enum PacketState {
 /// The result of a query packet.
 #[derive(Debug)]
 pub(crate) enum QueryOutcome {
-    Replied(Vec<codec::Reply>),
+    Replied(Vec<Reply>),
     /// The controller acknowledged the packet but returned no reply.
     Busy,
 }
 
 /// A link plus the Ruida packet handshake.
-pub struct RuidaTransport {
-    link: Box<dyn Link>,
+pub struct RdTransport {
+    link: Box<dyn Transport>,
     kind: TransportKind,
     profile: WireProfile,
     magic: u8,
     ack_table: [u8; 256],
     rx: Vec<u8>,
-    replies: Vec<codec::Reply>,
+    replies: Vec<Reply>,
     pub timeout: Duration,
     pub inter_packet_timeout: Duration,
 }
 
-impl RuidaTransport {
+impl RdTransport {
     /// Wraps a link. ``magic`` is the controller's swizzle key.
-    pub fn new(link: Box<dyn Link>, kind: TransportKind, magic: u8) -> Self {
+    pub fn new(
+        link: Box<dyn Transport>,
+        kind: TransportKind,
+        magic: u8,
+    ) -> Self {
         Self {
             link,
             kind,
             profile: WireProfile::for_kind(kind),
             magic,
-            ack_table: codec::ack_magic_table(),
+            ack_table: ack_magic_table(),
             rx: Vec::new(),
             replies: Vec::new(),
             timeout: Duration::from_millis(500),
@@ -141,7 +207,7 @@ impl RuidaTransport {
     pub async fn query(
         &mut self,
         raw: &[u8],
-    ) -> Result<Vec<codec::Reply>, DriverError> {
+    ) -> Result<Vec<Reply>, DriverError> {
         match self.query_outcome(raw).await? {
             QueryOutcome::Replied(replies) => Ok(replies),
             QueryOutcome::Busy => Err(DriverError::Timeout(
@@ -173,7 +239,7 @@ impl RuidaTransport {
     }
 
     fn pack(&self, raw: &[u8]) -> Vec<u8> {
-        codec::package(raw, self.magic, self.profile.frames_with_checksum())
+        package(raw, self.magic, self.profile.frames_with_checksum())
     }
 
     /// Runs one packet through the handshake state machine.
@@ -209,7 +275,7 @@ impl RuidaTransport {
                     let Some(first) = data.first().copied() else {
                         return Err(timed_out());
                     };
-                    if codec::unswizzle_byte(first, self.magic) == codec::ACK {
+                    if unswizzle_byte(first, self.magic) == ACK {
                         if data.len() > 1 {
                             self.rx.extend_from_slice(&data[1..]);
                         }
@@ -220,7 +286,7 @@ impl RuidaTransport {
                         };
                         continue;
                     }
-                    let code = codec::unswizzle_byte(first, self.magic);
+                    let code = unswizzle_byte(first, self.magic);
                     if data.len() == 1
                         && self.profile.learn_magic
                         && !magic_retried
@@ -268,8 +334,8 @@ impl RuidaTransport {
                 Err(error) => return Err(error),
             }
         }
-        let raw = codec::unswizzle(&data, self.magic);
-        let replies = codec::unpack_replies(&raw);
+        let raw = unswizzle(&data, self.magic);
+        let replies = unpack_replies(&raw);
         let count = replies.len();
         self.replies.extend(replies);
         Ok(count)
@@ -294,8 +360,8 @@ impl RuidaTransport {
         let deadline = Instant::now() + timeout;
         loop {
             if !self.rx.is_empty() {
-                let first = codec::unswizzle_byte(self.rx[0], self.magic);
-                if first == codec::ACK {
+                let first = unswizzle_byte(self.rx[0], self.magic);
+                if first == ACK {
                     let ack = self.rx.drain(..1).collect();
                     return Ok(Some(ack));
                 }

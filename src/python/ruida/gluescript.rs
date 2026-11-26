@@ -5,7 +5,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3_stub_gen::derive::{gen_stub_pyclass, gen_stub_pymethods};
 
-use crate::ruida::gluescript::GlueScript as CoreGlueScript;
+use crate::ruida::ruidadriver::rd_gluescript::GlueScript as CoreGlueScript;
 
 /// The Ruida job authoring and compilation model.
 ///

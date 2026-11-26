@@ -14,8 +14,8 @@ use crate::python::driver::PyDriver;
 use crate::python::events::PyEvents;
 use crate::python::grbl::driver::{get_f64, get_str};
 use crate::python::pyfuture::{spawn_future, PyAwait};
-use crate::ruida::driver::{RuidaConfig, RuidaDriver};
-use crate::ruida::transport::TransportKind;
+use crate::ruida::ruidadriver::ruida_driver::{RuidaConfig, RuidaDriver};
+use crate::ruida::ruidadriver::transport::base::TransportKind;
 
 fn build_config(dict: Option<&Bound<'_, PyDict>>) -> PyResult<RuidaConfig> {
     let mut config = RuidaConfig::default();
