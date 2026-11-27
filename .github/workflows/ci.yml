@@ -28,7 +28,7 @@ jobs:
 
       - name: Run pyright
         run: |
-          pip install pytest pytest-asyncio zeroconf raygeo
+          pip install pytest pytest-asyncio zeroconf raygeo==1.102.1
           pip install mdformat mdformat-frontmatter mdformat-tables
           npx --yes pyright --pythonpath $(which python) python/raydriver tests tools
 
@@ -70,7 +70,7 @@ jobs:
 
       - name: Install test dependencies
         shell: bash
-        run: pip install pytest pytest-asyncio pytest-timeout zeroconf raygeo
+        run: pip install pytest pytest-asyncio pytest-timeout zeroconf raygeo==1.102.1
 
       - name: Run tests
         shell: bash

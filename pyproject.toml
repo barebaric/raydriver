@@ -24,7 +24,7 @@ test = [
     "pytest",
     "pytest-asyncio",
     "pytest-timeout",
-    "raygeo",
+    "raygeo==1.102.1",
     "zeroconf",
 ]
 docs = [
