@@ -1,5 +1,46 @@
 # raydriver
 
+> **Legacy repository.** raydriver has been merged into
+> [raygeo](https://github.com/barebaric/raygeo) and is no longer
+> maintained. The drivers live under `raygeo.driver`, the encoders
+> under `raygeo.ops.convert`, and the `raydriver` console script is
+> still provided by `raygeo`.
+
+## Migrating to raygeo
+
+```sh
+pip uninstall raydriver
+pip install "raygeo>=2.0.0"
+```
+
+| Old path | New path |
+| -------- | -------- |
+| `raydriver.encode` | `raygeo.ops.convert` |
+| `raydriver.driver` | `raygeo.driver` |
+| `raydriver.core` | `raygeo.driver.core` |
+| `raydriver.grbl` | `raygeo.driver.grbl` |
+| `raydriver.marlin` | `raygeo.driver.marlin` |
+| `raydriver.smoothie` | `raygeo.driver.smoothie` |
+| `raydriver.octoprint` | `raygeo.driver.octoprint` |
+| `raydriver.ruida` | `raygeo.driver.ruida` |
+| `raydriver.epilog` | `raygeo.driver.epilog` |
+| `raydriver.esp3d` | `raygeo.driver.config.Esp3dConfig` |
+| `raydriver.xtool` | `raygeo.driver.xtool_d1` |
+| `raydriver.xtool.m2` | `raygeo.driver.xtool_m2` |
+| `raydriver.remote` | `raygeo.driver.remote` |
+| `raydriver.analyzer` | `raygeo.driver.analyzer` |
+| `raydriver.simulator` | `raygeo.driver.simulator` |
+| any other `raydriver.*` | `raygeo.driver.*` |
+
+The `raydriver` command keeps its name and works the same way once
+`raygeo` is installed. Uninstall the old distribution first so its
+console script cannot shadow the one from `raygeo`. Daemon config
+paths, service names, `_raydriver._tcp`, `_raydriver_protocol` and
+`raydriver://` URLs are unchanged.
+
+The rest of this README describes the final standalone release and is
+kept for historical reference.
+
 Rust-native machine drivers for [Rayforge](https://github.com/barebaric/rayforge),
 exposed to Python via PyO3.
 
